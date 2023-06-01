@@ -65,11 +65,12 @@ struct EDB {
     auto itb = intern.emplace(s);
     return Value(*itb.first);
   }
-  Value of(const Var& v) { return Value(v); }
+  Value of(Var& v) { return Value(v); }
 };
 
 struct Var {
   std::string name;
+  Var(const Var&) = delete;
   Var(const std::string& name): name(name) {}
   bool operator<(const Var& o) const { return name < o.name; }
 
