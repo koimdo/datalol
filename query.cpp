@@ -74,17 +74,30 @@ struct Var {
   Var(const std::string& name): name(name) {}
   bool operator<(const Var& o) const { return name < o.name; }
 
-  mutable Kind kind = TVAR;
-  mutable const Value *val = nullptr;
-  bool unify(const Value *v) const
+  bool unify(Value v, Kind k) const
   {
-    if (val)
-      return Value::eq(*val, *v, kind);
+    if (kind == k)
+      return Value::eq(val, v, kind);
     val = v;
+    kind = k;
     return true;
   }
-  void zap() const { val = nullptr; }
-  bool is_unset() const { return !val; }
+  void zap() const { kind = TVAR; val.i = 0; }
+  bool is_unset() const { return kind == TVAR; }
+
+  const Value *get() const { return is_unset() ? nullptr : &val; }
+  friend std::ostream& operator<<(std::ostream& os, const Var& v)
+  {
+    os << "?" << v.name;
+    if (auto val = v.get()) {
+      os << "=";
+      val->format(os, v.kind);
+    }
+    return os;
+  }
+private:
+  mutable Kind kind = TVAR;
+  mutable Value val = 0;
 };
 
 void Value::format(std::ostream& os, Kind k) const
@@ -93,13 +106,7 @@ void Value::format(std::ostream& os, Kind k) const
   case TINT: os << i; break;
   case TFLOAT: os << f; break;
   case TSTRING: os << "\"" << *s << "\""; break;
-  case TVAR:
-    os << "?" << v->name;
-    if (v->val) {
-      os << "=";
-      v->val->format(os, v->kind);
-    }
-    break;
+  case TVAR: os << *v; break;
   }
 }
 
@@ -255,8 +262,7 @@ bool QueryFragment::unify(row_t t) const
     Kind kind = seltype[i];
     if (TVAR == kind) {
       const Var *v = sel[i].v;
-      assert(rel.dtype[i] == v->kind);
-      if (!v->unify(&t[i])) {
+      if (!v->unify(t[i], rel.dtype[i])) {
         return false;
       }
     } else if (!Value::eq(sel[i], t[i], kind))
@@ -332,10 +338,7 @@ struct Relation : Relation_base {
       for (int i=0; i<type.size(); i++) {
         Kind k = kinds[i];
         Kind t = type[i];
-        if (TVAR == k)
-          vals[i].v->kind = t;
-        else
-          assert(k == t);
+        assert(k == TVAR || k == t);
       }
     } else {
       assert(kinds == type);
