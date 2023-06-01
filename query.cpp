@@ -155,6 +155,31 @@ struct QueryFragment {
   {}
 };
 
+struct Query {
+  std::vector<QueryFragment> qfs;
+  Query(QueryFragment&& qf) { qfs.emplace_back(qf); }
+  Query operator&(QueryFragment&& qf) const
+  {
+    Query res(*this);
+    res.qfs.emplace_back(qf);
+    return res;
+  }
+  friend std::ostream& operator<<(std::ostream& os, const Query& q)
+  {
+    os << "{";
+    for (auto const& qf : q.qfs)
+      os << " " << qf;
+    os << " }";
+  }
+};
+
+Query operator&(QueryFragment&& l, QueryFragment&& r)
+{
+  Query res(std::move(l));
+  res.qfs.emplace_back(r);
+  return res;
+}
+
 struct Relation_base {
   EDB& edb;
   std::string name;
@@ -232,8 +257,9 @@ struct Relation_base {
 
 std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
 {
+  os << qf.rel.name << "(";
   Relation_base::format_tuple(os, qf.sel.data(), qf.seltype);
-  return os;
+  return os << ")";
 }
 
 template<typename... Args>
