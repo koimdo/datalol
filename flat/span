@@ -50,6 +50,7 @@ public:
   constexpr iterator cbegin() const { return beg_; }
   constexpr iterator cend() const { return end_; }
 
+  span(const span&) = default;
   constexpr span(std::initializer_list<T> l) noexcept : span(l.begin(), l.end()) {}
 
   template<size_t N>

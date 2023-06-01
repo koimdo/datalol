@@ -83,6 +83,7 @@ struct Var {
     return true;
   }
   void zap() const { val = nullptr; }
+  bool is_unset() const { return !val; }
 };
 
 void Value::format(std::ostream& os, Kind k) const
@@ -144,8 +145,13 @@ public:
 
 using row_t = flat::span<Value>;
 
+struct res_cb {
+  virtual void operator()() const = 0;
+};
+
 class Relation_base;
-struct QueryFragment {
+struct QueryFragment : res_cb {
+  mutable const res_cb *next = nullptr; // FIXME
   Relation_base& rel;
   std::vector<Value> sel;
   std::vector<Kind> seltype;
@@ -157,16 +163,21 @@ struct QueryFragment {
   {}
 
   bool unify(row_t row) const;
-  bool operator()(row_t row) const { return unify(row); }
+  void operator()() const override { return eval(); }
+  void eval() const;
 };
 
-struct Query {
+struct Query : res_cb {
   std::vector<QueryFragment> qfs;
   Query(QueryFragment&& qf) { qfs.emplace_back(qf); }
+  Query& operator+=(QueryFragment&& qf)
+  {
+    qfs.emplace_back(qf);
+  }
   Query operator&(QueryFragment&& qf) const
   {
     Query res(*this);
-    res.qfs.emplace_back(qf);
+    res += std::move(qf);
     return res;
   }
   friend std::ostream& operator<<(std::ostream& os, const Query& q)
@@ -176,6 +187,15 @@ struct Query {
       os << " " << qf;
     os << " }";
   }
+  void configure_pipeline(const res_cb *next) const {
+    auto beg = qfs.rbegin();
+    auto end = qfs.rend();
+    for ( ; beg != end; ++beg) {
+      beg->next = next;
+      next = &(*beg);
+    }
+  }
+  void operator()() const override { std::cout << *this << "\n"; } // TODO: real results
 };
 
 Query operator&(QueryFragment&& l, QueryFragment&& r)
@@ -219,27 +239,8 @@ struct Relation_base {
     os <<"\n}";
     return os;
   }
-
-  void select(const QueryFragment& qf)
-  {
-    std::vector<const Var*> vars;
-    for (int i=0; i<qf.sel.size(); ++i)
-      if (qf.seltype[i] == TVAR)
-        vars.push_back(qf.sel[i].v);
-
-    int res = 0;
-    std::cout << name << ".select(" << qf << "):\n";
-    for (auto row : *this) {
-      if (qf.unify(row)) {
-        std::cout << qf << "\n";
-        res++;
-      }
-      for (auto v : vars)
-        v->zap();
-    }
-    std::cout << res << "\n";
-  }
 };
+
 
 // unify([1, 2, 3], [1, 2, 3]) -> true
 // unify([1, 2, 3], [1, x, y]) -> true
@@ -261,6 +262,23 @@ bool QueryFragment::unify(row_t t) const
       return false;
   }
   return true;
+}
+void QueryFragment::eval() const
+{
+  std::vector<const Var*> vars;
+  for (int i=0; i<sel.size(); ++i)
+      if (seltype[i] == TVAR) {
+        const Var *v = sel[i].v;
+        if (v->is_unset())
+          vars.push_back(v);
+      }
+
+  for (auto row : rel) {
+    if (unify(row))
+      (*next)();
+    for (auto v : vars)
+      v->zap();
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
@@ -341,9 +359,11 @@ struct Relation : Relation_base {
 template<typename... Args>
 std::array<Kind, sizeof...(Args)> Relation<Args...>::type{(kind_of<Args>::value)...};
 
-void select(const QueryFragment& qf)
+void select(const Query& qf)
 {
-  qf.rel.select(qf);
+  std::cout << "SELECT(" << qf << "):\n";
+  qf.configure_pipeline(&qf);
+  qf.qfs[0].eval();
 }
 
 int main()
@@ -364,6 +384,11 @@ int main()
   
   Var x("x");
   Var y("y");
+  Var z("z");
+
+
+  select(R(1, y, 3) &
+         S(x, y, z));
 
   select(R(1, 2, 3));
   select(R(1, x, y));
