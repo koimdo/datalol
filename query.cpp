@@ -64,6 +64,7 @@ struct EDB {
     auto itb = intern.emplace(s);
     return Value(*itb.first);
   }
+  Value of(const Var& v) { return Value(v); }
 };
 
 struct Var {
@@ -164,19 +165,29 @@ struct Relation {
     return true;
   }
 
+  bool check_type(flat::span<Kind> kinds, bool allow_var) const
+  {
+    assert(kinds.size() == type.size());
+    for (int i=0; i<type.size(); i++) {
+      if (type[i] != kinds[i] && !(allow_var && kinds[i] == TVAR))
+        return false;
+    }
+    return true;
+  }
+
   template<typename... Args>
   std::pair<Tuple, std::vector<Kind>>
-  tuplify(Args... args)
+  tuplify(bool allow_vars, Args... args)
   {
     std::vector<Kind> kinds({(kind_of<Args>::value)...});
-    assert(kinds == type);
+    assert(check_type(kinds, allow_vars));
     Tuple vals({edb.of(args)...});
     return {std::move(vals), std::move(kinds)};
   }
 
   template<typename... Args>
   void insert(Args... args) {
-    auto vk = tuplify(args...);
+    auto vk = tuplify(false, args...);
     all.emplace(std::move(vk.first));
   }
 
@@ -199,10 +210,7 @@ int main()
 {
   EDB edb;
   Relation R(edb, "R", {TINT, TINT, TINT});
-  
-  auto vk = R.tuplify(1, 2, 3);
-  vk.first.format(std::cout, vk.second);
-  //R.insert(vk.first);
+
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
   R.insert(1, 1, 3);
@@ -212,8 +220,11 @@ int main()
   S.insert("Hello", 2, "Hello");
   std::cout << S << "\n"; 
   
-  // Var x("x");
-  // Var y("y");
+  Var x(TINT, "x");
+  Var y(TINT, "y");
+
+  auto vk = R.tuplify(true, 1, x, x);
+  vk.first.format(std::cout, vk.second);
 
   // R.select(Tuple({&i[1], &i[2], &i[3]}));
   // R.select(Tuple({&i[1], &x, &y}));
