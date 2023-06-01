@@ -50,7 +50,7 @@ template<> struct kind_of<int> : std::integral_constant<Kind, TINT> {};
 template<> struct kind_of<float> : std::integral_constant<Kind, TFLOAT> {};
 template<> struct kind_of<std::string> : std::integral_constant<Kind, TSTRING> {};
 template<> struct kind_of<const char*> : std::integral_constant<Kind, TSTRING> {};
-template<size_t N> struct kind_of<const char(&)[N]> : std::integral_constant<Kind, TSTRING> {};
+template<size_t N> struct kind_of<const char[N]> : std::integral_constant<Kind, TSTRING> {};
 template<> struct kind_of<Var> : std::integral_constant<Kind, TVAR> {};
   
 struct EDB {
@@ -168,9 +168,9 @@ struct Relation {
 
   template<typename... Args>
   std::pair<Tuple, std::vector<Kind>>
-  tuplify(bool allow_vars, Args... args)
+  tuplify(bool allow_vars, Args&&... args)
   {
-    std::vector<Kind> kinds({(kind_of<Args>::value)...});
+    std::vector<Kind> kinds({(kind_of<typename std::remove_reference<Args>::type>::value)...});
     Tuple vals({edb.of(args)...});
 
     assert(kinds.size() == type.size());
@@ -191,7 +191,7 @@ struct Relation {
   }
 
   template<typename... Args>
-  void insert(Args... args) {
+  void insert(Args&&... args) {
     auto vk = tuplify(false, args...);
     all.emplace(std::move(vk.first));
   }
@@ -208,19 +208,19 @@ struct Relation {
     sel.format(std::cout, kinds);
     std::cout << "):\n";
     for (auto const& t : all) {
-      for (auto v : vars)
-        v->zap();
       if (unify(t, sel, kinds)) {
         sel.format(std::cout, kinds);
         std::cout << "\n";
         res++;
       }
+      for (auto v : vars)
+        v->zap();
     }
     std::cout << res << "\n";
   }
   
   template<typename... Args>
-  void select(Args... args) {
+  void select(Args&&... args) {
     auto vk = tuplify(true, args...);
     select_(vk.first, vk.second);
   }
@@ -234,10 +234,12 @@ int main()
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
   R.insert(1, 1, 3);
+  R.insert(0, 2, 0);
   std::cout << R << "\n"; 
 
   Relation S(edb, "S", {TSTRING, TINT, TSTRING});
   S.insert("Hello", 2, "Hello");
+  S.insert("Hello", 3, "World");
   std::cout << S << "\n"; 
   
   Var x("x");
@@ -248,4 +250,7 @@ int main()
   R.select(1, x, x);
   R.select(1, x, 0);
   R.select(x, x, 3);
+
+  S.select(x, y, x);
+  R.select(x, y, x);
 }
