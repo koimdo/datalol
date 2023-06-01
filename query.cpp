@@ -125,11 +125,23 @@ struct Tuple {
   bool operator<(const Tuple& o) const { return vals < o.vals; }
 };
 
-struct Relation {
+struct Relation_base {
+protected:
   EDB& edb;
   std::string name;
+  flat::span<Kind> dtype;
+  Relation_base(EDB& edb, const std::string& name, flat::span<Kind> dtype)
+    : edb(edb), name(name), dtype(dtype)
+  {}
+
+};
+
+struct Relation : Relation_base {
   std::vector<Kind> type;
-  Relation(EDB& edb, const std::string& name, const std::vector<Kind>& type): edb(edb), name(name), type(type) {}
+  Relation(EDB& edb, const std::string& name, const std::vector<Kind>& type)
+    : Relation_base(edb, name, type)
+    , type(type)
+  {}
 
   flat::set<Tuple> all;
   friend std::ostream& operator<<(std::ostream& os, const Relation& r)
