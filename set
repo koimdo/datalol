@@ -1,0 +1,241 @@
+// -*- C++ -*-
+
+#pragma once
+
+#include <iterator>
+#include <vector>
+#include <algorithm>
+#include <cassert>
+
+namespace flat {
+
+class stamp {
+  unsigned count = 0;
+  template<typename>
+  friend class iterator;
+public:
+  void invalidate() { ++count; }
+  template<class It>
+  class iterator {
+    It it;
+    const stamp *stamp_;
+    unsigned last;
+    unsigned count() const { return stamp_->count; }
+    void check() const {
+      assert(count() == last);
+    }
+    static void check(const iterator& l, const iterator& r) {
+      assert(l.count() == r.count() && l.last == r.last);
+    }
+    typedef std::iterator_traits<It> iter_traits_t;
+
+  public:
+    typedef It iterator_type;
+    typedef typename iter_traits_t::iterator_category iterator_category;
+    typedef typename iter_traits_t::value_type value_type;
+    typedef typename iter_traits_t::difference_type difference_type;
+    typedef typename iter_traits_t::reference reference;
+    typedef typename iter_traits_t::pointer pointer;
+
+    iterator(const It& it, const stamp &stamp): it(it), stamp_(&stamp), last(stamp.count) {}
+    iterator(const iterator&) = default;
+    const It& base() const { return it; }
+
+    // forward iterator
+    reference operator*() const { return check(), *it; }
+    pointer operator->() const { return check(), std::addressof(*it); }
+    iterator& operator++() { return check(), ++it, *this; }
+    iterator operator++(int) { return check(), iterator(it++, *stamp_); }
+    friend bool operator==(const iterator& l, const iterator& r) { return check(l, r), l.it == r.it; }
+    friend bool operator!=(const iterator& l, const iterator& r) { return check(l, r), l.it != r.it; }
+
+    // bidirectional
+    iterator& operator--() { return check(), --it, *this; }
+    iterator operator--(int) { return check(), iterator(it--, *stamp_); }
+
+    // random access
+    iterator& operator+=(difference_type n) { return check(), it += n, *this; }
+    iterator& operator-=(difference_type n) { return check(), it -= n, *this; }
+    iterator operator+(difference_type n) { return check(), iterator(it + n, *stamp_); }
+    iterator operator-(difference_type n) { return check(), iterator(it - n, *stamp_); }
+    reference operator[](difference_type n) { return check(), it[n]; }
+    friend difference_type operator-(const iterator& l, const iterator& r) { return check(l, r), l.it - r.it; }
+  };
+  template<typename It>
+  iterator<It> mkiter(It&& it) const { return iterator<It>(it, *this); }
+};
+
+// a fast small set. Use if small (<32 elements) or iteration speed is more important than
+// modification speed
+template <typename T, typename Compare = std::less<T>, typename Sequence = std::vector<T>>
+class set {
+  Sequence storage;
+  stamp check;
+  typedef typename Sequence::const_iterator seq_iter;
+public:
+  typedef typename Sequence::value_type value_type;
+  typedef typename Sequence::reference reference;
+  typedef typename Sequence::const_reference const_reference;
+  typedef typename Sequence::allocator_type allocator_type;
+  typedef typename Sequence::size_type size_type;
+  typedef typename Sequence::pointer pointer;
+  typedef typename Sequence::const_pointer const_pointer;
+  typedef stamp::iterator<typename Sequence::const_iterator> const_iterator;
+  typedef const_iterator iterator;
+  typedef stamp::iterator<typename Sequence::const_reverse_iterator> const_reverse_iterator;
+  typedef const_reverse_iterator reverse_iterator;
+
+  set() = default;
+
+  set(std::initializer_list<value_type> init): set(init.begin(), init.end()) {}
+
+  template<class It>
+  set(It beg, It end)
+  {
+    storage.reserve(end-beg);
+    insert(beg, end);
+  }
+
+  template<class It>
+  void insert(It beg, It end)
+  {
+    for (; beg != end; ++beg)
+      insert(*beg);
+  }
+
+  template<typename... Args>
+  std::pair<iterator, bool> emplace(Args&&... args) {
+    T p(std::forward<Args>(args)...);
+    auto itb = find_(p);
+    if (!itb.second) {
+      storage.emplace(itb.first, std::move(p));
+      check.invalidate();
+    }
+
+    return { mkiter(std::move(itb.first)), !itb.second };
+  }
+
+  std::pair<iterator, bool> insert(const_reference p) {
+    auto itb = find_(p);
+    if (!itb.second) {
+      storage.insert(itb.first, p);
+      check.invalidate();
+    }
+
+    return { mkiter(std::move(itb.first)), !itb.second };
+  }
+
+  int count(const_reference p) const { return find_(p).second; }
+  bool contains(const_reference p) const { return find_(p).second; }
+
+  bool operator==(const set& o) const { return &o == this || storage == o.storage; }
+  bool operator!=(const set& o) const { return &o != this && storage != o.storage; }
+
+  const_iterator erase(const_iterator pos) {
+    check.invalidate();
+    return mkiter(storage.erase(pos.base()));
+  }
+  bool erase(const_reference p) {
+    auto itb = find_(p);
+    if (itb.second) {
+      check.invalidate();
+      storage.erase(itb.first);
+    }
+    return itb.second;
+  }
+
+  void clear() {
+    if (!empty())
+      check.invalidate();
+    storage.clear();
+  }
+
+  size_type size() const { return storage.size(); }
+
+  bool empty() const { return storage.empty(); }
+
+  const_iterator begin() const { return mkiter(storage.begin()); }
+  const_iterator cbegin() const { return mkiter(storage.begin()); }
+  const_iterator end() const { return mkiter(storage.end()); }
+  const_iterator cend() const { return mkiter(storage.end()); }
+
+  const_reverse_iterator rbegin() const { return mkiter(storage.rbegin()); }
+  const_reverse_iterator rend() const { return mkiter(storage.rend()); }
+
+  const_iterator find(const_reference p) const {
+    auto itb = find_(p);
+    return mkiter(itb.second ? itb.first : storage.end());
+  }
+
+  const_reference min() const { return storage.front(); }
+  const_reference max() const { return storage.back(); }
+  const_reference singleton() const
+  {
+    if (size() != 1)
+      throw std::out_of_range("Not a singleton set!");
+    return storage.front();
+  }
+
+  template<class Pred>
+  set filter(Pred&& pred) const {
+    set res;
+    for (auto const& x : storage) {
+      if (pred(x))
+        res.storage.push_back(x);
+    }
+    return res;
+  }
+
+  bool is_subset(const set& o) const {
+    return std::includes(storage.begin(), storage.end(),
+                         o.storage.begin(), o.storage.end());
+  }
+
+  set set_union(const set& o) const {
+    set res;
+    std::set_union(storage.begin(), storage.end(),
+                   o.storage.begin(), o.storage.end(),
+                   std::back_inserter(res.storage),
+                   Compare{});
+    return res;
+  }
+
+  set intersect(const set& o) const {
+    set res;
+    std::set_intersection(storage.begin(), storage.end(),
+                          o.storage.begin(), o.storage.end(),
+                          std::back_inserter(res.storage),
+                          Compare{});
+    return res;
+  }
+
+  set diff(const set& o) const {
+    set res;
+    std::set_difference(storage.begin(), storage.end(),
+                        o.storage.begin(), o.storage.end(),
+                        std::back_inserter(res.storage),
+                        Compare{});
+    return res;
+  }
+
+private:
+  const_iterator mkiter(seq_iter&& it) const { return const_iterator(it, check); }
+  const_reverse_iterator mkiter(typename Sequence::const_reverse_iterator&& it) const { return const_reverse_iterator(it, check); }
+  std::pair<seq_iter, bool> find_(const_reference p) const {
+    auto pos = storage.begin();
+    auto end = storage.end();
+    int n = storage.size();
+    if (!n)
+      return { end, false };
+    while (n > 1) {
+      int half = n/2;
+      auto mid = pos + half;
+      pos = Compare{}(*mid, p) ? mid : pos;
+      n -= half;
+    }
+    pos += Compare{}(*pos, p);
+    return { pos, end != pos && !Compare{}(p, *pos) };
+  }
+};
+
+}
