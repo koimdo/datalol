@@ -1,0 +1,68 @@
+// -*- C++ -*-
+#pragma once
+
+#include <initializer_list>
+#include <iterator>
+
+namespace flat {
+
+/**
+ * A bare-bones version of c++20 std::span, without fancy static extents
+ *
+ * A span designates a contiguous range of elements, and is intended to be used
+ * as a type-erasing parameter type. e.g.
+ *
+ * void foo(const std::vector<lol>& it)
+ *
+ * can be generalized to accept vectors, arrays, initializer lists by defining
+ * it as:
+ *
+ * void foo(span<const lol> it) (NOTE: span is passed by value)
+ *
+ *
+ */
+template<class T>
+class span {
+  const T *beg_ = nullptr;
+  const T *end_ = nullptr;
+public:
+  constexpr span(const T *beg, const T *end) noexcept : beg_(beg), end_(end) {}
+  using element_type = T;
+  using value_type = typename std::remove_cv<T>::type;
+  using size_type = std::size_t;
+  using difference_type = std::ptrdiff_t;
+  using pointer = const T*;
+  using const_pointer = const T*;
+  using reference = const T&;
+  using const_reference = const T&;
+  using iterator = const T*;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+
+  constexpr explicit operator bool() const { return !empty(); }
+  constexpr bool empty() const { return end_ == beg_; }
+  constexpr size_t size() const { return end_ - beg_; }
+  constexpr reference front() const { return beg_[0]; }
+  constexpr reference back() const { return end_[-1]; }
+  constexpr reference operator[](size_t n) const { return beg_[n]; }
+  constexpr pointer data() const { return beg_; }
+  constexpr iterator begin() const { return beg_; }
+  constexpr iterator end() const { return end_; }
+  constexpr iterator cbegin() const { return beg_; }
+  constexpr iterator cend() const { return end_; }
+
+  constexpr span(std::initializer_list<T> l) noexcept : span(l.begin(), l.end()) {}
+
+  template<size_t N>
+  constexpr span(T (&arr)[N]) noexcept : span(arr, arr+N) {}
+
+  template<class C>
+  span(C&& c) : span(&(*c.begin()), &(*c.end())) {}
+
+  span sub(size_t start, size_t end)
+  {
+    rdassert(start < size() && end <= size(), "");
+    return span(beg_+start, beg_+end);
+  }
+};
+
+}

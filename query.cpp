@@ -1,8 +1,6 @@
 #include <iostream>
 #include <sstream>
-#include "set"
-
-using namespace flat;
+#include <set>
 
 enum Kind {
   TVAR = 0,
@@ -15,6 +13,8 @@ struct Value {
   virtual std::string label() const = 0;
   virtual Kind kind() const = 0;
 };
+#include "flat/set"
+#include "flat/span"
 
 class format {
   std::ostringstream s;
