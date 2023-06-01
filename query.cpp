@@ -142,8 +142,20 @@ public:
   T& operator*() { return *p; }
 };
 
+class Relation_base;
+struct QueryFragment {
+  Relation_base& rel;
+  std::vector<Value> sel;
+  std::vector<Kind> seltype;
+  friend std::ostream& operator<<(std::ostream& os, const QueryFragment& qf);
+  QueryFragment(Relation_base& rel, flat::span<Value> sel_, flat::span<Kind> seltype_)
+    : rel(rel)
+    , sel(sel_.begin(), sel_.end())
+    , seltype(seltype_.begin(), seltype_.end())
+  {}
+};
+
 struct Relation_base {
-protected:
   EDB& edb;
   std::string name;
   flat::span<Kind> dtype;
@@ -162,7 +174,6 @@ protected:
   void format_tuple(std::ostream& os, const Value *base) const { format_tuple(os, base, dtype); }
 
   using gen_iterator = striderator<const Value>;
-  virtual int get_arity() const = 0;
   virtual gen_iterator begin() const = 0;
   virtual gen_iterator end() const = 0;
 
@@ -183,37 +194,33 @@ protected:
   // unify([1, 2, 3], [1, x, 4]) -> false
   // unify([1, 2, 3], [1, x, x]) -> false
   // unify([1, 2, 2], [1, x, x]) -> true
-  bool unify(const Value* t, const Value* sel, flat::span<Kind> selkind) const {
-    int size = get_arity();
-    for (int i=0; i<size; i++) {
-      Kind kind = selkind[i];
+  bool unify(const Value* t, const QueryFragment& qf) const {
+    for (int i=0; i<qf.sel.size(); i++) {
+      Kind kind = qf.seltype[i];
       if (TVAR == kind) {
-        const Var *v = sel[i].v;
+        const Var *v = qf.sel[i].v;
         assert(dtype[i] == v->kind);
         if (!v->unify(&t[i])) {
           return false;
         }
-      } else if (!Value::eq(sel[i], t[i], kind))
+      } else if (!Value::eq(qf.sel[i], t[i], kind))
         return false;
     }
     return true;
   }
 
-  void select_(const Value* sel, flat::span<Kind> kinds)
+  void select(const QueryFragment& qf)
   {
     std::vector<const Var*> vars;
-    for (int i=0; i<kinds.size(); ++i)
-      if (kinds[i] == TVAR)
-        vars.push_back(sel[i].v);
+    for (int i=0; i<qf.sel.size(); ++i)
+      if (qf.seltype[i] == TVAR)
+        vars.push_back(qf.sel[i].v);
 
     int res = 0;
-    std::cout << name << ".select(";
-    format_tuple(std::cout, sel, kinds);
-    std::cout << "):\n";
+    std::cout << name << ".select(" << qf << "):\n";
     for (auto const& t : *this) {
-      if (unify(&t, sel, kinds)) {
-        format_tuple(std::cout, sel, kinds);
-        std::cout << "\n";
+      if (unify(&t, qf)) {
+        std::cout << qf << "\n";
         res++;
       }
       for (auto v : vars)
@@ -222,6 +229,12 @@ protected:
     std::cout << res << "\n";
   }
 };
+
+std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
+{
+  Relation_base::format_tuple(os, qf.sel.data(), qf.seltype);
+  return os;
+}
 
 template<typename... Args>
 struct Relation : Relation_base {
@@ -235,7 +248,6 @@ struct Relation : Relation_base {
   using value_type = std::array<Value, arity>; // TODO: tuple it
   using query_type = std::array<Value, arity>;
 
-  int get_arity() const override { return arity; }
   gen_iterator begin() const override { return gen_iterator(all.begin()->data(), arity); }
   gen_iterator end() const override { return gen_iterator(all.end()->data(), arity); }
 
@@ -254,10 +266,6 @@ struct Relation : Relation_base {
   };
 
   flat::set<value_type, cmp_tuples> all;
-
-  bool unify(const value_type& t, const query_type& sel, flat::span<Kind> selkind) {
-    return Relation_base::unify(t.data(), sel.data(), selkind);
-  }
 
   template<typename... TArgs>  
   std::pair<value_type, flat::span<Kind>>
@@ -289,13 +297,20 @@ struct Relation : Relation_base {
   }
 
   template<typename... SelectArgs>
-  void select(SelectArgs&&... args) {
+  QueryFragment
+  operator()(SelectArgs&&... args) {
+    static_assert(sizeof...(SelectArgs) == arity, "Wrong arity!");
     auto vk = tuplify(true, std::forward<SelectArgs>(args)...);
-    Relation_base::select_(vk.first.data(), vk.second);
+    return QueryFragment(*this, vk.first, vk.second);
   }
 };
 template<typename... Args>
 std::array<Kind, sizeof...(Args)> Relation<Args...>::type{(kind_of<Args>::value)...};
+
+void select(const QueryFragment& qf)
+{
+  qf.rel.select(qf);
+}
 
 int main()
 {
@@ -316,12 +331,12 @@ int main()
   Var x("x");
   Var y("y");
 
-  R.select(1, 2, 3);
-  R.select(1, x, y);
-  R.select(1, x, x);
-  R.select(1, x, 0);
-  R.select(x, x, 3);
+  select(R(1, 2, 3));
+  select(R(1, x, y));
+  select(R(1, x, x));
+  select(R(1, x, 0));
+  select(R(x, x, 3));
 
-  S.select(x, y, x);
-  R.select(x, y, x);
+  select(S(x, y, x));
+  select(R(x, y, x));
 }
