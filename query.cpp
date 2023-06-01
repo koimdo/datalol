@@ -68,11 +68,11 @@ struct EDB {
 };
 
 struct Var {
-  Kind kind;
   std::string name;
-  Var(Kind kind, const std::string& name): kind(kind), name(name) {}
+  Var(const std::string& name): name(name) {}
   bool operator<(const Var& o) const { return name < o.name; }
 
+  mutable Kind kind = TVAR;
   mutable const Value *val = nullptr;
   bool unify(const Value *v) const
   {
@@ -81,6 +81,7 @@ struct Var {
     val = v;
     return true;
   }
+  void zap() const { val = nullptr; }
 };
 
 void Value::format(std::ostream& os, Kind k) const
@@ -150,7 +151,7 @@ struct Relation {
   // unify([1, 2, 3], [1, x, 4]) -> false
   
   // unify([1, 2, 3], [1, x, x]) -> false
-  bool unify(const Tuple& t, const Tuple& sel, flat::span<Kind> selkind) const {
+  static bool unify(const Tuple& t, const Tuple& sel, flat::span<Kind> selkind) {
     assert(t.vals.size() == sel.vals.size());
     for (int i=0; i<t.vals.size(); i++) {
       Kind kind = selkind[i];
@@ -165,23 +166,27 @@ struct Relation {
     return true;
   }
 
-  bool check_type(flat::span<Kind> kinds, bool allow_var) const
-  {
-    assert(kinds.size() == type.size());
-    for (int i=0; i<type.size(); i++) {
-      if (type[i] != kinds[i] && !(allow_var && kinds[i] == TVAR))
-        return false;
-    }
-    return true;
-  }
-
   template<typename... Args>
   std::pair<Tuple, std::vector<Kind>>
   tuplify(bool allow_vars, Args... args)
   {
     std::vector<Kind> kinds({(kind_of<Args>::value)...});
-    assert(check_type(kinds, allow_vars));
     Tuple vals({edb.of(args)...});
+
+    assert(kinds.size() == type.size());
+    if (allow_vars) {
+      for (int i=0; i<type.size(); i++) {
+        Kind k = kinds[i];
+        Kind t = type[i];
+        if (TVAR == k)
+          vals.vals[i].v->kind = t;
+        else
+          assert(k == t);
+      }
+    } else {
+      assert(kinds == type);
+    }
+
     return {std::move(vals), std::move(kinds)};
   }
 
@@ -191,19 +196,34 @@ struct Relation {
     all.emplace(std::move(vk.first));
   }
 
-  // int select(const Tuple& sel)
-  // {
-  //   int res = 0;
-  //   std::cout << name << ".select(" << sel << "): ";
-  //   for (auto const& t : all) {
-  //     if (t.unify(sel)) {
-  //       std::cout << sel << "\n";
-  //       res++;
-  //     }
-  //   }
-  //   std::cout << res << "\n";
-  //   return res;
-  // }
+  void select_(const Tuple& sel, const std::vector<Kind>& kinds)
+  {
+    std::vector<const Var*> vars;
+    for (int i=0; i<kinds.size(); ++i)
+      if (kinds[i] == TVAR)
+        vars.push_back(sel.vals[i].v);
+
+    int res = 0;
+    std::cout << name << ".select(";
+    sel.format(std::cout, kinds);
+    std::cout << "):\n";
+    for (auto const& t : all) {
+      for (auto v : vars)
+        v->zap();
+      if (unify(t, sel, kinds)) {
+        sel.format(std::cout, kinds);
+        std::cout << "\n";
+        res++;
+      }
+    }
+    std::cout << res << "\n";
+  }
+  
+  template<typename... Args>
+  void select(Args... args) {
+    auto vk = tuplify(true, args...);
+    select_(vk.first, vk.second);
+  }
 };
 
 int main()
@@ -220,14 +240,12 @@ int main()
   S.insert("Hello", 2, "Hello");
   std::cout << S << "\n"; 
   
-  Var x(TINT, "x");
-  Var y(TINT, "y");
+  Var x("x");
+  Var y("y");
 
-  auto vk = R.tuplify(true, 1, x, x);
-  vk.first.format(std::cout, vk.second);
-
-  // R.select(Tuple({&i[1], &i[2], &i[3]}));
-  // R.select(Tuple({&i[1], &x, &y}));
-  // R.select(Tuple({&i[1], &x, &i[0]}));
-  // R.select(Tuple({&x, &x, &i[3]}));
+  R.select(1, 2, 3);
+  R.select(1, x, y);
+  R.select(1, x, x);
+  R.select(1, x, 0);
+  R.select(x, x, 3);
 }
