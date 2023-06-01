@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sstream>
 #include <set>
+#include <array>
 
 #include "flat/set"
 #include "flat/span"
@@ -110,21 +111,6 @@ bool Value::cmp(Value l, Value r, Kind k) {
   }
 }
 
-struct Tuple {
-  Tuple(std::initializer_list<Value> l): vals(l) {}
-  std::vector<Value> vals;
-  void format(std::ostream& os, flat::span<Kind> kind) const
-  {
-    int i=0;
-    for (auto const& v : vals) {
-      if (i) os << ", ";
-      v.format(os, kind[i]);
-      i++;
-    }
-  }
-  bool operator<(const Tuple& o) const { return vals < o.vals; }
-};
-
 struct Relation_base {
 protected:
   EDB& edb;
@@ -134,56 +120,64 @@ protected:
     : edb(edb), name(name), dtype(dtype)
   {}
 
+  static void format_tuple(std::ostream& os, const Value *base, flat::span<Kind> dtype)
+  {
+    for (int i=0; i<dtype.size(); ++i) {
+      if (i) os << ", ";
+      base[i].format(os, dtype[i]);
+    }
+  }
+
+  void format_tuple(std::ostream& os, const Value *base) const { format_tuple(os, base, dtype); }
 };
 
+template<typename... Args>
 struct Relation : Relation_base {
-  std::vector<Kind> type;
-  Relation(EDB& edb, const std::string& name, const std::vector<Kind>& type)
+  std::array<Kind, sizeof...(Args)> type{(kind_of<Args>::value)...};
+  Relation(EDB& edb, const std::string& name)
     : Relation_base(edb, name, type)
-    , type(type)
   {}
 
-  flat::set<Tuple> all;
+  using value_type = std::array<Value, sizeof...(Args)>; // TODO: tuple it
+  using query_type = std::array<Value, sizeof...(Args)>;
+  flat::set<value_type> all;
   friend std::ostream& operator<<(std::ostream& os, const Relation& r)
   {
     os << "{";
     for (auto const& t : r.all) {
       os << "\n  " << r.name << "(";
-      t.format(os, r.type);
+      r.format_tuple(os, t.data());
       os  << ")";
     }
     os <<"\n}";
     return os;
   }
 
-
-
   // unify([1, 2, 3], [1, 2, 3]) -> true
   // unify([1, 2, 3], [1, x, y]) -> true
-  // unify([1, 2, 3], [1, x, 4]) -> false
-  
+  // unify([1, 2, 3], [1, x, 4]) -> false  
   // unify([1, 2, 3], [1, x, x]) -> false
-  static bool unify(const Tuple& t, const Tuple& sel, flat::span<Kind> selkind) {
-    assert(t.vals.size() == sel.vals.size());
-    for (int i=0; i<t.vals.size(); i++) {
+  static bool unify(const value_type& t, const query_type& sel, flat::span<Kind> selkind) {
+    assert(t.size() == sel.size());
+    for (int i=0; i<t.size(); i++) {
       Kind kind = selkind[i];
       if (TVAR == kind) {
-        const Var *v = sel.vals[i].v;
-        if (!v->unify(&t.vals[i])) {
+        const Var *v = sel[i].v;
+        if (!v->unify(&t[i])) {
           return false;
         }
-      } else if (!Value::cmp(sel.vals[i], t.vals[i], kind))
+      } else if (!Value::cmp(sel[i], t[i], kind))
         return false;
     }
     return true;
   }
 
-  template<typename... Args>
-  std::pair<Tuple, std::vector<Kind>>
-  tuplify(bool allow_vars, Args&&... args)
+  template<typename... TArgs>  
+  std::pair<value_type, flat::span<Kind>>
+  tuplify(bool allow_vars, TArgs&&... args)
   {
-    std::vector<Kind> kinds({(kind_of<typename std::remove_reference<Args>::type>::value)...});
-    Tuple vals({edb.of(args)...});
+    static constexpr std::array<Kind, sizeof...(TArgs)> kinds{(kind_of<typename std::remove_reference<TArgs>::type>::value)...};
+    value_type vals({edb.of(std::forward<TArgs>( args))...});
 
     assert(kinds.size() == type.size());
     if (allow_vars) {
@@ -191,7 +185,7 @@ struct Relation : Relation_base {
         Kind k = kinds[i];
         Kind t = type[i];
         if (TVAR == k)
-          vals.vals[i].v->kind = t;
+          vals[i].v->kind = t;
         else
           assert(k == t);
       }
@@ -202,26 +196,25 @@ struct Relation : Relation_base {
     return {std::move(vals), std::move(kinds)};
   }
 
-  template<typename... Args>
   void insert(Args&&... args) {
-    auto vk = tuplify(false, args...);
+    auto vk = tuplify(false, std::forward<Args>(args)...);
     all.emplace(std::move(vk.first));
   }
 
-  void select_(const Tuple& sel, const std::vector<Kind>& kinds)
+  void select_(const query_type& sel, flat::span<Kind> kinds)
   {
     std::vector<const Var*> vars;
     for (int i=0; i<kinds.size(); ++i)
       if (kinds[i] == TVAR)
-        vars.push_back(sel.vals[i].v);
+        vars.push_back(sel[i].v);
 
     int res = 0;
     std::cout << name << ".select(";
-    sel.format(std::cout, kinds);
+    format_tuple(std::cout, sel.data(), kinds);
     std::cout << "):\n";
     for (auto const& t : all) {
       if (unify(t, sel, kinds)) {
-        sel.format(std::cout, kinds);
+        format_tuple(std::cout, sel.data(), kinds);
         std::cout << "\n";
         res++;
       }
@@ -230,10 +223,10 @@ struct Relation : Relation_base {
     }
     std::cout << res << "\n";
   }
-  
-  template<typename... Args>
-  void select(Args&&... args) {
-    auto vk = tuplify(true, args...);
+
+  template<typename... SelectArgs>
+  void select(SelectArgs&&... args) {
+    auto vk = tuplify(true, std::forward<SelectArgs>(args)...);
     select_(vk.first, vk.second);
   }
 };
@@ -241,7 +234,7 @@ struct Relation : Relation_base {
 int main()
 {
   EDB edb;
-  Relation R(edb, "R", {TINT, TINT, TINT});
+  Relation<int, int, int> R(edb, "R");
 
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
@@ -249,7 +242,7 @@ int main()
   R.insert(0, 2, 0);
   std::cout << R << "\n"; 
 
-  Relation S(edb, "S", {TSTRING, TINT, TSTRING});
+  Relation<std::string, int, std::string> S(edb, "S");
   S.insert("Hello", 2, "Hello");
   S.insert("Hello", 3, "World");
   std::cout << S << "\n"; 
