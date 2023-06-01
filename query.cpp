@@ -26,8 +26,12 @@ enum Kind {
 
 struct Var;
 union Value {
+  static_assert(sizeof(long) == sizeof(void*));
+  static_assert(sizeof(double) == sizeof(void*));
+  static_assert(alignof(long) == alignof(void*));
+  static_assert(alignof(double) == alignof(void*));
   long i;
-  float f;
+  double f;
   const std::string *s;
   const Var *v;
   Value(int i): i(i) {}
@@ -36,6 +40,7 @@ union Value {
   Value(const Var &v): v(&v) {}
   void format(std::ostream& os, Kind k) const;
   static bool cmp(Value l, Value r, Kind k);
+  bool operator<(const Value& o) const { return i < o.i; } // FIXME: remove once we get typed relations
 };
 
 template<class T>
@@ -44,6 +49,7 @@ struct kind_of {};
 template<> struct kind_of<int> : std::integral_constant<Kind, TINT> {};
 template<> struct kind_of<float> : std::integral_constant<Kind, TFLOAT> {};
 template<> struct kind_of<std::string> : std::integral_constant<Kind, TSTRING> {};
+template<> struct kind_of<const char*> : std::integral_constant<Kind, TSTRING> {};
 template<size_t N> struct kind_of<const char(&)[N]> : std::integral_constant<Kind, TSTRING> {};
 template<> struct kind_of<Var> : std::integral_constant<Kind, TVAR> {};
   
@@ -114,6 +120,7 @@ struct Tuple {
       i++;
     }
   }
+  bool operator<(const Tuple& o) const { return vals < o.vals; }
 };
 
 struct Relation {
@@ -136,7 +143,6 @@ struct Relation {
   }
 
 
-  //void insert(Tuple&& t) { all.emplace(t); }
 
   // unify([1, 2, 3], [1, 2, 3]) -> true
   // unify([1, 2, 3], [1, x, y]) -> true
@@ -160,14 +166,20 @@ struct Relation {
 
   template<typename... Args>
   std::pair<Tuple, std::vector<Kind>>
-  tuplify(Args&&... args)
+  tuplify(Args... args)
   {
     std::vector<Kind> kinds({(kind_of<Args>::value)...});
     assert(kinds == type);
     Tuple vals({edb.of(args)...});
     return {std::move(vals), std::move(kinds)};
   }
-  
+
+  template<typename... Args>
+  void insert(Args... args) {
+    auto vk = tuplify(args...);
+    all.emplace(std::move(vk.first));
+  }
+
   // int select(const Tuple& sel)
   // {
   //   int res = 0;
@@ -191,14 +203,14 @@ int main()
   auto vk = R.tuplify(1, 2, 3);
   vk.first.format(std::cout, vk.second);
   //R.insert(vk.first);
-  // R.insert(Tuple({&i[1], &i[2], &i[3]}));
-  // R.insert(Tuple({&i[1], &i[2], &i[3]}));
-  // R.insert(Tuple({&i[1], &i[1], &i[3]}));
-  //std::cout << R << "\n"; 
+  R.insert(1, 2, 3);
+  R.insert(1, 2, 3);
+  R.insert(1, 1, 3);
+  std::cout << R << "\n"; 
 
   Relation S(edb, "S", {TSTRING, TINT, TSTRING});
-  auto vk2 = S.tuplify("Hello", 2, "Hello");
-  vk2.first.format(std::cout, vk2.second);
+  S.insert("Hello", 2, "Hello");
+  std::cout << S << "\n"; 
   
   // Var x("x");
   // Var y("y");
