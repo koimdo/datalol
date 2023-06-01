@@ -139,8 +139,10 @@ public:
     ++(*this);
     return *res;
   }
-  T& operator*() { return *p; }
+  flat::span<T> operator*() { return flat::span<T>(p, p+stride); }
 };
+
+using row_t = flat::span<Value>;
 
 class Relation_base;
 struct QueryFragment {
@@ -153,6 +155,9 @@ struct QueryFragment {
     , sel(sel_.begin(), sel_.end())
     , seltype(seltype_.begin(), seltype_.end())
   {}
+
+  bool unify(row_t row) const;
+  bool operator()(row_t row) const { return unify(row); }
 };
 
 struct Query {
@@ -188,15 +193,16 @@ struct Relation_base {
     : edb(edb), name(name), dtype(dtype)
   {}
 
-  static void format_tuple(std::ostream& os, const Value *base, flat::span<Kind> dtype)
+  static void format_tuple(std::ostream& os, row_t row, flat::span<Kind> dtype)
   {
+    assert(row.size() == dtype.size());
     for (int i=0; i<dtype.size(); ++i) {
       if (i) os << ", ";
-      base[i].format(os, dtype[i]);
+      row[i].format(os, dtype[i]);
     }
   }
 
-  void format_tuple(std::ostream& os, const Value *base) const { format_tuple(os, base, dtype); }
+  void format_tuple(std::ostream& os, row_t row) const { format_tuple(os, row, dtype); }
 
   using gen_iterator = striderator<const Value>;
   virtual gen_iterator begin() const = 0;
@@ -205,33 +211,13 @@ struct Relation_base {
   friend std::ostream& operator<<(std::ostream& os, const Relation_base& r)
   {
     os << "{";
-    for (auto const& t : r) {
+    for (auto row : r) {
       os << "\n  " << r.name << "(";
-      r.format_tuple(os, &t);
+      r.format_tuple(os, row);
       os  << ")";
     }
     os <<"\n}";
     return os;
-  }
-
-  // unify([1, 2, 3], [1, 2, 3]) -> true
-  // unify([1, 2, 3], [1, x, y]) -> true
-  // unify([1, 2, 3], [1, x, 4]) -> false
-  // unify([1, 2, 3], [1, x, x]) -> false
-  // unify([1, 2, 2], [1, x, x]) -> true
-  bool unify(const Value* t, const QueryFragment& qf) const {
-    for (int i=0; i<qf.sel.size(); i++) {
-      Kind kind = qf.seltype[i];
-      if (TVAR == kind) {
-        const Var *v = qf.sel[i].v;
-        assert(dtype[i] == v->kind);
-        if (!v->unify(&t[i])) {
-          return false;
-        }
-      } else if (!Value::eq(qf.sel[i], t[i], kind))
-        return false;
-    }
-    return true;
   }
 
   void select(const QueryFragment& qf)
@@ -243,8 +229,8 @@ struct Relation_base {
 
     int res = 0;
     std::cout << name << ".select(" << qf << "):\n";
-    for (auto const& t : *this) {
-      if (unify(&t, qf)) {
+    for (auto row : *this) {
+      if (qf.unify(row)) {
         std::cout << qf << "\n";
         res++;
       }
@@ -255,10 +241,32 @@ struct Relation_base {
   }
 };
 
+// unify([1, 2, 3], [1, 2, 3]) -> true
+// unify([1, 2, 3], [1, x, y]) -> true
+// unify([1, 2, 3], [1, x, 4]) -> false
+// unify([1, 2, 3], [1, x, x]) -> false
+// unify([1, 2, 2], [1, x, x]) -> true
+bool QueryFragment::unify(row_t t) const
+{
+  assert(sel.size() == t.size());
+  for (int i=0; i<sel.size(); i++) {
+    Kind kind = seltype[i];
+    if (TVAR == kind) {
+      const Var *v = sel[i].v;
+      assert(rel.dtype[i] == v->kind);
+      if (!v->unify(&t[i])) {
+        return false;
+      }
+    } else if (!Value::eq(sel[i], t[i], kind))
+      return false;
+  }
+  return true;
+}
+
 std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
 {
   os << qf.rel.name << "(";
-  Relation_base::format_tuple(os, qf.sel.data(), qf.seltype);
+  Relation_base::format_tuple(os, qf.sel, qf.seltype);
   return os << ")";
 }
 
