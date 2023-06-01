@@ -40,8 +40,8 @@ union Value {
   Value(const std::string& s): s(&s) {}
   Value(const Var &v): v(&v) {}
   void format(std::ostream& os, Kind k) const;
-  static bool cmp(Value l, Value r, Kind k);
-  bool operator<(const Value& o) const { return i < o.i; } // FIXME: remove once we get typed relations
+  static bool eq(Value l, Value r, Kind k);
+  static bool lt(Value l, Value r, Kind k);
 };
 
 template<class T>
@@ -78,7 +78,7 @@ struct Var {
   bool unify(const Value *v) const
   {
     if (val)
-      return Value::cmp(*val, *v, kind);
+      return Value::eq(*val, *v, kind);
     val = v;
     return true;
   }
@@ -101,11 +101,21 @@ void Value::format(std::ostream& os, Kind k) const
   }
 }
 
-bool Value::cmp(Value l, Value r, Kind k) {
+bool Value::eq(Value l, Value r, Kind k) {
   switch (k) {
   case TINT: return l.i == r.i;
   case TFLOAT: return l.f == r.f;
   case TSTRING: return l.s == r.s; // Strings are interned!
+  case TVAR:
+    assert(false);
+  }
+}
+
+bool Value::lt(Value l, Value r, Kind k) {
+  switch (k) {
+  case TINT: return l.i < r.i;
+  case TFLOAT: return l.f < r.f;
+  case TSTRING: return *l.s < *r.s;
   case TVAR:
     assert(false);
   }
@@ -129,18 +139,36 @@ protected:
   }
 
   void format_tuple(std::ostream& os, const Value *base) const { format_tuple(os, base, dtype); }
+
 };
 
 template<typename... Args>
 struct Relation : Relation_base {
-  std::array<Kind, sizeof...(Args)> type{(kind_of<Args>::value)...};
+  static std::array<Kind, sizeof...(Args)> type;
   Relation(EDB& edb, const std::string& name)
     : Relation_base(edb, name, type)
   {}
 
-  using value_type = std::array<Value, sizeof...(Args)>; // TODO: tuple it
-  using query_type = std::array<Value, sizeof...(Args)>;
-  flat::set<value_type> all;
+  static constexpr int arity = sizeof...(Args);
+  using tuple_t = std::tuple<Args...>;
+  using value_type = std::array<Value, arity>; // TODO: tuple it
+  using query_type = std::array<Value, arity>;
+
+  struct cmp_tuples {
+    bool operator()(const value_type& ls, const value_type& rs) const
+    {
+      for (int i=0; i<arity; ++i) {
+        auto const& l = ls[i];
+        auto const& r = rs[i];
+        auto t = type[i];
+        if (!Value::eq(l, r, t))
+          return Value::lt(l, r, t);
+      }
+      return false;
+    }
+  };
+
+  flat::set<value_type, cmp_tuples> all;
   friend std::ostream& operator<<(std::ostream& os, const Relation& r)
   {
     os << "{";
@@ -166,7 +194,7 @@ struct Relation : Relation_base {
         if (!v->unify(&t[i])) {
           return false;
         }
-      } else if (!Value::cmp(sel[i], t[i], kind))
+      } else if (!Value::eq(sel[i], t[i], kind))
         return false;
     }
     return true;
@@ -230,6 +258,8 @@ struct Relation : Relation_base {
     select_(vk.first, vk.second);
   }
 };
+template<typename... Args>
+std::array<Kind, sizeof...(Args)> Relation<Args...>::type{(kind_of<Args>::value)...};
 
 int main()
 {
