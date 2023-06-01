@@ -121,6 +121,27 @@ bool Value::lt(Value l, Value r, Kind k) {
   }
 }
 
+template<class T>
+class striderator {
+  T *p;
+  ptrdiff_t stride;
+public:
+  striderator(T *p, ptrdiff_t stride): p(p), stride(stride) {}
+  constexpr bool operator!=(const striderator& o) const { return p != o.p; }
+  striderator& operator++()
+  {
+    p += stride;
+    return *this;
+  }
+  striderator& operator++(int)
+  {
+    striderator res = *this;
+    ++(*this);
+    return *res;
+  }
+  T& operator*() { return *p; }
+};
+
 struct Relation_base {
 protected:
   EDB& edb;
@@ -140,6 +161,66 @@ protected:
 
   void format_tuple(std::ostream& os, const Value *base) const { format_tuple(os, base, dtype); }
 
+  using gen_iterator = striderator<const Value>;
+  virtual int get_arity() const = 0;
+  virtual gen_iterator begin() const = 0;
+  virtual gen_iterator end() const = 0;
+
+  friend std::ostream& operator<<(std::ostream& os, const Relation_base& r)
+  {
+    os << "{";
+    for (auto const& t : r) {
+      os << "\n  " << r.name << "(";
+      r.format_tuple(os, &t);
+      os  << ")";
+    }
+    os <<"\n}";
+    return os;
+  }
+
+  // unify([1, 2, 3], [1, 2, 3]) -> true
+  // unify([1, 2, 3], [1, x, y]) -> true
+  // unify([1, 2, 3], [1, x, 4]) -> false
+  // unify([1, 2, 3], [1, x, x]) -> false
+  // unify([1, 2, 2], [1, x, x]) -> true
+  bool unify(const Value* t, const Value* sel, flat::span<Kind> selkind) const {
+    int size = get_arity();
+    for (int i=0; i<size; i++) {
+      Kind kind = selkind[i];
+      if (TVAR == kind) {
+        const Var *v = sel[i].v;
+        assert(dtype[i] == v->kind);
+        if (!v->unify(&t[i])) {
+          return false;
+        }
+      } else if (!Value::eq(sel[i], t[i], kind))
+        return false;
+    }
+    return true;
+  }
+
+  void select_(const Value* sel, flat::span<Kind> kinds)
+  {
+    std::vector<const Var*> vars;
+    for (int i=0; i<kinds.size(); ++i)
+      if (kinds[i] == TVAR)
+        vars.push_back(sel[i].v);
+
+    int res = 0;
+    std::cout << name << ".select(";
+    format_tuple(std::cout, sel, kinds);
+    std::cout << "):\n";
+    for (auto const& t : *this) {
+      if (unify(&t, sel, kinds)) {
+        format_tuple(std::cout, sel, kinds);
+        std::cout << "\n";
+        res++;
+      }
+      for (auto v : vars)
+        v->zap();
+    }
+    std::cout << res << "\n";
+  }
 };
 
 template<typename... Args>
@@ -153,6 +234,10 @@ struct Relation : Relation_base {
   using tuple_t = std::tuple<Args...>;
   using value_type = std::array<Value, arity>; // TODO: tuple it
   using query_type = std::array<Value, arity>;
+
+  int get_arity() const override { return arity; }
+  gen_iterator begin() const override { return gen_iterator(all.begin()->data(), arity); }
+  gen_iterator end() const override { return gen_iterator(all.end()->data(), arity); }
 
   struct cmp_tuples {
     bool operator()(const value_type& ls, const value_type& rs) const
@@ -169,35 +254,9 @@ struct Relation : Relation_base {
   };
 
   flat::set<value_type, cmp_tuples> all;
-  friend std::ostream& operator<<(std::ostream& os, const Relation& r)
-  {
-    os << "{";
-    for (auto const& t : r.all) {
-      os << "\n  " << r.name << "(";
-      r.format_tuple(os, t.data());
-      os  << ")";
-    }
-    os <<"\n}";
-    return os;
-  }
 
-  // unify([1, 2, 3], [1, 2, 3]) -> true
-  // unify([1, 2, 3], [1, x, y]) -> true
-  // unify([1, 2, 3], [1, x, 4]) -> false  
-  // unify([1, 2, 3], [1, x, x]) -> false
-  static bool unify(const value_type& t, const query_type& sel, flat::span<Kind> selkind) {
-    assert(t.size() == sel.size());
-    for (int i=0; i<t.size(); i++) {
-      Kind kind = selkind[i];
-      if (TVAR == kind) {
-        const Var *v = sel[i].v;
-        if (!v->unify(&t[i])) {
-          return false;
-        }
-      } else if (!Value::eq(sel[i], t[i], kind))
-        return false;
-    }
-    return true;
+  bool unify(const value_type& t, const query_type& sel, flat::span<Kind> selkind) {
+    return Relation_base::unify(t.data(), sel.data(), selkind);
   }
 
   template<typename... TArgs>  
@@ -229,33 +288,10 @@ struct Relation : Relation_base {
     all.emplace(std::move(vk.first));
   }
 
-  void select_(const query_type& sel, flat::span<Kind> kinds)
-  {
-    std::vector<const Var*> vars;
-    for (int i=0; i<kinds.size(); ++i)
-      if (kinds[i] == TVAR)
-        vars.push_back(sel[i].v);
-
-    int res = 0;
-    std::cout << name << ".select(";
-    format_tuple(std::cout, sel.data(), kinds);
-    std::cout << "):\n";
-    for (auto const& t : all) {
-      if (unify(t, sel, kinds)) {
-        format_tuple(std::cout, sel.data(), kinds);
-        std::cout << "\n";
-        res++;
-      }
-      for (auto v : vars)
-        v->zap();
-    }
-    std::cout << res << "\n";
-  }
-
   template<typename... SelectArgs>
   void select(SelectArgs&&... args) {
     auto vk = tuplify(true, std::forward<SelectArgs>(args)...);
-    select_(vk.first, vk.second);
+    Relation_base::select_(vk.first.data(), vk.second);
   }
 };
 template<typename... Args>
