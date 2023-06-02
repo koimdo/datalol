@@ -173,6 +173,15 @@ struct QueryFragment : res_cb {
   bool unify(row_t row) const;
   void operator()() const override { return eval(); }
   void eval() const;
+
+  template<class F>
+  bool zip(F&& f) const
+  {
+    for (int i=0; i<sel.size(); ++i)
+      if (!f(i, sel[i], seltype[i]))
+        return false;
+    return true;
+  }
 };
 
 struct Query : res_cb {
@@ -258,27 +267,25 @@ struct Relation_base {
 bool QueryFragment::unify(row_t t) const
 {
   assert(sel.size() == t.size());
-  for (int i=0; i<sel.size(); i++) {
-    Kind kind = seltype[i];
+  zip([t, this](int i, Value v, Kind kind) {
     if (TVAR == kind) {
-      const Var *v = sel[i].v;
-      if (!v->unify(t[i], rel.dtype[i])) {
+      if (!v.v->unify(t[i], rel.dtype[i])) {
         return false;
       }
-    } else if (!Value::eq(sel[i], t[i], kind))
+    } else if (!Value::eq(v, t[i], kind))
       return false;
-  }
+    return true;
+  });
   return true;
 }
 void QueryFragment::eval() const
 {
   std::vector<const Var*> vars;
-  for (int i=0; i<sel.size(); ++i)
-      if (seltype[i] == TVAR) {
-        const Var *v = sel[i].v;
-        if (v->is_unset())
-          vars.push_back(v);
-      }
+  zip([&vars](int, Value v, Kind k) {
+    if (k == TVAR && v.v->is_unset())
+      vars.push_back(v.v);
+    return true;
+  });
 
   for (auto row : rel) {
     if (unify(row))
