@@ -295,8 +295,12 @@ std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
   return os << ")";
 }
 
+template <typename T, typename ...Ts>
+using anyT = std::disjunction<std::is_same<T,Ts>...>;
+
 template<typename... Args>
 struct Relation : Relation_base {
+  static_assert(!anyT<Var, Args...>::value ,  "Cannot have var type");
   static std::array<Kind, sizeof...(Args)> type;
   Relation(EDB& edb, const std::string& name)
     : Relation_base(edb, name, type)
