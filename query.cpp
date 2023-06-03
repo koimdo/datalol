@@ -142,14 +142,6 @@ namespace detail {
   template<typename Sel, typename Row, size_t size>
   struct check_query_t<Sel, Row, size, size> : std::bool_constant<true> {};
   
-  // template<typename Sel, typename Row, int... Is>
-  // constexpr bool
-  // check_query(std::integer_sequence<int, Is...>) {
-  //   constexpr int val = std::conjunction<check_arg<>...>::value;
-  //   static_assert(val, "Type error");
-  //   return true;
-  // }
-
   template<class R> constexpr bool unify1(const R& s, const R& r) { return s == r; }
   template<class R> constexpr bool unify1(const Var<R>& s, const R& r) { return s.unify(r); }
   
@@ -212,8 +204,9 @@ struct QueryFragment : QueryFragment_base {
   void eval1(const void *p) override
   {
     const value_type& row = *static_cast<const value_type*>(p);
-    if (detail::unify<query_type, value_type, 0, std::tuple_size<query_type>::value>::exec(selector, row))
+    if (detail::unify<query_type, value_type, 0, std::tuple_size<query_type>::value>::exec(selector, row)) {
       next->eval();
+    }
     bt.undo();
   }
 
@@ -322,16 +315,14 @@ int main()
 
   Relation<std::string, int, std::string> S("S");
   S.insert("Hello", 2, "Hello");
+  S.insert("Hello", 2, "Datalog");
+  S.insert("LOL", 1, "LOL");
+  S.insert("Goodbye", 1, "Query");
   S.insert("Hello", 3, "World");
   std::cout << S << "\n"; 
   
   Var<int> x("x");
   Var<int> y("y");
-  Var<int> z("z");
-
-
-  // select(R(1, y, 3) &
-  //        S(x, y, z));
 
   select(R(1, 2, 3));
   select(R(1, x, y));
@@ -339,6 +330,11 @@ int main()
   select(R(1, x, 0));
   select(R(x, x, 3));
 
-  // select(S(x, y, x));
-  // select(R(x, y, x));
+  Var<std::string> s("s");
+  select(S(s, y, s));
+
+  select(R(1, y, 3) &
+         S(s, y, s));
+
+
 }
