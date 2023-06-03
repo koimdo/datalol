@@ -2,6 +2,7 @@
 #include <sstream>
 #include <set>
 #include <array>
+#include <tuple>
 
 #include "flat/set"
 #include "flat/span"
@@ -18,373 +19,300 @@ public:
   operator std::string() const { return s.str(); }
 };
 
-enum Kind {
-  TVAR = 0,
-  TINT,
-  TFLOAT,
-  TSTRING,
+namespace detail
+{
+  template<typename T, typename F, int... Is>
+  bool
+  for_each(T&& t, F&& f, std::integer_sequence<int, Is...>)
+  {
+    bool cont = true;
+    auto l = { ((cont = cont && f(Is, std::get<Is>(t))) , 0)... };
+    return cont;
+  }
+} // namespace detail
+
+template<typename... Ts, typename F>
+bool
+for_each_in_tuple(std::tuple<Ts...> const& t, F&& f)
+{
+  return detail::for_each(t, std::forward<F>(f), std::make_integer_sequence<int, sizeof...(Ts)>());
+}
+
+struct generic_print {
+  std::ostream& os;
+  template<typename T>
+  bool operator () (int i, T const &v)
+  {
+    os << (i? ", " : "") << v;
+    return true;
+  }
 };
 
-struct Var;
-union Value {
-  static_assert(sizeof(long) == sizeof(void*));
-  static_assert(sizeof(double) == sizeof(void*));
-  static_assert(alignof(long) == alignof(void*));
-  static_assert(alignof(double) == alignof(void*));
-  long i;
-  double f;
-  const std::string *s;
-  const Var *v;
-  Value(int i): i(i) {}
-  Value(float f): f(f) {}
-  Value(const std::string& s): s(&s) {}
-  Value(const Var &v): v(&v) {}
-  void format(std::ostream& os, Kind k) const;
-  static bool eq(Value l, Value r, Kind k);
-  static bool lt(Value l, Value r, Kind k);
+template<typename... Args>
+std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t)
+{
+  os << "<";
+  auto intr = !for_each_in_tuple(t, generic_print{os});
+  return os << (intr ? "|" : ">");
+}
+
+struct Var_ {
+  std::string name;
+  Var_(const Var_&) = delete;
+  Var_(const std::string& name): name(name) {}
+  bool operator<(const Var_& o) const { return name < o.name; }
+
+  mutable const void *p = nullptr; // FIXME: maybe std::optional<T> or similar. For now we have address persistence.
+  void zap() const { p = nullptr; }
+  bool is_unset() const { !p; }
 };
 
 template<class T>
-struct kind_of {};
+struct Var : public Var_ {
+  using Var_::Var_;
 
-template<> struct kind_of<int> : std::integral_constant<Kind, TINT> {};
-template<> struct kind_of<float> : std::integral_constant<Kind, TFLOAT> {};
-template<> struct kind_of<std::string> : std::integral_constant<Kind, TSTRING> {};
-template<> struct kind_of<const char*> : std::integral_constant<Kind, TSTRING> {};
-template<size_t N> struct kind_of<const char[N]> : std::integral_constant<Kind, TSTRING> {};
-template<> struct kind_of<Var> : std::integral_constant<Kind, TVAR> {};
-  
-struct EDB {
-  std::set<std::string> intern;
-
-  Value of(int i) { return Value(i); }
-  Value of(float f) { return Value(f); }
-  Value of(const char *s) { return of(std::string(s)); }
-  Value of(const std::string& s)
+  bool unify(const T& t) const
   {
-    auto itb = intern.emplace(s);
-    return Value(*itb.first);
-  }
-  Value of(Var& v) { return Value(v); }
-};
-
-struct Var {
-  std::string name;
-  Var(const Var&) = delete;
-  Var(const std::string& name): name(name) {}
-  bool operator<(const Var& o) const { return name < o.name; }
-
-  bool unify(Value v, Kind k) const
-  {
-    if (kind == k)
-      return Value::eq(val, v, kind);
-    val = v;
-    kind = k;
+    if (p)
+      return t == *get();
+    p = &t;
     return true;
   }
-  void zap() const { kind = TVAR; val.i = 0; }
-  bool is_unset() const { return kind == TVAR; }
 
-  const Value *get() const { return is_unset() ? nullptr : &val; }
+  const T *get() const { return static_cast<const T*>(p); }
   friend std::ostream& operator<<(std::ostream& os, const Var& v)
   {
     os << "?" << v.name;
-    if (auto val = v.get()) {
-      os << "=";
-      val->format(os, v.kind);
+    if (v.p) {
+      const T& t = *v.get();
+      os << "=" << t;
     }
     return os;
   }
-private:
-  mutable Kind kind = TVAR;
-  mutable Value val = 0;
 };
-
-void Value::format(std::ostream& os, Kind k) const
-{
-  switch (k) {
-  case TINT: os << i; break;
-  case TFLOAT: os << f; break;
-  case TSTRING: os << "\"" << *s << "\""; break;
-  case TVAR: os << *v; break;
-  }
-}
-
-bool Value::eq(Value l, Value r, Kind k) {
-  switch (k) {
-  case TINT: return l.i == r.i;
-  case TFLOAT: return l.f == r.f;
-  case TSTRING: return l.s == r.s; // Strings are interned!
-  case TVAR:
-    assert(false);
-  }
-}
-
-bool Value::lt(Value l, Value r, Kind k) {
-  switch (k) {
-  case TINT: return l.i < r.i;
-  case TFLOAT: return l.f < r.f;
-  case TSTRING: return *l.s < *r.s;
-  case TVAR:
-    assert(false);
-  }
-}
-
-template<class T>
-class striderator {
-  T *p;
-  ptrdiff_t stride;
-public:
-  striderator(T *p, ptrdiff_t stride): p(p), stride(stride) {}
-  constexpr bool operator!=(const striderator& o) const { return p != o.p; }
-  striderator& operator++()
-  {
-    p += stride;
-    return *this;
-  }
-  striderator& operator++(int)
-  {
-    striderator res = *this;
-    ++(*this);
-    return *res;
-  }
-  flat::span<T> operator*() { return flat::span<T>(p, p+stride); }
-};
-
-using row_t = flat::span<Value>;
 
 struct res_cb {
-  virtual void operator()() const = 0;
+  virtual void eval() = 0;
 };
 
-class Relation_base;
-struct QueryFragment : res_cb {
-  mutable const res_cb *next = nullptr; // FIXME
+class QueryFragment_base;
+struct Relation_base {
+  std::string name;
+  Relation_base(const std::string& name)
+    : name(name)
+  {}
+  virtual void run(QueryFragment_base& q) = 0;
+};
+
+struct QueryFragment_base : res_cb {
+  res_cb *next = nullptr;
   Relation_base& rel;
-  std::vector<Value> sel;
-  std::vector<Kind> seltype;
-  friend std::ostream& operator<<(std::ostream& os, const QueryFragment& qf);
-  QueryFragment(Relation_base& rel, flat::span<Value> sel_, flat::span<Kind> seltype_)
+  virtual void eval1(const void *p) = 0; // FIXME: virtual call on the hot path
+  virtual void print(std::ostream&) const = 0;
+  QueryFragment_base(Relation_base& rel)
     : rel(rel)
-    , sel(sel_.begin(), sel_.end())
-    , seltype(seltype_.begin(), seltype_.end())
+  {}
+  friend std::ostream& operator<<(std::ostream& os, const QueryFragment_base& qf)
+  {
+    os << qf.rel.name << "(";
+    qf.print(os);
+    return os << ")";
+  }
+};
+
+namespace detail {
+  template<class S, class R> struct check_arg : std::bool_constant<false> {};
+  template<class R> struct check_arg<R,             R > : std::bool_constant<true> {};
+  template<class R> struct check_arg<Var<R>&, const R&> : std::bool_constant<true> {};
+
+  template<size_t i, class S, class R> struct check1 {
+    static constexpr bool value = check_arg<S, R>::value;
+    static_assert(value, "Type mismatch");
+  };
+
+  template<typename Sel, typename Row, size_t i, size_t size>
+  struct check_query_t {
+    using SElem = decltype(std::get<i>(*(const Sel*)nullptr));
+    using RElem = decltype(std::get<i>(*(const Row*)nullptr));
+    static constexpr bool value =
+      check1<i, SElem, RElem>::value &&
+      check_query_t<Sel, Row, i+1, size>::value;
+  };
+
+  template<typename Sel, typename Row, size_t size>
+  struct check_query_t<Sel, Row, size, size> : std::bool_constant<true> {};
+  
+  // template<typename Sel, typename Row, int... Is>
+  // constexpr bool
+  // check_query(std::integer_sequence<int, Is...>) {
+  //   constexpr int val = std::conjunction<check_arg<>...>::value;
+  //   static_assert(val, "Type error");
+  //   return true;
+  // }
+
+  template<class R> constexpr bool unify1(const R& s, const R& r) { return s == r; }
+  template<class R> constexpr bool unify1(const Var<R>& s, const R& r) { return s.unify(r); }
+  
+  // This class unifies tuples elementwise
+  template<typename Sel, typename Row, size_t i, size_t size>
+  struct unify {
+    static constexpr bool
+    exec(const Sel& sel, const Row& row)
+    {
+      return
+        unify1(std::get<i>(sel), std::get<i>(row)) &&
+        unify<Sel, Row, i+1, size>::exec(sel, row);
+      }
+    };
+
+  template<typename Sel, typename Row, size_t size>
+  struct unify<Sel, Row, size, size> {
+    static constexpr bool
+    exec(const Sel&, const Row&) { return true; }
+  };
+
+  struct backtrack {
+    std::vector<const Var_*> vars;
+    
+    template<typename T>
+    bool operator()(int, Var<T>& v)
+    {
+      if (v.is_unset())
+        vars.push_back(&v);
+      return true;
+    }
+
+    template<typename T>
+    bool operator()(int, const T&) { return true; }
+    void undo() {
+      for (auto v : vars)
+        v->zap();
+    }
+  };
+}
+
+template<typename value_type, typename... Selector>
+struct QueryFragment : QueryFragment_base {
+  // TODO: value_type can be derived from selector (at least for value_type = tuple<...>)
+  using query_type = std::tuple<Selector...>;
+  static constexpr int arity = std::tuple_size<query_type>::value;
+  static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
+  static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
+
+  query_type selector;
+  detail::backtrack bt;
+
+  void print(std::ostream& os) const override { os << selector; }
+  QueryFragment(Relation_base& rel, Selector&&... sels)
+    : QueryFragment_base(rel)
+    , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
   {}
 
-  bool unify(row_t row) const;
-  void operator()() const override { return eval(); }
-  void eval() const;
-
-  template<class F>
-  bool zip(F&& f) const
+  
+  void eval1(const void *p) override
   {
-    for (int i=0; i<sel.size(); ++i)
-      if (!f(i, sel[i], seltype[i]))
-        return false;
-    return true;
+    const value_type& row = *static_cast<const value_type*>(p);
+    if (detail::unify<query_type, value_type, 0, std::tuple_size<query_type>::value>::exec(selector, row))
+      next->eval();
+    bt.undo();
+  }
+
+  void eval() override
+  {
+    for_each_in_tuple(selector, bt); // Record unset vars
+
+    rel.run(*this);
   }
 };
 
 struct Query : res_cb {
-  std::vector<QueryFragment> qfs;
-  Query(QueryFragment&& qf) { qfs.emplace_back(qf); }
-  Query& operator+=(QueryFragment&& qf)
-  {
-    qfs.emplace_back(qf);
+  std::vector<QueryFragment_base*> qfs;
+  Query(QueryFragment_base&& qf) {
+    qfs.emplace_back(&qf);
   }
-  Query operator&(QueryFragment&& qf) const
+  Query& operator+=(QueryFragment_base&& qf)
+  {
+    qfs.emplace_back(&qf);
+  }
+  Query operator&(QueryFragment_base&& qf) const
   {
     Query res(*this);
-    res += std::move(qf);
+    res.qfs.emplace_back(&qf);
     return res;
   }
   friend std::ostream& operator<<(std::ostream& os, const Query& q)
   {
     os << "{";
     for (auto const& qf : q.qfs)
-      os << " " << qf;
+      os << " " << *qf;
     os << " }";
-  }
-  void configure_pipeline(const res_cb *next) const {
+  } 
+  void configure_pipeline(res_cb *next) {
     auto beg = qfs.rbegin();
     auto end = qfs.rend();
     for ( ; beg != end; ++beg) {
-      beg->next = next;
-      next = &(*beg);
+      (*beg)->next = next;
+      next = *beg;
     }
   }
-  void operator()() const override { std::cout << *this << "\n"; } // TODO: real results
+  void eval() override { std::cout << *this << "\n"; } // TODO: real results
 };
 
-Query operator&(QueryFragment&& l, QueryFragment&& r)
+Query operator&(QueryFragment_base&& l, QueryFragment_base&& r)
 {
   Query res(std::move(l));
-  res.qfs.emplace_back(r);
+  res.qfs.emplace_back(&r);
   return res;
 }
 
-struct Relation_base {
-  EDB& edb;
-  std::string name;
-  flat::span<Kind> dtype;
-  Relation_base(EDB& edb, const std::string& name, flat::span<Kind> dtype)
-    : edb(edb), name(name), dtype(dtype)
+template<typename... Args>
+struct Relation : Relation_base {
+  static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value ,  "Cannot have var type");
+  Relation(const std::string& name)
+    : Relation_base(name)
   {}
 
-  static void format_tuple(std::ostream& os, row_t row, flat::span<Kind> dtype)
-  {
-    assert(row.size() == dtype.size());
-    for (int i=0; i<dtype.size(); ++i) {
-      if (i) os << ", ";
-      row[i].format(os, dtype[i]);
-    }
-  }
+  using value_type = std::tuple<Args...>;
+  flat::set<value_type> all;
 
-  void format_tuple(std::ostream& os, row_t row) const { format_tuple(os, row, dtype); }
-
-  using gen_iterator = striderator<const Value>;
-  virtual gen_iterator begin() const = 0;
-  virtual gen_iterator end() const = 0;
-
-  friend std::ostream& operator<<(std::ostream& os, const Relation_base& r)
+  friend std::ostream& operator<<(std::ostream& os, const Relation& r)
   {
     os << "{";
-    for (auto row : r) {
-      os << "\n  " << r.name << "(";
-      r.format_tuple(os, row);
-      os  << ")";
-    }
+    for (auto const& row : r.all)
+      os << "\n  " << r.name << "(" << row << ")";
     os <<"\n}";
     return os;
   }
-};
-
-
-// unify([1, 2, 3], [1, 2, 3]) -> true
-// unify([1, 2, 3], [1, x, y]) -> true
-// unify([1, 2, 3], [1, x, 4]) -> false
-// unify([1, 2, 3], [1, x, x]) -> false
-// unify([1, 2, 2], [1, x, x]) -> true
-bool QueryFragment::unify(row_t t) const
-{
-  assert(sel.size() == t.size());
-  zip([t, this](int i, Value v, Kind kind) {
-    if (TVAR == kind) {
-      if (!v.v->unify(t[i], rel.dtype[i])) {
-        return false;
-      }
-    } else if (!Value::eq(v, t[i], kind))
-      return false;
-    return true;
-  });
-  return true;
-}
-void QueryFragment::eval() const
-{
-  std::vector<const Var*> vars;
-  zip([&vars](int, Value v, Kind k) {
-    if (k == TVAR && v.v->is_unset())
-      vars.push_back(v.v);
-    return true;
-  });
-
-  for (auto row : rel) {
-    if (unify(row))
-      (*next)();
-    for (auto v : vars)
-      v->zap();
-  }
-}
-
-std::ostream& operator<<(std::ostream& os, const QueryFragment& qf)
-{
-  os << qf.rel.name << "(";
-  Relation_base::format_tuple(os, qf.sel, qf.seltype);
-  return os << ")";
-}
-
-template <typename T, typename ...Ts>
-using anyT = std::disjunction<std::is_same<T,Ts>...>;
-
-template<typename... Args>
-struct Relation : Relation_base {
-  static_assert(!anyT<Var, Args...>::value ,  "Cannot have var type");
-  static std::array<Kind, sizeof...(Args)> type;
-  Relation(EDB& edb, const std::string& name)
-    : Relation_base(edb, name, type)
-  {}
-
-  static constexpr int arity = sizeof...(Args);
-  using tuple_t = std::tuple<Args...>;
-  using value_type = std::array<Value, arity>; // TODO: tuple it
-  using query_type = std::array<Value, arity>;
-
-  gen_iterator begin() const override { return gen_iterator(all.begin()->data(), arity); }
-  gen_iterator end() const override { return gen_iterator(all.end()->data(), arity); }
-
-  struct cmp_tuples {
-    bool operator()(const value_type& ls, const value_type& rs) const
-    {
-      for (int i=0; i<arity; ++i) {
-        auto const& l = ls[i];
-        auto const& r = rs[i];
-        auto t = type[i];
-        if (!Value::eq(l, r, t))
-          return Value::lt(l, r, t);
-      }
-      return false;
-    }
-  };
-
-  flat::set<value_type, cmp_tuples> all;
-
-  template<typename... TArgs>  
-  std::pair<value_type, flat::span<Kind>>
-  tuplify(bool allow_vars, TArgs&&... args)
-  {
-    static constexpr std::array<Kind, sizeof...(TArgs)> kinds{(kind_of<typename std::remove_reference<TArgs>::type>::value)...};
-    value_type vals({edb.of(std::forward<TArgs>( args))...});
-
-    assert(kinds.size() == type.size());
-    if (allow_vars) {
-      for (int i=0; i<type.size(); i++) {
-        Kind k = kinds[i];
-        Kind t = type[i];
-        assert(k == TVAR || k == t);
-      }
-    } else {
-      assert(kinds == type);
-    }
-
-    return {std::move(vals), std::move(kinds)};
-  }
 
   void insert(Args&&... args) {
-    auto vk = tuplify(false, std::forward<Args>(args)...);
-    all.emplace(std::move(vk.first));
+    all.emplace(std::forward<Args>(args)...);
   }
+
+
 
   template<typename... SelectArgs>
-  QueryFragment
+  QueryFragment<value_type, SelectArgs...>
   operator()(SelectArgs&&... args) {
-    static_assert(sizeof...(SelectArgs) == arity, "Wrong arity!");
-    auto vk = tuplify(true, std::forward<SelectArgs>(args)...);
-    return QueryFragment(*this, vk.first, vk.second);
+    return QueryFragment<value_type, SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+  }
+
+  void run(QueryFragment_base& q) override {
+    assert(this == &q.rel);
+    for (auto const& row : all)
+      q.eval1(&row);
   }
 };
-template<typename... Args>
-std::array<Kind, sizeof...(Args)> Relation<Args...>::type{(kind_of<Args>::value)...};
 
-void select(const Query& qf)
+void select(Query&& qf)
 {
   std::cout << "SELECT(" << qf << "):\n";
   qf.configure_pipeline(&qf);
-  qf.qfs[0].eval();
+  qf.qfs[0]->eval();
 }
 
 int main()
 {
-  EDB edb;
-  Relation<int, int, int> R(edb, "R");
+  Relation<int, int, int> R("R");
 
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
@@ -392,18 +320,18 @@ int main()
   R.insert(0, 2, 0);
   std::cout << R << "\n"; 
 
-  Relation<std::string, int, std::string> S(edb, "S");
+  Relation<std::string, int, std::string> S("S");
   S.insert("Hello", 2, "Hello");
   S.insert("Hello", 3, "World");
   std::cout << S << "\n"; 
   
-  Var x("x");
-  Var y("y");
-  Var z("z");
+  Var<int> x("x");
+  Var<int> y("y");
+  Var<int> z("z");
 
 
-  select(R(1, y, 3) &
-         S(x, y, z));
+  // select(R(1, y, 3) &
+  //        S(x, y, z));
 
   select(R(1, 2, 3));
   select(R(1, x, y));
@@ -411,6 +339,6 @@ int main()
   select(R(1, x, 0));
   select(R(x, x, 3));
 
-  select(S(x, y, x));
-  select(R(x, y, x));
+  // select(S(x, y, x));
+  // select(R(x, y, x));
 }
