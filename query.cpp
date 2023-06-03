@@ -93,6 +93,7 @@ struct Var : public Var_ {
 
 struct res_cb {
   virtual void eval() = 0;
+  res_cb *next = nullptr;
 };
 
 class QueryFragment_base;
@@ -105,7 +106,6 @@ struct Relation_base {
 };
 
 struct QueryFragment_base : res_cb {
-  res_cb *next = nullptr;
   Relation_base& rel;
   virtual void eval1(const void *p) = 0; // FIXME: virtual call on the hot path
   virtual void print(std::ostream&) const = 0;
@@ -220,18 +220,16 @@ struct QueryFragment : QueryFragment_base {
 
 struct Query : res_cb {
   std::vector<QueryFragment_base*> qfs;
-  Query(QueryFragment_base&& qf) {
-    qfs.emplace_back(&qf);
-  }
-  Query& operator+=(QueryFragment_base&& qf)
+  Query& append(QueryFragment_base& qf)
   {
     qfs.emplace_back(&qf);
+    return *this;
   }
+  Query(QueryFragment_base&& qf) { append(qf); }
   Query operator&(QueryFragment_base&& qf) const
   {
     Query res(*this);
-    res.qfs.emplace_back(&qf);
-    return res;
+    return res.append(qf);
   }
   friend std::ostream& operator<<(std::ostream& os, const Query& q)
   {
