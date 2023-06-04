@@ -64,7 +64,7 @@ struct Var_ {
 
   mutable const void *p = nullptr; // FIXME: maybe std::optional<T> or similar. For now we have address persistence.
   void zap() const { p = nullptr; }
-  bool is_unset() const { !p; }
+  bool is_unset() const { return !p; }
 };
 
 template<class T>
@@ -243,7 +243,7 @@ struct Query : res_cb {
     os << "{";
     for (auto const& qf : q.qfs)
       os << " " << *qf;
-    os << " }";
+    return os << " }";
   } 
   void configure_pipeline(res_cb *next) {
     assert(qfs.size());
