@@ -21,7 +21,6 @@ public:
 
 namespace detail
 {
-
   template<size_t i, size_t size, typename F, typename... Ts>
   struct for_each {
     static constexpr
@@ -61,13 +60,19 @@ struct generic_print {
   }
 };
 
-template<typename... Args>
-std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t)
-{
-  os << "<";
-  auto intr = !for_each_in_tuple(generic_print{os}, t);
-  return os << (intr ? "|" : ">");
-}
+template<typename T>
+struct print_tuple {
+  const T& t;
+  print_tuple(const T& t): t(t) {}
+  friend std::ostream& operator<<(std::ostream& os, const print_tuple& p)
+  {
+    os << "<";
+    auto intr = !for_each_in_tuple(generic_print{os}, p.t);
+    if (intr)
+      os << ", ...";
+    return os << ">";
+  }
+};
 
 struct Var_ {
   std::string name;
@@ -143,18 +148,13 @@ namespace detail {
   template<class R> struct check_arg<R,             R > : std::bool_constant<true> {};
   template<class R> struct check_arg<Var<R>&, const R&> : std::bool_constant<true> {};
 
-  template<size_t i, class S, class R> struct check1 {
-    static constexpr bool value = check_arg<S, R>::value;
-    static_assert(value, "Type mismatch");
-  };
-
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
     using SElem = decltype(std::get<i>(*(const Sel*)nullptr));
     using RElem = decltype(std::get<i>(*(const Row*)nullptr));
-    static constexpr bool value =
-      check1<i, SElem, RElem>::value &&
-      check_query_t<Sel, Row, i+1, size>::value;
+    static constexpr bool check1 = check_arg<SElem, RElem>::value;
+    static_assert(check1, "Type mismatch");
+    static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
   };
 
   template<typename Sel, typename Row, size_t size>
@@ -196,7 +196,7 @@ struct QueryFragment : QueryFragment_base {
   query_type selector;
   detail::backtrack bt;
 
-  void print(std::ostream& os) const override { os << selector; }
+  void print(std::ostream& os) const override { os << print_tuple(selector); }
   QueryFragment(Relation_base& rel, Selector&&... sels)
     : QueryFragment_base(rel)
     , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
@@ -273,7 +273,7 @@ struct Relation : Relation_base {
   {
     os << "{";
     for (auto const& row : r.all)
-      os << "\n  " << r.name << "(" << row << ")";
+      os << "\n  " << r.name << "(" << print_tuple(row) << ")";
     os <<"\n}";
     return os;
   }
