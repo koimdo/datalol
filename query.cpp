@@ -94,6 +94,11 @@ struct Var : public Var_ {
 struct res_cb {
   virtual void eval() = 0;
   res_cb *next = nullptr;
+  res_cb& operator>>(res_cb&& n)
+  {
+    next = &n;
+    return *this;
+  }
 };
 
 class QueryFragment_base;
@@ -222,6 +227,8 @@ struct Query : res_cb {
   std::vector<QueryFragment_base*> qfs;
   Query& append(QueryFragment_base& qf)
   {
+    if (qfs.size())
+      qfs.back()->next = &qf;
     qfs.emplace_back(&qf);
     return *this;
   }
@@ -239,21 +246,20 @@ struct Query : res_cb {
     os << " }";
   } 
   void configure_pipeline(res_cb *next) {
-    auto beg = qfs.rbegin();
-    auto end = qfs.rend();
-    for ( ; beg != end; ++beg) {
-      (*beg)->next = next;
-      next = *beg;
-    }
+    assert(qfs.size());
+    qfs.back()->next = next;
   }
-  void eval() override { std::cout << *this << "\n"; } // TODO: real results
+  void eval() override {
+    if (next)
+      next->eval();
+    else
+      std::cout << *this << "\n";
+  } // TODO: real results
 };
 
 Query operator&(QueryFragment_base&& l, QueryFragment_base&& r)
 {
-  Query res(std::move(l));
-  res.qfs.emplace_back(&r);
-  return res;
+  return Query(std::move(l)) & std::move(r);
 }
 
 template<typename... Args>
