@@ -1,7 +1,6 @@
 #include <iostream>
 #include <sstream>
 #include <set>
-#include <array>
 #include <tuple>
 
 #include "flat/set"
@@ -149,21 +148,24 @@ namespace detail {
   };
 
   struct backtrack {
-    std::vector<const Var_*> vars;
-    
+    const Var_ **vars;
+    int nvars = 0;
+
+    backtrack(const Var_ **vars): vars(vars) {}
+
     template<typename T>
     bool operator()(int, Var<T>& v)
     {
       if (v.is_unset())
-        vars.push_back(&v);
+        vars[nvars++] = &v;
       return true;
     }
 
     template<typename T>
     bool operator()(int, const T&) { return true; }
     void undo() {
-      for (auto v : vars)
-        v->zap();
+      for (int i=0; i<nvars; i++)
+        vars[i]->zap();
     }
   };
 }
@@ -270,7 +272,8 @@ struct Relation : Relation_base {
 template<typename value_type, typename... Selector>
 void QueryFragment<value_type, Selector...>::eval()
 {
-  detail::backtrack bt;
+  const Var_ *vars[sizeof...(Selector)];
+  detail::backtrack bt(vars);      // Cannot have more unset vars than query size
   for_each_in_tuple(bt, selector); // Record unset vars
   for (auto const& row : this->rel.all) {
     if (for_each_in_tuple(detail::unify1(), selector, row))
