@@ -262,13 +262,12 @@ Query operator&(QueryFragment_base&& l, QueryFragment_base&& r)
   return Query(std::move(l)) & std::move(r);
 }
 
-template<typename... Args>
+template<typename T>
 struct Relation : Relation_base {
   friend class DB;
-  static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value ,  "Cannot have var type");
   using Relation_base::Relation_base;
 
-  using value_type = std::tuple<Args...>;
+  using value_type = T;
   flat::set<value_type> all;
 
   friend std::ostream& operator<<(std::ostream& os, const Relation& r)
@@ -280,11 +279,10 @@ struct Relation : Relation_base {
     return os;
   }
 
+  template<typename... Args>
   void insert(Args&&... args) {
     all.emplace(std::forward<Args>(args)...);
   }
-
-
 
   template<typename... SelectArgs>
   QueryFragment<value_type, SelectArgs...>
@@ -302,10 +300,11 @@ struct Relation : Relation_base {
 class DB {
 public:
   template<typename... Args>
-  Relation<Args...>
+  Relation<std::tuple<Args...>>
   table(const std::string& name)
   {
-    return Relation<Args...>(*this, name);
+    static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value, "Cannot have var type");
+    return Relation<std::tuple<Args...>>(*this, name);
   }
 };
 
