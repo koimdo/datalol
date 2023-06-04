@@ -116,23 +116,13 @@ struct res_cb {
   res_cb *next = nullptr;
 };
 
-class QueryFragment_base;
 class DB;
 struct Relation_base {
   DB& db;
   std::string name;
   Relation_base(DB& db, const std::string& name)
     : db(db)
-    ,name(name)
-  {}
-  virtual void run(QueryFragment_base& q) = 0;
-};
-
-struct QueryFragment_base : res_cb {
-  Relation_base& rel;
-  virtual void eval1(const void *p) = 0; // FIXME: virtual call on the hot path
-  QueryFragment_base(Relation_base& rel)
-    : rel(rel)
+    , name(name)
   {}
 };
 
@@ -178,39 +168,32 @@ namespace detail {
   };
 }
 
+template<typename> struct Relation;
+template<typename value_type>
+struct QueryFragment_base : res_cb {
+  using relation_t = Relation<value_type>;
+  relation_t& rel;
+  QueryFragment_base(relation_t& rel)
+    : rel(rel)
+  {}
+};
+
 template<typename value_type, typename... Selector>
-struct QueryFragment : QueryFragment_base {
-  // TODO: value_type can be derived from selector (at least for value_type = tuple<...>)
+struct QueryFragment : QueryFragment_base<value_type> {
   using query_type = std::tuple<Selector...>;
+  using QueryFragment_base<value_type>::relation_t;
   static constexpr int arity = std::tuple_size<query_type>::value;
   static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
   static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
 
   query_type selector;
-  detail::backtrack bt;
 
   void print(std::ostream& os) const override { os << print_tuple(selector); }
-  QueryFragment(Relation_base& rel, Selector&&... sels)
-    : QueryFragment_base(rel)
+  QueryFragment(Relation<value_type>& rel, Selector&&... sels)
+    : QueryFragment_base<value_type>(rel)
     , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
   {}
-
-  
-  void eval1(const void *p) override
-  {
-    const value_type& row = *static_cast<const value_type*>(p);
-    if (for_each_in_tuple(detail::unify1(), selector, row)) {
-      next->eval();
-    }
-    bt.undo();
-  }
-
-  void eval() override
-  {
-    for_each_in_tuple(bt, selector); // Record unset vars
-
-    rel.run(*this);
-  }
+  void eval() override;
 };
 
 struct Query : res_cb {
@@ -281,13 +264,20 @@ struct Relation : Relation_base {
   operator()(SelectArgs&&... args) {
     return QueryFragment<value_type, SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
   }
-
-  void run(QueryFragment_base& q) override {
-    assert(this == &q.rel);
-    for (auto const& row : all)
-      q.eval1(&row);
-  }
 };
+
+
+template<typename value_type, typename... Selector>
+void QueryFragment<value_type, Selector...>::eval()
+{
+  detail::backtrack bt;
+  for_each_in_tuple(bt, selector); // Record unset vars
+  for (auto const& row : this->rel.all) {
+    if (for_each_in_tuple(detail::unify1(), selector, row))
+      this->next->eval();
+    bt.undo();
+  }
+}
 
 class DB {
 public:
