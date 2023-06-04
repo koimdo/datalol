@@ -111,12 +111,9 @@ struct Var : public Var_ {
 
 struct res_cb {
   virtual void eval() = 0;
+  virtual void print(std::ostream&) const = 0;
+  friend std::ostream& operator<<(std::ostream& os, const res_cb& cb) { return cb.print(os), os; }
   res_cb *next = nullptr;
-  res_cb& operator>>(res_cb&& n)
-  {
-    next = &n;
-    return *this;
-  }
 };
 
 class QueryFragment_base;
@@ -134,16 +131,9 @@ struct Relation_base {
 struct QueryFragment_base : res_cb {
   Relation_base& rel;
   virtual void eval1(const void *p) = 0; // FIXME: virtual call on the hot path
-  virtual void print(std::ostream&) const = 0;
   QueryFragment_base(Relation_base& rel)
     : rel(rel)
   {}
-  friend std::ostream& operator<<(std::ostream& os, const QueryFragment_base& qf)
-  {
-    os << qf.rel.name << "(";
-    qf.print(os);
-    return os << ")";
-  }
 };
 
 namespace detail {
@@ -224,27 +214,29 @@ struct QueryFragment : QueryFragment_base {
 };
 
 struct Query : res_cb {
-  std::vector<QueryFragment_base*> qfs;
-  Query& append(QueryFragment_base& qf)
+  std::vector<res_cb*> qfs;
+  Query& append(res_cb& qf)
   {
     if (qfs.size())
       qfs.back()->next = &qf;
     qfs.emplace_back(&qf);
     return *this;
   }
-  Query(QueryFragment_base&& qf) { append(qf); }
-  Query operator&(QueryFragment_base&& qf) const
+  Query(res_cb&& qf) { append(qf); }
+  Query operator&(res_cb&& qf) const
   {
     Query res(*this);
     return res.append(qf);
   }
-  friend std::ostream& operator<<(std::ostream& os, const Query& q)
+
+  void print(std::ostream& os) const override
   {
     os << "{";
-    for (auto const& qf : q.qfs)
+    for (auto const& qf : qfs)
       os << " " << *qf;
-    return os << " }";
-  } 
+    os << " }";
+  }
+
   void configure_pipeline(res_cb *next) {
     assert(qfs.size());
     qfs.back()->next = next;
@@ -257,7 +249,7 @@ struct Query : res_cb {
   } // TODO: real results
 };
 
-Query operator&(QueryFragment_base&& l, QueryFragment_base&& r)
+Query operator&(res_cb&& l, res_cb&& r)
 {
   return Query(std::move(l)) & std::move(r);
 }
