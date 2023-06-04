@@ -2,6 +2,7 @@
 #include <sstream>
 #include <set>
 #include <tuple>
+#include <functional>
 
 #include "flat/set"
 #include "flat/span"
@@ -199,20 +200,16 @@ struct QueryFragment : QueryFragment_base<value_type> {
 };
 
 struct Query : res_cb {
+  Query(const Query&) = delete;
   std::vector<res_cb*> qfs;
-  Query& append(res_cb& qf)
+  void append(const res_cb& qf)
   {
+    res_cb *cqf = const_cast<res_cb*>(&qf);
     if (qfs.size())
-      qfs.back()->next = &qf;
-    qfs.emplace_back(&qf);
-    return *this;
+      qfs.back()->next = cqf;
+    qfs.emplace_back(cqf);
   }
-  Query(res_cb&& qf) { append(qf); }
-  Query operator&(res_cb&& qf) const
-  {
-    Query res(*this);
-    return res.append(qf);
-  }
+  Query(const res_cb& qf) { append(qf); }
 
   void print(std::ostream& os) const override
   {
@@ -222,22 +219,19 @@ struct Query : res_cb {
     os << " }";
   }
 
-  void configure_pipeline(res_cb *next) {
+  void run() {
     assert(qfs.size());
-    qfs.back()->next = next;
+    qfs.back()->next = this;
+    qfs[0]->eval();
   }
+
   void eval() override {
-    if (next)
-      next->eval();
-    else
-      std::cout << *this << "\n";
-  } // TODO: real results
+    assert(!next);
+    std::cout << *this << "\n";
+  }
 };
 
-Query operator&(res_cb&& l, res_cb&& r)
-{
-  return Query(std::move(l)) & std::move(r);
-}
+Query&& operator&(Query&& l, const res_cb& r) { return l.append(r), std::move(l); }
 
 template<typename T>
 struct Relation : Relation_base {
@@ -270,7 +264,8 @@ struct Relation : Relation_base {
 
 
 template<typename value_type, typename... Selector>
-void QueryFragment<value_type, Selector...>::eval()
+void
+QueryFragment<value_type, Selector...>::eval()
 {
   const Var_ *vars[sizeof...(Selector)];
   detail::backtrack bt(vars);      // Cannot have more unset vars than query size
@@ -293,11 +288,18 @@ public:
   }
 };
 
+struct tail : res_cb {
+  using fun_t = std::function<void()>;
+  fun_t f;
+  tail(const fun_t& f): f(f) {}
+  void eval() { f(); }
+  void print(std::ostream& os) const { os << "<function>"; }
+};
+
 void select(Query&& qf)
 {
   std::cout << "SELECT(" << qf << "):\n";
-  qf.configure_pipeline(&qf);
-  qf.qfs[0]->eval();
+  qf.run();
 }
 
 int main()
@@ -332,7 +334,8 @@ int main()
   select(S(s, y, s));
 
   select(R(1, y, 3) &
-         S(s, y, s));
+         S(s, y, s) &
+         tail([&]() { std::cout << y << " " << s << "\n";}));
 
 
 }
