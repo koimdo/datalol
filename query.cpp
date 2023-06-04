@@ -21,21 +21,34 @@ public:
 
 namespace detail
 {
-  template<typename T, typename F, int... Is>
-  bool
-  for_each(T&& t, F&& f, std::integer_sequence<int, Is...>)
-  {
-    bool cont = true;
-    auto l = { ((cont = cont && f(Is, std::get<Is>(t))) , 0)... };
-    return cont;
-  }
+
+  template<size_t i, size_t size, typename F, typename... Ts>
+  struct for_each {
+    static constexpr
+    bool
+    run(F&& f, Ts const&... ts)
+    {
+      return f(i, std::get<i>(ts)...) && for_each<i+1, size, F, Ts...>::run(std::forward<F>(f), ts...);
+    }
+  };
+  template<size_t size, typename F, typename... Ts>
+  struct for_each<size, size, F, Ts...> {
+    static constexpr
+    bool
+    run(F&& f, Ts const&... ts)
+    {
+      return true;
+    }
+  };
 } // namespace detail
 
-template<typename... Ts, typename F>
+template<typename F, typename T0, typename... Ts>
 bool
-for_each_in_tuple(std::tuple<Ts...> const& t, F&& f)
+for_each_in_tuple(F&& f, const T0& t0, const Ts&... ts)
 {
-  return detail::for_each(t, std::forward<F>(f), std::make_integer_sequence<int, sizeof...(Ts)>());
+  static constexpr size_t arity = std::tuple_size<T0>::value;
+  static_assert(std::conjunction<std::bool_constant<arity == std::tuple_size<Ts>::value>...>::value, "All tuples myust have the same arity");
+  return detail::for_each<0, arity, F, T0, Ts...>::run(std::forward<F>(f), t0, ts...);
 }
 
 struct generic_print {
@@ -52,7 +65,7 @@ template<typename... Args>
 std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t)
 {
   os << "<";
-  auto intr = !for_each_in_tuple(t, generic_print{os});
+  auto intr = !for_each_in_tuple(generic_print{os}, t);
   return os << (intr ? "|" : ">");
 }
 
@@ -146,26 +159,10 @@ namespace detail {
 
   template<typename Sel, typename Row, size_t size>
   struct check_query_t<Sel, Row, size, size> : std::bool_constant<true> {};
-  
-  template<class R> constexpr bool unify1(const R& s, const R& r) { return s == r; }
-  template<class R> constexpr bool unify1(const Var<R>& s, const R& r) { return s.unify(r); }
-  
-  // This class unifies tuples elementwise
-  template<typename Sel, typename Row, size_t i, size_t size>
-  struct unify {
-    static constexpr bool
-    exec(const Sel& sel, const Row& row)
-    {
-      return
-        unify1(std::get<i>(sel), std::get<i>(row)) &&
-        unify<Sel, Row, i+1, size>::exec(sel, row);
-      }
-    };
 
-  template<typename Sel, typename Row, size_t size>
-  struct unify<Sel, Row, size, size> {
-    static constexpr bool
-    exec(const Sel&, const Row&) { return true; }
+  struct unify1 {
+    template<class R> constexpr bool operator()(int, const R& s, const R& r) const { return s == r; }
+    template<class R> constexpr bool operator()(int, const Var<R>& s, const R& r) { return s.unify(r); }
   };
 
   struct backtrack {
@@ -209,7 +206,7 @@ struct QueryFragment : QueryFragment_base {
   void eval1(const void *p) override
   {
     const value_type& row = *static_cast<const value_type*>(p);
-    if (detail::unify<query_type, value_type, 0, std::tuple_size<query_type>::value>::exec(selector, row)) {
+    if (for_each_in_tuple(detail::unify1(), selector, row)) {
       next->eval();
     }
     bt.undo();
@@ -217,7 +214,7 @@ struct QueryFragment : QueryFragment_base {
 
   void eval() override
   {
-    for_each_in_tuple(selector, bt); // Record unset vars
+    for_each_in_tuple(bt, selector); // Record unset vars
 
     rel.run(*this);
   }
