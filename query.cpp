@@ -120,10 +120,13 @@ struct res_cb {
 };
 
 class QueryFragment_base;
+class DB;
 struct Relation_base {
+  DB& db;
   std::string name;
-  Relation_base(const std::string& name)
-    : name(name)
+  Relation_base(DB& db, const std::string& name)
+    : db(db)
+    ,name(name)
   {}
   virtual void run(QueryFragment_base& q) = 0;
 };
@@ -261,10 +264,9 @@ Query operator&(QueryFragment_base&& l, QueryFragment_base&& r)
 
 template<typename... Args>
 struct Relation : Relation_base {
+  friend class DB;
   static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value ,  "Cannot have var type");
-  Relation(const std::string& name)
-    : Relation_base(name)
-  {}
+  using Relation_base::Relation_base;
 
   using value_type = std::tuple<Args...>;
   flat::set<value_type> all;
@@ -297,6 +299,16 @@ struct Relation : Relation_base {
   }
 };
 
+class DB {
+public:
+  template<typename... Args>
+  Relation<Args...>
+  table(const std::string& name)
+  {
+    return Relation<Args...>(*this, name);
+  }
+};
+
 void select(Query&& qf)
 {
   std::cout << "SELECT(" << qf << "):\n";
@@ -306,7 +318,8 @@ void select(Query&& qf)
 
 int main()
 {
-  Relation<int, int, int> R("R");
+  DB db;
+  auto R = db.table<int, int, int>("R");
 
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
@@ -314,7 +327,7 @@ int main()
   R.insert(0, 2, 0);
   std::cout << R << "\n"; 
 
-  Relation<std::string, int, std::string> S("S");
+  auto S = db.table<std::string, int, std::string>("S");
   S.insert("Hello", 2, "Hello");
   S.insert("Hello", 2, "Datalog");
   S.insert("LOL", 1, "LOL");
