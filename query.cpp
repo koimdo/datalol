@@ -3,6 +3,8 @@
 #include <set>
 #include <tuple>
 #include <functional>
+#include <map>
+#include <memory>
 
 #include "flat/set"
 #include "flat/span"
@@ -109,15 +111,19 @@ struct Var : public Var_ {
   }
 };
 
-struct res_cb {
-  virtual void eval() = 0;
+struct IPrint {
   virtual void print(std::ostream&) const = 0;
-  friend std::ostream& operator<<(std::ostream& os, const res_cb& cb) { return cb.print(os), os; }
+  friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
+};
+
+struct res_cb : IPrint {
+  virtual void eval() = 0;
   res_cb *next = nullptr;
 };
 
 class DB;
-struct Relation_base {
+struct Relation_base : public IPrint {
+  Relation_base(const Relation_base&) = delete;
   DB& db;
   std::string name;
   Relation_base(DB& db, const std::string& name)
@@ -241,13 +247,12 @@ struct Relation : Relation_base {
   using value_type = T;
   flat::set<value_type> all;
 
-  friend std::ostream& operator<<(std::ostream& os, const Relation& r)
+  void print(std::ostream& os) const override
   {
     os << "{";
-    for (auto const& row : r.all)
-      os << "\n  " << r.name << "(" << print_tuple(row) << ")";
+    for (auto const& row : all)
+      os << "\n  " << name << "(" << print_tuple(row) << ")";
     os <<"\n}";
-    return os;
   }
 
   template<typename... Args>
@@ -278,13 +283,18 @@ QueryFragment<value_type, Selector...>::eval()
 }
 
 class DB {
+  std::map<std::string, std::unique_ptr<Relation_base>> rels;
 public:
   template<typename... Args>
-  Relation<std::tuple<Args...>>
+  Relation<std::tuple<Args...>>&
   table(const std::string& name)
   {
     static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value, "Cannot have var type");
-    return Relation<std::tuple<Args...>>(*this, name);
+    auto rel = std::make_unique<Relation<std::tuple<Args...>>>(*this, name);
+    auto p = rel.get();
+    auto itb = rels.emplace(name, std::move(rel));
+    assert(itb.second);
+    return *p;
   }
 };
 
@@ -305,7 +315,7 @@ void select(Query&& qf)
 int main()
 {
   DB db;
-  auto R = db.table<int, int, int>("R");
+  auto& R = db.table<int, int, int>("R");
 
   R.insert(1, 2, 3);
   R.insert(1, 2, 3);
@@ -313,7 +323,7 @@ int main()
   R.insert(0, 2, 0);
   std::cout << R << "\n"; 
 
-  auto S = db.table<std::string, int, std::string>("S");
+  auto& S = db.table<std::string, int, std::string>("S");
   S.insert("Hello", 2, "Hello");
   S.insert("Hello", 2, "Datalog");
   S.insert("LOL", 1, "LOL");
