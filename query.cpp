@@ -100,6 +100,8 @@ struct Var : public Var_ {
   }
 
   const T *get() const { return static_cast<const T*>(p); }
+  const T *operator->() const { return get(); }
+  const T& operator*() const { return *get(); }
   friend std::ostream& operator<<(std::ostream& os, const Var& v)
   {
     os << "?" << v.name;
@@ -301,9 +303,21 @@ public:
 struct tail : res_cb {
   using fun_t = std::function<void()>;
   fun_t f;
-  tail(const fun_t& f): f(f) {}
+  tail(fun_t&& f): f(f) {}
   void eval() { f(); }
-  void print(std::ostream& os) const { os << "<function>"; }
+  void print(std::ostream& os) const { os << "<tail>"; }
+};
+
+struct guard : res_cb {
+  using fun_t = std::function<bool()>;
+  fun_t f;
+  guard(fun_t&& f): f(f) {}
+  void eval()
+  {
+    // TODO: bind vars in guards?
+    if (f()) next->eval();
+  }
+  void print(std::ostream& os) const { os << "<guard>"; }
 };
 
 void select(Query&& qf)
@@ -345,6 +359,7 @@ int main()
 
   select(R(1, y, 3) &
          S(s, y, s) &
+         guard([&]() { return s->size() > 3; }) &
          tail([&]() { std::cout << y << " " << s << "\n";}));
 
 
