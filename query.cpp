@@ -295,16 +295,18 @@ struct tail : query_fragment {
   void print(std::ostream& os) const { os << "<tail>"; }
 };
 
+#define GUARD(expr) guard([&]() -> bool { return (expr); }, #expr)
 struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;
-  guard(fun_t&& f): f(f) {}
+  std::string desc;
+  guard(fun_t&& f, const std::string& desc = "<guard>"): f(f), desc(desc) {}
   void eval()
   {
     // TODO: bind vars in guards?
     if (f()) next->eval();
   }
-  void print(std::ostream& os) const { os << "<guard>"; }
+  void print(std::ostream& os) const { os << "guard(" << desc << ")"; }
 };
 
 void select(Query&& qf)
@@ -346,7 +348,7 @@ int main()
 
   select(R(1, y, 3) &
          S(s, y, s) &
-         guard([&]() { return s->size() > 3; }) &
+         GUARD(s->size() > 3) &
          tail([&]() { std::cout << y << " " << s << "\n";}));
 
 
