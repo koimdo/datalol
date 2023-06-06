@@ -83,7 +83,12 @@ struct print_tuple {
   }
 };
 
-struct Var_ {
+struct IPrint {
+  virtual void print(std::ostream&) const = 0;
+  friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
+};
+
+struct Var_ : IPrint {
   std::string name;
   Var_(const Var_&) = delete;
   Var_(const std::string& name): name(name) {}
@@ -109,20 +114,14 @@ struct Var : public Var_ {
   const T *get() const { return static_cast<const T*>(p); }
   const T *operator->() const { return get(); }
   const T& operator*() const { return *get(); }
-  friend std::ostream& operator<<(std::ostream& os, const Var& v)
+  void print(std::ostream& os) const override
   {
-    os << "?" << v.name;
-    if (v.p) {
-      const T& t = *v.get();
+    os << "?" << name;
+    if (p) {
+      const T& t = *get();
       os << "=" << t;
     }
-    return os;
   }
-};
-
-struct IPrint {
-  virtual void print(std::ostream&) const = 0;
-  friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
 struct query_fragment : IPrint {
@@ -365,19 +364,29 @@ struct Objects : Collection_base {
 
     Objects<value_type>& rel;
     query_type selector;
+
+    // TODO: move to printing or something
+    std::array<const Var_*, sizeof...(Selector)> vars = {0};
+    int nvars = 0;
     const value_type *last = nullptr;
 
     void print(std::ostream& os) const override
     {
       if (last)
-        os << "<" << *last << "> :";
-      os << "<UNKNOWN>";        // TODO: vars
-      //os << "<" << for_each_in_tupleprint_tuple<query_type>(selector);
+        os << "<" << *last << "> : ";
+      os << "{";
+      for (int i=0; i<nvars; i++)
+        os << ", " << *vars[i];
+      os << "}";
     }
     Match(Objects<value_type>& rel, Selector&&... sels)
       : rel(rel)
       , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
-    {}
+    {
+      detail::backtrack bt(vars.data());
+      for_each_in_tuple(bt, selector);
+      nvars = bt.nvars;
+    }
     void eval() override
     {
       const Var_ *vars[sizeof...(Selector)];
