@@ -1,5 +1,4 @@
 #include <iostream>
-#include <sstream>
 #include <set>
 #include <tuple>
 #include <functional>
@@ -8,18 +7,6 @@
 
 #include "flat/set"
 #include "flat/span"
-
-class format {
-  std::ostringstream s;
-public:
-  template<class T>
-  format& operator<<(const T& t) { s << t; return *this; }
-  // stream manipulators. not caught by the above template overload.
-  format& operator<<(std::ios_base& (*func)(std::ios_base&)) { s << func; return *this; }
-  format& operator<<(std::ios_base& (*func)(std::ios&))      { s << func; return *this; }
-  format& operator<<(std::ios_base& (*func)(std::ostream&))  { s << func; return *this; }
-  operator std::string() const { return s.str(); }
-};
 
 namespace detail
 {
