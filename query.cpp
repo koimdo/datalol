@@ -4,9 +4,18 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <type_traits>
 
 #include "flat/set"
 #include "flat/span"
+
+// FIXME: remove when we are assured we have C++14 (or higher) also in csp
+#ifndef __cpp_lib_make_unique
+namespace std {
+template<typename T, typename... Args>
+unique_ptr<T> make_unique(Args&&... args) { return unique_ptr<T>(new T(forward<Args>(args)...)); }
+}
+#endif
 
 namespace detail
 {
@@ -28,6 +37,17 @@ namespace detail
       return true;
     }
   };
+
+  template< bool B >
+  using bool_constant = std::integral_constant<bool, B>;
+
+  template<bool...> struct all : bool_constant<true> {};
+  template<bool B, bool... Rest>
+  struct all<B, Rest...> : bool_constant<B && all<Rest...>::value> {};
+
+  template<bool...> struct any : bool_constant<false> {};
+  template<bool B, bool... Rest>
+  struct any<B, Rest...> : bool_constant<B || any<Rest...>::value> {};
 } // namespace detail
 
 template<typename F, typename T0, typename... Ts>
@@ -35,7 +55,7 @@ bool
 for_each_in_tuple(F&& f, const T0& t0, const Ts&... ts)
 {
   static constexpr size_t arity = std::tuple_size<T0>::value;
-  static_assert(std::conjunction<std::bool_constant<arity == std::tuple_size<Ts>::value>...>::value, "All tuples myust have the same arity");
+  static_assert(detail::all<(arity == std::tuple_size<Ts>::value)...>::value, "All tuples must have the same arity");
   return detail::for_each<0, arity, F, T0, Ts...>::run(std::forward<F>(f), t0, ts...);
 }
 
@@ -122,9 +142,9 @@ struct Relation_base : public IPrint {
 };
 
 namespace detail {
-  template<class S, class R> struct check_arg : std::bool_constant<false> {};
-  template<class R> struct check_arg<R,             R > : std::bool_constant<true> {};
-  template<class R> struct check_arg<Var<R>&, const R&> : std::bool_constant<true> {};
+  template<class S, class R> struct check_arg           : bool_constant<false> {};
+  template<class R> struct check_arg<R,             R > : bool_constant<true> {};
+  template<class R> struct check_arg<Var<R>&, const R&> : bool_constant<true> {};
 
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
@@ -136,7 +156,7 @@ namespace detail {
   };
 
   template<typename Sel, typename Row, size_t size>
-  struct check_query_t<Sel, Row, size, size> : std::bool_constant<true> {};
+  struct check_query_t<Sel, Row, size, size> : bool_constant<true> {};
 
   struct unify1 {
     template<class R> constexpr bool operator()(int, const R& s, const R& r) const { return s == r; }
@@ -186,7 +206,7 @@ struct Match : Match_base<value_type> {
 
   query_type selector;
 
-  void print(std::ostream& os) const override { os << print_tuple(selector); }
+  void print(std::ostream& os) const override { os << print_tuple<query_type>(selector); }
   Match(Relation<value_type>& rel, Selector&&... sels)
     : Match_base<value_type>(rel)
     , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
@@ -240,7 +260,7 @@ struct Relation : Relation_base {
   {
     os << "{";
     for (auto const& row : all)
-      os << "\n  " << name << "(" << print_tuple(row) << ")";
+      os << "\n  " << name << "(" << print_tuple<value_type>(row) << ")";
     os <<"\n}";
   }
 
@@ -273,17 +293,30 @@ Match<value_type, Selector...>::eval()
 
 class DB {
   std::map<std::string, std::unique_ptr<Relation_base>> rels;
+
+  template<class Rel>
+  Rel& make_relation(const std::string& name)
+  {
+    auto rel = std::make_unique<Rel>(*this, name);
+    auto p = rel.get();
+    auto itb = rels.emplace(name, std::move(rel));
+    assert(itb.second);
+    return *p;
+  }
+
 public:
   template<typename... Args>
   Relation<std::tuple<Args...>>&
   table(const std::string& name)
   {
-    static_assert(!std::disjunction<std::is_base_of<Var_, Args>...>::value, "Cannot have var type");
-    auto rel = std::make_unique<Relation<std::tuple<Args...>>>(*this, name);
-    auto p = rel.get();
-    auto itb = rels.emplace(name, std::move(rel));
-    assert(itb.second);
-    return *p;
+    static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
+    return make_relation<Relation<std::tuple<Args...>>>(name);
+  }
+
+  template<typename T>
+  Relation<T>&
+  objects(const std::string& name) {
+    return make_relation<Relation<T>>(name);
   }
 };
 
