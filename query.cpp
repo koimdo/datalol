@@ -118,9 +118,9 @@ struct IPrint {
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
-struct res_cb : IPrint {
+struct query_fragment : IPrint {
   virtual void eval() = 0;
-  res_cb *next = nullptr;
+  query_fragment *next = nullptr;
 };
 
 class DB;
@@ -181,18 +181,18 @@ namespace detail {
 
 template<typename> struct Relation;
 template<typename value_type>
-struct QueryFragment_base : res_cb {
+struct Match_base : query_fragment {
   using relation_t = Relation<value_type>;
   relation_t& rel;
-  QueryFragment_base(relation_t& rel)
+  Match_base(relation_t& rel)
     : rel(rel)
   {}
 };
 
 template<typename value_type, typename... Selector>
-struct QueryFragment : QueryFragment_base<value_type> {
+struct Match : Match_base<value_type> {
   using query_type = std::tuple<Selector...>;
-  using QueryFragment_base<value_type>::relation_t;
+  using Match_base<value_type>::relation_t;
   static constexpr int arity = std::tuple_size<query_type>::value;
   static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
   static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
@@ -200,24 +200,24 @@ struct QueryFragment : QueryFragment_base<value_type> {
   query_type selector;
 
   void print(std::ostream& os) const override { os << print_tuple(selector); }
-  QueryFragment(Relation<value_type>& rel, Selector&&... sels)
-    : QueryFragment_base<value_type>(rel)
+  Match(Relation<value_type>& rel, Selector&&... sels)
+    : Match_base<value_type>(rel)
     , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
   {}
   void eval() override;
 };
 
-struct Query : res_cb {
+struct Query : query_fragment {
   Query(const Query&) = delete;
-  std::vector<res_cb*> qfs;
-  void append(const res_cb& qf)
+  std::vector<query_fragment*> qfs;
+  void append(const query_fragment& qf)
   {
-    res_cb *cqf = const_cast<res_cb*>(&qf);
+    query_fragment *cqf = const_cast<query_fragment*>(&qf);
     if (qfs.size())
       qfs.back()->next = cqf;
     qfs.emplace_back(cqf);
   }
-  Query(const res_cb& qf) { append(qf); }
+  Query(const query_fragment& qf) { append(qf); }
 
   void print(std::ostream& os) const override
   {
@@ -239,7 +239,7 @@ struct Query : res_cb {
   }
 };
 
-Query&& operator&(Query&& l, const res_cb& r) { return l.append(r), std::move(l); }
+Query&& operator&(Query&& l, const query_fragment& r) { return l.append(r), std::move(l); }
 
 template<typename T>
 struct Relation : Relation_base {
@@ -263,16 +263,16 @@ struct Relation : Relation_base {
   }
 
   template<typename... SelectArgs>
-  QueryFragment<value_type, SelectArgs...>
+  Match<value_type, SelectArgs...>
   operator()(SelectArgs&&... args) {
-    return QueryFragment<value_type, SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+    return Match<value_type, SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
   }
 };
 
 
 template<typename value_type, typename... Selector>
 void
-QueryFragment<value_type, Selector...>::eval()
+Match<value_type, Selector...>::eval()
 {
   const Var_ *vars[sizeof...(Selector)];
   detail::backtrack bt(vars);      // Cannot have more unset vars than query size
@@ -300,7 +300,7 @@ public:
   }
 };
 
-struct tail : res_cb {
+struct tail : query_fragment {
   using fun_t = std::function<void()>;
   fun_t f;
   tail(fun_t&& f): f(f) {}
@@ -308,7 +308,7 @@ struct tail : res_cb {
   void print(std::ostream& os) const { os << "<tail>"; }
 };
 
-struct guard : res_cb {
+struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;
   guard(fun_t&& f): f(f) {}
