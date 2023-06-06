@@ -148,8 +148,8 @@ namespace detail {
 
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
-    using SElem = decltype(std::get<i>(*(const Sel*)nullptr));
-    using RElem = decltype(std::get<i>(*(const Row*)nullptr));
+    using SElem = decltype(std::get<i>(std::declval<const Sel&>()));
+    using RElem = decltype(std::get<i>(std::declval<const Row&>()));
     static constexpr bool check1 = check_arg<SElem, RElem>::value;
     static_assert(check1, "Type mismatch");
     static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
@@ -281,6 +281,122 @@ struct Relation : Collection_base {
   }
 };
 
+
+template<typename T>
+struct Objects : Collection_base {
+  friend class DB;
+  using Collection_base::Collection_base;
+
+  using value_type = T;
+  class cmp {
+    bool operator()(const std::unique_ptr<T>& l, const std::unique_ptr<T>& r)
+    {
+      return *l < *r;
+    }
+  };
+  flat::set<std::unique_ptr<value_type>> all;    // FIXME: node_set
+
+  void print(std::ostream& os) const override
+  {
+    os << "{";
+    for (auto const& row : all)
+      os << "\n  " << name << "(" << *row << ")"; // FIXME: node_set
+    os <<"\n}";
+  }
+
+  template<typename... Args>
+  void insert(Args&&... args) {
+    all.emplace(std::make_unique<value_type>(std::forward<Args>(args)...));
+  }
+
+  struct match_elem {};
+
+  template<class M>
+  struct data_base : match_elem {
+    M T::*m;
+    data_base(M T::*m): m(m) {}
+    const M& get(const T& t) const { return t.*m; }
+  };
+
+  template<class M, class V>
+  struct data_eq : data_base<M> {
+    const V& v;
+    data_eq(M T::*m, const V& v): data_base<M>(m), v(v) {}
+    bool apply(const T& t) const { return this->get(t) == v; }
+  };
+
+  template<class M>
+  struct data_bind : data_base<M> {
+    const Var<M>& v;
+    data_bind(M T::*m, const Var<M>& v): data_base<M>(m), v(v) {}
+    bool apply(const T& t) const { return v.unify(this->get(t)); }
+  };
+
+  template<class M>
+  struct match_data_factory {
+    M T::* m;
+    constexpr match_data_factory(M T::*m): m(m) {}
+
+    data_bind<M> operator==(const Var<M>& v) { return data_bind<M>(m, v); }
+
+    template<class V>
+    data_eq<M, V> operator==(const V& v) { return data_eq<M, V>(m, v); }
+  };
+
+  template<class M>
+  match_data_factory<M> operator[](M T::*p) { return p; }
+
+  struct apply_sels {
+    apply_sels(const value_type& t): t(t) {}
+    const value_type& t;
+    template<class S>
+    bool operator()(int, const S& sel) { return sel.apply(t); }
+  };
+
+  template<typename... Selector>
+  struct Match : Match_base<value_type> {
+    using query_type = std::tuple<Selector...>;
+    static_assert(detail::all<std::is_base_of<match_elem, Selector>::value...>::value, "Proper selectors");
+
+    Objects<value_type>& rel;
+    query_type selector;
+    const value_type *last = nullptr;
+
+    void print(std::ostream& os) const override
+    {
+      if (last)
+        os << "<" << *last << "> :";
+      os << "<UNKNOWN>";        // TODO: vars
+      //os << "<" << for_each_in_tupleprint_tuple<query_type>(selector);
+    }
+    Match(Objects<value_type>& rel, Selector&&... sels)
+      : rel(rel)
+      , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
+    {}
+    void eval() override
+    {
+      const Var_ *vars[sizeof...(Selector)];
+      detail::backtrack bt(vars);      // Cannot have more unset vars than query size
+      for_each_in_tuple(bt, selector); // Record unset vars
+      for (auto const& urow : this->rel.all) {
+        const value_type& row = *urow;
+        if (for_each_in_tuple(apply_sels(row), selector)) {
+          this->last = &row;
+          this->next->eval();
+        }
+        bt.undo();
+      }
+    }
+  };
+
+  template<typename... SelectArgs>
+  Match<SelectArgs...>
+  operator()(SelectArgs&&... args) {
+    return Match<SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+  }
+};
+
+
 class DB {
   std::map<std::string, std::unique_ptr<Collection_base>> rels;
 
@@ -304,9 +420,9 @@ public:
   }
 
   template<typename T>
-  Relation<T>&
+  Objects<T>&
   objects(const std::string& name) {
-    return make_relation<Relation<T>>(name);
+    return make_relation<Objects<T>>(name);
   }
 };
 
@@ -337,6 +453,22 @@ void select(Query&& qf)
   std::cout << "SELECT(" << qf << "):\n";
   qf.run();
 }
+
+struct A {
+  int i, j, k;
+  A(int i, int j, int k): i(i), j(j), k(k) {}
+  A(int i, int j): A(i, j, i*j) {}
+  bool lolz(int ofs) const { return k >= std::max(i, j + ofs); }
+  int get_i() const { return i; }
+  const int& get_j() const { return j; }
+  friend std::ostream& operator<<(std::ostream& os, const A& a) {
+    return os << "A{i=" << a.i << ", j=" << a.j << ", k=" << a.k << "}";
+  }
+  bool operator<(const A& o) const
+  {
+    return std::make_tuple(i, j, k) < std::make_tuple(o.i, o.j, o.k);
+  }
+};
 
 int main()
 {
@@ -369,6 +501,15 @@ int main()
   Var<std::string> s("s");
   select(S(s, y, s));
 
+  auto& As = db.objects<A>("AS");
+
+  As.insert(0, 1, 2);
+  As.insert(1, 2, 3);
+  As.insert(1, 1, 3);
+  As.insert(1, 8);
+  std::cout << As << "\n";
+
+  select(As(As[&A::i] == 1, As[&A::k] == 3, As[&A::j] == x));
   select(R(1, y, 3) &
          S(s, y, s) &
          GUARD(s->size() > 3) &
