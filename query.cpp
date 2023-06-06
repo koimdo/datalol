@@ -131,11 +131,11 @@ struct query_fragment : IPrint {
 };
 
 class DB;
-struct Relation_base : public IPrint {
-  Relation_base(const Relation_base&) = delete;
+struct Collection_base : public IPrint {
+  Collection_base(const Collection_base&) = delete;
   DB& db;
   std::string name;
-  Relation_base(DB& db, const std::string& name)
+  Collection_base(DB& db, const std::string& name)
     : db(db)
     , name(name)
   {}
@@ -186,32 +186,9 @@ namespace detail {
   };
 }
 
-template<typename> struct Relation;
 template<typename value_type>
 struct Match_base : query_fragment {
-  using relation_t = Relation<value_type>;
-  relation_t& rel;
-  Match_base(relation_t& rel)
-    : rel(rel)
-  {}
-};
-
-template<typename value_type, typename... Selector>
-struct Match : Match_base<value_type> {
-  using query_type = std::tuple<Selector...>;
-  using Match_base<value_type>::relation_t;
-  static constexpr int arity = std::tuple_size<query_type>::value;
-  static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
-  static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
-
-  query_type selector;
-
-  void print(std::ostream& os) const override { os << print_tuple<query_type>(selector); }
-  Match(Relation<value_type>& rel, Selector&&... sels)
-    : Match_base<value_type>(rel)
-    , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
-  {}
-  void eval() override;
+  // TODO: any positive content for Match_base. perhaps list of bound vars?
 };
 
 struct Query : query_fragment {
@@ -249,9 +226,9 @@ struct Query : query_fragment {
 Query&& operator&(Query&& l, const query_fragment& r) { return l.append(r), std::move(l); }
 
 template<typename T>
-struct Relation : Relation_base {
+struct Relation : Collection_base {
   friend class DB;
-  using Relation_base::Relation_base;
+  using Collection_base::Collection_base;
 
   using value_type = T;
   flat::set<value_type> all;
@@ -269,30 +246,43 @@ struct Relation : Relation_base {
     all.emplace(std::forward<Args>(args)...);
   }
 
+  template<typename... Selector>
+  struct Match : Match_base<value_type> {
+    using query_type = std::tuple<Selector...>;
+    static constexpr int arity = std::tuple_size<query_type>::value;
+    static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
+    static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
+
+    Relation<value_type>& rel;
+    query_type selector;
+
+    void print(std::ostream& os) const override { os << print_tuple<query_type>(selector); }
+    Match(Relation<value_type>& rel, Selector&&... sels)
+      : rel(rel)
+      , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
+    {}
+    void eval() override
+    {
+      const Var_ *vars[sizeof...(Selector)];
+      detail::backtrack bt(vars);      // Cannot have more unset vars than query size
+      for_each_in_tuple(bt, selector); // Record unset vars
+      for (auto const& row : this->rel.all) {
+        if (for_each_in_tuple(detail::unify1(), selector, row))
+          this->next->eval();
+        bt.undo();
+      }
+    }
+  };
+
   template<typename... SelectArgs>
-  Match<value_type, SelectArgs...>
+  Match<SelectArgs...>
   operator()(SelectArgs&&... args) {
-    return Match<value_type, SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+    return Match<SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
   }
 };
 
-
-template<typename value_type, typename... Selector>
-void
-Match<value_type, Selector...>::eval()
-{
-  const Var_ *vars[sizeof...(Selector)];
-  detail::backtrack bt(vars);      // Cannot have more unset vars than query size
-  for_each_in_tuple(bt, selector); // Record unset vars
-  for (auto const& row : this->rel.all) {
-    if (for_each_in_tuple(detail::unify1(), selector, row))
-      this->next->eval();
-    bt.undo();
-  }
-}
-
 class DB {
-  std::map<std::string, std::unique_ptr<Relation_base>> rels;
+  std::map<std::string, std::unique_ptr<Collection_base>> rels;
 
   template<class Rel>
   Rel& make_relation(const std::string& name)
