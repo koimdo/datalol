@@ -163,6 +163,9 @@ namespace detail {
     template<class R> constexpr bool operator()(int, const Var<R>& s, const R& r) { return s.unify(r); }
   };
 
+  template<class T> struct get_var { static const Var_* get(const T&) { return nullptr; } };
+  template<class T> struct get_var<Var<T>> { static const Var_* get(const Var<T>& v) { return &v; } };
+
   struct backtrack {
     const Var_ **vars;
     int nvars = 0;
@@ -170,15 +173,12 @@ namespace detail {
     backtrack(const Var_ **vars): vars(vars) {}
 
     template<typename T>
-    bool operator()(int, Var<T>& v)
-    {
-      if (v.is_unset())
-        vars[nvars++] = &v;
+    bool operator()(int, const T& t) {
+      const Var_ *v = get_var<T>::get(t);
+      if (v && v->is_unset())
+        vars[nvars++] = v;
       return true;
     }
-
-    template<typename T>
-    bool operator()(int, const T&) { return true; }
     void undo() {
       for (int i=0; i<nvars; i++)
         vars[i]->zap();
@@ -281,7 +281,46 @@ struct Relation : Collection_base {
   }
 };
 
+namespace detail {
+  template<class T>
+  struct match_elem {};
 
+  template<class T, class M>
+  struct data_base : match_elem<T> {
+    M T::*m;
+    data_base(M T::*m): m(m) {}
+    const M& get(const T& t) const { return t.*m; }
+  };
+
+  template<class T, class M, class V>
+  struct data_eq : data_base<T, M> {
+    const V& v;
+    data_eq(M T::*m, const V& v): data_base<T, M>(m), v(v) {}
+    bool apply(const T& t) const { return this->get(t) == v; }
+  };
+
+  template<class T, class M>
+  struct data_bind : data_base<T, M> {
+    const Var<M>& v;
+    data_bind(M T::*m, const Var<M>& v): data_base<T, M>(m), v(v) {}
+    bool apply(const T& t) const { return v.unify(this->get(t)); }
+  };
+
+  template<class T, class M>
+  struct get_var<data_bind<T, M>> { static const Var_* get(const data_bind<T, M>& d) { return &d.v; } };
+
+  template<class T, class M>
+  struct match_data_factory {
+    M T::* m;
+    constexpr match_data_factory(M T::*m): m(m) {}
+
+    data_bind<T, M> operator==(const Var<M>& v) { return data_bind<T, M>(m, v); }
+
+    template<class V>
+    data_eq<T, M, V> operator==(const V& v) { return data_eq<T, M, V>(m, v); }
+  };
+
+}
 template<typename T>
 struct Objects : Collection_base {
   friend class DB;
@@ -309,42 +348,8 @@ struct Objects : Collection_base {
     all.emplace(std::make_unique<value_type>(std::forward<Args>(args)...));
   }
 
-  struct match_elem {};
-
   template<class M>
-  struct data_base : match_elem {
-    M T::*m;
-    data_base(M T::*m): m(m) {}
-    const M& get(const T& t) const { return t.*m; }
-  };
-
-  template<class M, class V>
-  struct data_eq : data_base<M> {
-    const V& v;
-    data_eq(M T::*m, const V& v): data_base<M>(m), v(v) {}
-    bool apply(const T& t) const { return this->get(t) == v; }
-  };
-
-  template<class M>
-  struct data_bind : data_base<M> {
-    const Var<M>& v;
-    data_bind(M T::*m, const Var<M>& v): data_base<M>(m), v(v) {}
-    bool apply(const T& t) const { return v.unify(this->get(t)); }
-  };
-
-  template<class M>
-  struct match_data_factory {
-    M T::* m;
-    constexpr match_data_factory(M T::*m): m(m) {}
-
-    data_bind<M> operator==(const Var<M>& v) { return data_bind<M>(m, v); }
-
-    template<class V>
-    data_eq<M, V> operator==(const V& v) { return data_eq<M, V>(m, v); }
-  };
-
-  template<class M>
-  match_data_factory<M> operator[](M T::*p) { return p; }
+  detail::match_data_factory<T, M> operator[](M T::*p) { return p; }
 
   struct apply_sels {
     apply_sels(const value_type& t): t(t) {}
@@ -356,7 +361,7 @@ struct Objects : Collection_base {
   template<typename... Selector>
   struct Match : Match_base<value_type> {
     using query_type = std::tuple<Selector...>;
-    static_assert(detail::all<std::is_base_of<match_elem, Selector>::value...>::value, "Proper selectors");
+    static_assert(detail::all<std::is_base_of<detail::match_elem<T>, Selector>::value...>::value, "Proper selectors");
 
     Objects<value_type>& rel;
     query_type selector;
