@@ -6,6 +6,8 @@
 #include <memory>
 #include <type_traits>
 
+#include <cstddef>
+
 #include "flat/set"
 #include "flat/span"
 
@@ -88,14 +90,60 @@ struct IPrint {
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
+struct cow_buf {
+  static constexpr size_t MAX_SIZE = 1024;
+  const void *p = nullptr;
+  void (*destroy)(const void *) = nullptr;
+
+  // Assumption: the held data is never aligned wider than std::align_t
+  alignas(std::max_align_t) unsigned char buf[MAX_SIZE];
+
+  constexpr bool owned() const noexcept { return p == buf; }
+
+  constexpr explicit operator bool() const noexcept { return p; }
+
+  ~cow_buf() { clear();}
+  void clear()
+  {
+    if (!p)
+      return;
+    if (destroy)
+      (destroy)(p);
+
+    p = nullptr;
+    destroy = nullptr;
+  }
+
+  template<class T>
+  void assign(const T& t)
+  {
+    clear();
+    p = &t;
+  }
+
+  template<class T>
+  void assign(T&& t)
+  {
+    // FIXME: wider alignment?
+    clear();
+    ::new (buf) T(std::forward<T>(t));
+    p = buf;
+
+    if (!std::is_trivially_destructible<T>::value)
+      destroy = [](const void *p) { static_cast<const T*>(p)->~T(); };
+  }
+
+  constexpr const void *get() const noexcept { return p; }
+};
+
 struct Var_ : IPrint {
   std::string name;
   Var_(const Var_&) = delete;
   Var_(const std::string& name): name(name) {}
   bool operator<(const Var_& o) const { return name < o.name; }
 
-  mutable const void *p = nullptr; // FIXME: maybe std::optional<T> or similar. For now we have address persistence.
-  void zap() const { p = nullptr; }
+  mutable cow_buf p;
+  void zap() const { p.clear(); }
   bool is_unset() const { return !p; }
 };
 
@@ -106,12 +154,20 @@ struct Var : public Var_ {
   bool unify(const T& t) const
   {
     if (p)
-      return t == *get();
-    p = &t;
+      return *get() == t;
+    p.assign(t);
     return true;
   }
 
-  const T *get() const { return static_cast<const T*>(p); }
+  bool unify(T&& t) const
+  {
+    if (p)
+      return *get() == t;
+    p.assign(std::move(t));
+    return true;
+  }
+
+  const T *get() const { return static_cast<const T*>(p.get()); }
   const T *operator->() const { return get(); }
   const T& operator*() const { return *get(); }
   void print(std::ostream& os) const override
