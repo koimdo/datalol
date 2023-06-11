@@ -104,8 +104,7 @@ struct Var : public Var_ {
   }
 };
 
-struct query_fragment : IPrint {
-  virtual void eval() = 0;
+struct query_fragment : Rule::Body {
   query_fragment *next = nullptr;
 };
 
@@ -170,39 +169,34 @@ struct Match_base : query_fragment {
   // TODO: any positive content for Match_base. perhaps list of bound vars?
 };
 
-struct Query : query_fragment {
-  Query(const Query&) = delete;
-  std::vector<query_fragment*> qfs;
-  void append(const query_fragment& qf)
+struct DQuery : Query, query_fragment {
+  using Query::Query;
+  void configure()
   {
-    query_fragment *cqf = const_cast<query_fragment*>(&qf);
-    if (qfs.size())
-      qfs.back()->next = cqf;
-    qfs.emplace_back(cqf);
+    for (auto& r : rules) {
+      assert(!r.get_body().empty());
+      assert(r.get_head());
+      query_fragment *next = this;
+      auto body = r.get_body();
+      for (int i=body.size()-1; i >= 0; i--) {
+        query_fragment *elem = static_cast<query_fragment*>(body[i]);
+        elem->next = next;
+        next = elem;
+      }
+    }
   }
-  Query(const query_fragment& qf) { append(qf); }
-
-  void print(std::ostream& os) const override
-  {
-    os << "{";
-    for (auto const& qf : qfs)
-      os << " " << *qf;
-    os << " }";
-  }
-
   void run() {
-    assert(qfs.size());
-    qfs.back()->next = this;
-    qfs[0]->eval();
+    for (auto& r : rules) {
+      r.get_body()[0]->eval_body(r);
+    }
   }
 
-  void eval() override {
-    assert(!next);
-    std::cout << *this << "\n";
+  void eval_body(Rule& r) override {
+    r.get_head()->eval_head(r);
   }
+
+  void print(std::ostream& os) const override { Query::print(os); }
 };
-
-Query&& operator&(Query&& l, const query_fragment& r) { return l.append(r), std::move(l); }
 
 template<typename T>
 struct Relation : Collection_base {
@@ -240,23 +234,23 @@ struct Relation : Collection_base {
       : rel(rel)
       , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
     {}
-    void eval() override
+    void eval_body(Rule& r) override
     {
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
       for_each_in_tuple(bt, selector); // Record unset vars
       for (auto const& row : this->rel.all) {
         if (for_each_in_tuple(detail::unify1(), selector, row))
-          this->next->eval();
+          this->next->eval_body(r);
         bt.undo();
       }
     }
   };
 
   template<typename... SelectArgs>
-  Match<SelectArgs...>
+  Rule::ubody
   operator()(SelectArgs&&... args) {
-    return Match<SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+    return std::make_unique<Match<SelectArgs...>>(*this, std::forward<SelectArgs>(args)...);
   }
 };
 
@@ -367,7 +361,7 @@ struct Objects : Collection_base {
       for_each_in_tuple(bt, selector);
       nvars = bt.nvars;
     }
-    void eval() override
+    void eval_body(Rule& r) override
     {
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
@@ -376,7 +370,7 @@ struct Objects : Collection_base {
         const value_type& row = *urow;
         if (for_each_in_tuple(apply_sels(row), selector)) {
           this->last = &row;
-          this->next->eval();
+          this->next->eval_body(r);
         }
         bt.undo();
       }
@@ -420,31 +414,35 @@ public:
   }
 };
 
-struct tail : query_fragment {
+
+#define HEAD_WITH(expr) std::make_unique<head>(([&]() -> void { (void)(expr); }), #expr)
+struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
-  tail(fun_t&& f): f(f) {}
-  void eval() { f(); }
-  void print(std::ostream& os) const { os << "<tail>"; }
+  std::string desc;
+  head(fun_t&& f, const std::string& desc = "<head>"): f(f), desc(desc) {}
+  void eval_head(Rule&) override { f(); }
+  void print(std::ostream& os) const { os << "head(" << desc << ")"; }
 };
 
-#define GUARD(expr) guard([&]() -> bool { return (expr); }, #expr)
+#define GUARD(expr) std::make_unique<guard>(([&]() -> bool { return (expr); }), #expr)
 struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
   guard(fun_t&& f, const std::string& desc = "<guard>"): f(f), desc(desc) {}
-  void eval()
+  void eval_body(Rule& r) override
   {
     // TODO: bind vars in guards?
-    if (f()) next->eval();
+    if (f()) next->eval_body(r);
   }
   void print(std::ostream& os) const { os << "guard(" << desc << ")"; }
 };
 
-void select(Query&& qf)
+void select(DQuery&& qf)
 {
-  std::cout << "SELECT(" << qf << "):\n";
+  std::cout << "SELECT(" << (const Query&)qf << "):\n";
+  qf.configure();
   qf.run();
 }
 
@@ -463,6 +461,21 @@ struct A {
     return std::make_tuple(i, j, k) < std::make_tuple(o.i, o.j, o.k);
   }
 };
+
+struct raw_result : Rule::Head {
+  void eval_head(Rule& r) override
+  {
+    std::cout << r << "\n";
+  }
+  void print(std::ostream& os) const override
+  {
+    os << "<debug print>";
+  }
+};
+
+static
+Rule::uhead
+print_raw() { return std::make_unique<raw_result>(); }
 
 int main()
 {
@@ -486,14 +499,14 @@ int main()
   Var<int> x("x");
   Var<int> y("y");
 
-  select(R(1, 2, 3));
-  select(R(1, x, y));
-  select(R(1, x, x));
-  select(R(1, x, 0));
-  select(R(x, x, 3));
+  select(DQuery{{print_raw() << R(1, 2, 3)}});
+  select(DQuery{{print_raw() << R(1, x, y)}});
+  select(DQuery{{print_raw() << R(1, x, x)}});
+  select(DQuery{{print_raw() << R(1, x, 0)}});
+  select(DQuery{{print_raw() << R(x, x, 3)}});
 
   Var<std::string> s("s");
-  select(S(s, y, s));
+  select(DQuery{{print_raw() << S(s, y, s)}});
 
   auto& As = db.objects<A>("AS");
 
@@ -504,10 +517,12 @@ int main()
   std::cout << As << "\n";
 
   select(As(As[&A::i] == 1, As[&A::k] == 3, As[&A::j] == x));
-  select(R(1, y, 3) &
-         S(s, y, s) &
-         GUARD(s->size() > 3) &
-         tail([&]() { std::cout << y << " " << s << "\n";}));
 
 
+  select(DQuery{{
+        HEAD_WITH(std::cout << y << " " << s << "\n") <<
+        R(1, y, 3) &
+        S(s, y, s) &
+        GUARD(s->size() > 3)
+      }});
 }

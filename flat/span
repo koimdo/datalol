@@ -27,6 +27,7 @@ class span {
   const T *end_ = nullptr;
 public:
   constexpr span(const T *beg, const T *end) noexcept : beg_(beg), end_(end) {}
+  constexpr span(const T *beg, std::size_t size) noexcept : beg_(beg), end_(beg+size) {}
   using element_type = T;
   using value_type = typename std::remove_cv<T>::type;
   using size_type = std::size_t;
