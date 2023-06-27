@@ -52,6 +52,6 @@ void Query::print(std::ostream& os) const
   os << "{";
   size_t i=0;
   for (auto const& r : rules)
-    os << r << (rules.size() == ++i ? "" : ",") << "\n";
+    os << r << (rules.size() == ++i ? "" : ",\n");
   os <<"}";
 }

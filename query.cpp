@@ -14,7 +14,7 @@
 #include "syntax.h"
 #include "tuple_util.h"
 
-struct cow_buf {
+class cow_buf {
   static constexpr size_t MAX_SIZE = 1024;
   const void *p = nullptr;
   void (*destroy)(const void *) = nullptr;
@@ -22,8 +22,7 @@ struct cow_buf {
   // Assumption: the held data is never aligned wider than std::align_t
   alignas(std::max_align_t) unsigned char buf[MAX_SIZE];
 
-  constexpr bool owned() const noexcept { return p == buf; }
-
+public:
   constexpr explicit operator bool() const noexcept { return p; }
 
   ~cow_buf() { clear();}
@@ -60,19 +59,22 @@ struct cow_buf {
   constexpr const void *get() const noexcept { return p; }
 };
 
-struct Var_ : IPrint {
+class Var_ : public IPrint {
+protected:
+  mutable cow_buf p;
   std::string name;
+
+public:
   Var_(const Var_&) = delete;
   Var_(const std::string& name): name(name) {}
   bool operator<(const Var_& o) const { return name < o.name; }
-
-  mutable cow_buf p;
   void zap() const { p.clear(); }
   bool is_unset() const { return !p; }
 };
 
 template<class T>
-struct Var : public Var_ {
+class Var : public Var_ {
+public:
   using Var_::Var_;
 
   bool unify(const T& t) const
@@ -109,10 +111,12 @@ struct query_fragment : Rule::Body {
 };
 
 class DB;
-struct Collection_base : public IPrint {
-  Collection_base(const Collection_base&) = delete;
+class Collection_base : public IPrint {
+protected:
   DB& db;
   std::string name;
+public:
+  Collection_base(const Collection_base&) = delete;
   Collection_base(DB& db, const std::string& name)
     : db(db)
     , name(name)
@@ -221,6 +225,7 @@ struct Relation : Collection_base {
 
   template<typename... Selector>
   struct Match : Match_base<value_type> {
+    Match(const Match&) = default;
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
     static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
@@ -516,13 +521,18 @@ int main()
   As.insert(1, 8);
   std::cout << As << "\n";
 
-  select(As(As[&A::i] == 1, As[&A::k] == 3, As[&A::j] == x));
-
-
+  // select(As( $(&A::i) == 1, $(&A::k) == 3, $(&A::j) == x));
   select(DQuery{{
         HEAD_WITH(std::cout << y << " " << s << "\n") <<
         R(1, y, 3) &
         S(s, y, s) &
         GUARD(s->size() > 3)
       }});
+
+  // select(DQuery{{
+  //       Reachable(x, y) << E(x, y),
+  //       Reachable(x, z) << Reachable(x, y) & E(y, z)
+  //     }});
+
+  
 }
