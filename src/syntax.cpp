@@ -1,6 +1,6 @@
 #include <cassert>
 
-#include "syntax.h"
+#include <datalol/syntax.h>
 
 // RULE ::= HEAD << body (& body)*
 // (fact rules are not allowed)

@@ -11,8 +11,8 @@
 #include "flat/set"
 #include "flat/span"
 
-#include "syntax.h"
-#include "tuple_util.h"
+#include <datalol/syntax.h>
+#include <datalol/tuple_util.h>
 
 class cow_buf {
   static constexpr size_t MAX_SIZE = 1024;
