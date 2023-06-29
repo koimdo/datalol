@@ -12,11 +12,19 @@ struct IPrint {
   virtual ~IPrint() {}
 };
 
+class Collection_base;
 class Rule : public IPrint {
 public:
   Rule(Rule&&) = default;
-  struct Head : IPrint { virtual void eval_head(Rule&) = 0; };
-  struct Body : IPrint { virtual void eval_body(Rule&) = 0; };
+  struct Head : IPrint {
+    virtual void eval_head(Rule&) = 0;
+    virtual size_t post_head(Rule&) { return 0; };
+    virtual Collection_base *collection() { return nullptr; }
+  };
+  struct Body : IPrint {
+    virtual void eval_body(Rule&, size_t) = 0;
+    virtual Collection_base *collection() { return nullptr; }
+  };
 
   using uhead = std::unique_ptr<Head>;
   using ubody = std::unique_ptr<Body>;
@@ -26,6 +34,9 @@ public:
 
   Head *get_head() { return head.get(); }
   flat::span<Body*> get_body() { return { reinterpret_cast<Body**>(body.data()), body.size() }; }
+  size_t size() const { return body.size(); }
+
+  size_t seminaive_current;     // FIXME: finer choice of Delta'd relation
 private:
   void append(ubody b);
   void print(std::ostream& os) const override;

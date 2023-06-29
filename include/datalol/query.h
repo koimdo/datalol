@@ -107,6 +107,7 @@ public:
     : db(db)
     , name(name)
   {}
+  const std::string& get_name() const noexcept { return name; }
 };
 
 namespace detail {
@@ -170,8 +171,17 @@ struct DQuery : Query, query_fragment {
   using Query::Query;
   void configure();
   void run();
-  void eval_body(Rule& r) override;
+  void eval_body(Rule& r, size_t) override;
   void print(std::ostream& os) const override;
+  struct cmp {
+    bool operator()(Collection_base *l, Collection_base *r) const
+    {
+      return l->get_name() < r->get_name();
+    }
+  };
+
+  void add_merge(Collection_base *c);
+  flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
 };
 
 // TODO: despecialize relations?
@@ -183,6 +193,21 @@ struct Relation : Collection_base {
 
   using value_type = T;
   flat::set<value_type> all;
+  flat::set<value_type> delta;
+
+  void merge()
+  {
+    if (delta.empty())
+      return;
+
+    if (all.empty()) {
+      all = std::move(delta);
+      return;
+    }
+
+    all = all.set_union(delta);
+    delta.clear();
+  }
 
   void print(std::ostream& os) const override
   {
@@ -207,31 +232,42 @@ struct Relation : Collection_base {
 
     Relation<value_type>& rel;
     query_type selector;
+    flat::set<value_type> Delta;
 
     void print(std::ostream& os) const override
     {
       os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
     }
 
+    Collection_base *collection() { return &rel; }
+
     Match(Relation<value_type>& rel, Selector&&... sels)
       : rel(rel)
       , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
     {}
-    void eval_body(Rule& r) override
+    void eval_body(Rule& r, size_t idx) override
     {
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
       for_each_in_tuple(bt, selector); // Record unset vars
-      for (auto const& row : this->rel.all) {
+      for (auto const& row : idx == r.seminaive_current ? this->rel.delta : this->rel.all) {
         if (for_each_in_tuple(detail::unify1(), selector, row))
-          this->next->eval_body(r);
+          this->next->eval_body(r, idx+1);
         bt.undo();
       }
     }
     void eval_head(Rule& r) override
     {
       auto res = transform_each(selector, detail::get_value{});
-      this->rel.all.insert(std::move(res));
+      Delta.insert(std::move(res));
+    }
+
+    size_t post_head(Rule& r) override
+    {
+      this->rel.merge();
+      this->rel.delta = Delta.diff(this->rel.all);
+      Delta.clear();
+      return this->rel.delta.size();
     }
   };
 
@@ -349,7 +385,7 @@ struct Objects : Collection_base {
       for_each_in_tuple(bt, selector);
       nvars = bt.nvars;
     }
-    void eval_body(Rule& r) override
+    void eval_body(Rule& r, size_t idx) override
     {
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
@@ -358,7 +394,7 @@ struct Objects : Collection_base {
         const value_type& row = *urow;
         if (for_each_in_tuple(apply_sels(row), selector)) {
           this->last = &row;
-          this->next->eval_body(r);
+          this->next->eval_body(r, idx+1);
         }
         bt.undo();
       }
@@ -418,6 +454,6 @@ struct guard : query_fragment {
   fun_t f;
   std::string desc;
   guard(fun_t&& f, const std::string& desc = "<guard>");
-  void eval_body(Rule& r) override;
+  void eval_body(Rule& r, size_t idx) override;
   void print(std::ostream& os) const override;
 };

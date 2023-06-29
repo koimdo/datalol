@@ -13,12 +13,19 @@ void cow_buf::clear()
   destroy = nullptr;
 }
 
+void DQuery::add_merge(Collection_base *c)
+{
+  if (c)
+    to_merge.insert(c);
+}
+
 void DQuery::configure()
 {
   for (auto& r : rules) {
     assert(!r.get_body().empty());
     assert(r.get_head());
     query_fragment *next = this;
+    add_merge(r.get_head()->collection());
     auto body = r.get_body();
     for (int i=body.size()-1; i >= 0; i--) {
       query_fragment *elem = static_cast<query_fragment*>(body[i]);
@@ -28,12 +35,27 @@ void DQuery::configure()
   }
 }
 void DQuery::run() {
-  for (auto& r : rules) {
-    r.get_body()[0]->eval_body(r);
-  }
+  size_t changed ;
+  int iter = 0;
+  do {
+    changed = 0;
+    for (auto& r : rules) {
+      for (size_t i=0; i<=r.size(); ++i) {
+        // FIXME: i<=size() is a dumb hack to allow EDB-only bodies to run
+        // Use reachability and SCCs instead.
+        auto coll = i < r.size() ? r.get_body()[i]->collection() : nullptr;
+        if (i < r.size() && !to_merge.contains(coll))
+          continue;
+        r.seminaive_current = i;
+        r.get_body()[0]->eval_body(r, 0);
+      }
+      changed += r.get_head()->post_head(r);
+    }
+    ++iter;
+  } while (changed);
 }
 
-void DQuery::eval_body(Rule& r)
+void DQuery::eval_body(Rule& r, size_t)
 {
   r.get_head()->eval_head(r);
 }
@@ -46,9 +68,9 @@ void head::eval_head(Rule&) { f(); }
 void head::print(std::ostream& os) const { os << "head(" << desc << ")"; }
 
 guard::guard(fun_t&& f, const std::string& desc): f(f), desc(desc) {}
-void guard::eval_body(Rule& r)
+void guard::eval_body(Rule& r, size_t idx)
 {
   // TODO: bind vars in guards?
-  if (f()) next->eval_body(r);
+  if (f()) next->eval_body(r, idx+1);
 }
 void guard::print(std::ostream& os) const { os << "guard(" << desc << ")"; }

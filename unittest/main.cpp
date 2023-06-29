@@ -94,5 +94,19 @@ int main()
   //       Reachable(x, z) << Reachable(x, y) & E(y, z)
   //     }});
 
+  auto& E = db.table<int, int>("E");
+  auto& Reachable = db.table<int, int>("Reachable");
+
+  E.insert(1, 2);
+  E.insert(2, 3);
+  E.insert(3, 3);
+  E.insert(3, 4);
+
+  Var<int> u("u"), v("v"), w("w");
+  select(DQuery{{
+        Reachable(u, v) << E(u, v),
+        Reachable(u, w) << Reachable(u, v) & E(v, w)
+      }});
+
   
 }
