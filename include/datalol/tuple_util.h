@@ -1,6 +1,10 @@
 // -*- C++ -*-
 #pragma once
 
+#include <iostream>
+#include <memory>
+#include <tuple>
+
 // FIXME: remove when we are assured we have C++14 (or higher) also in csp
 #ifndef __cpp_lib_make_unique
 namespace std {
