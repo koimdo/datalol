@@ -152,6 +152,13 @@ namespace detail {
         vars[i]->zap();
     }
   };
+
+  struct get_value {
+    template<typename T>
+    const T& operator()(const Var<T>& v) const { return *v.get(); }
+    template<typename T>
+    constexpr const T& operator()(const T& t) const { return t; }
+  };
 }
 
 template<typename value_type>
@@ -191,7 +198,7 @@ struct Relation : Collection_base {
   }
 
   template<typename... Selector>
-  struct Match : Match_base<value_type> {
+  struct Match : Match_base<value_type>, public Rule::Head {
     Match(const Match&) = default;
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
@@ -221,10 +228,15 @@ struct Relation : Collection_base {
         bt.undo();
       }
     }
+    void eval_head(Rule& r) override
+    {
+      auto res = transform_each(selector, detail::get_value{});
+      this->rel.all.insert(std::move(res));
+    }
   };
 
   template<typename... SelectArgs>
-  Rule::ubody
+  std::unique_ptr<Match<SelectArgs...>>
   operator()(SelectArgs&&... args) {
     return std::make_unique<Match<SelectArgs...>>(*this, std::forward<SelectArgs>(args)...);
   }

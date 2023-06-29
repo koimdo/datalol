@@ -15,6 +15,12 @@ unique_ptr<T> make_unique(Args&&... args) { return unique_ptr<T>(new T(forward<A
 
 namespace detail
 {
+  template <class F, typename Tuple, size_t... Is>
+  auto transform_each_impl(const Tuple& t, F&& f, std::index_sequence<Is...>)
+  {
+    return std::make_tuple(f(std::get<Is>(t) )...);
+  }
+
   template<size_t i, size_t size, typename F, typename... Ts>
   struct for_each {
     static constexpr
@@ -45,6 +51,12 @@ namespace detail
   template<bool B, bool... Rest>
   struct any<B, Rest...> : bool_constant<B || any<Rest...>::value> {};
 } // namespace detail
+
+template <class F, typename... Args>
+auto transform_each(const std::tuple<Args...>& t, F&& f)
+{
+  return detail::transform_each_impl(t, f, std::make_index_sequence<sizeof...(Args)>{});
+}
 
 template<typename F, typename T0, typename... Ts>
 bool

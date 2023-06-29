@@ -79,14 +79,16 @@ int main()
   As.insert(1, 8);
   std::cout << As << "\n";
 
+  auto& res = db.table<std::string, int, std::string>("res");
   // select(As( $(&A::i) == 1, $(&A::k) == 3, $(&A::j) == x));
   select(DQuery{{
-        HEAD_WITH(std::cout << y << " " << s << "\n") <<
+        res(s, y, std::string("Bye")) <<
         R(1, y, 3) &
         S(s, y, s) &
         GUARD(s->size() > 3)
       }});
 
+  std::cout << res << "\n";
   // select(DQuery{{
   //       Reachable(x, y) << E(x, y),
   //       Reachable(x, z) << Reachable(x, y) & E(y, z)
