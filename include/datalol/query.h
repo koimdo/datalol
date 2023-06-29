@@ -201,7 +201,11 @@ struct Relation : Collection_base {
     Relation<value_type>& rel;
     query_type selector;
 
-    void print(std::ostream& os) const override { os << print_tuple<query_type>(selector); }
+    void print(std::ostream& os) const override
+    {
+      os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
+    }
+
     Match(Relation<value_type>& rel, Selector&&... sels)
       : rel(rel)
       , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
