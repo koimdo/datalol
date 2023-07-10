@@ -2,12 +2,12 @@
 
 #include "syntax.h"
 
-#include <map>
 #include <cstddef>
 #include <datalol/tuple_util.h>
 #include <functional>
 
 #include <flat/set>
+#include <flat/map>
 
 class cow_buf {
   static constexpr size_t MAX_SIZE = 1024;
@@ -96,7 +96,42 @@ struct query_fragment : Rule::Body {
   query_fragment *next = nullptr;
 };
 
-class DB;
+class Collection_base;
+template<class T> class Relation;
+template<class T> class Objects;
+
+class DB {
+  template<class T> friend class Relation;
+  template<class T> friend class Objects;
+  flat::autorelease pool;
+  flat::map<std::string, flat::pool_ptr<Collection_base>> rels;
+
+  template<class Rel>
+  Rel& make_relation(const std::string& name)
+  {
+    auto rel = pool.allocate<Rel>(*this, name);
+    auto itb = rels.emplace(name, rel);
+    assert(itb.second);
+    return *rel;
+  }
+
+public:
+  DB(): pool("db") {}
+  template<typename... Args>
+  Relation<std::tuple<Args...>>&
+  table(const std::string& name)
+  {
+    static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
+    return make_relation<Relation<std::tuple<Args...>>>(name);
+  }
+
+  template<typename T>
+  Objects<T>&
+  objects(const std::string& name) {
+    return make_relation<Objects<T>>(name);
+  }
+};
+
 class Collection_base : public IPrint {
 protected:
   DB& db;
@@ -272,9 +307,9 @@ struct Relation : Collection_base {
   };
 
   template<typename... SelectArgs>
-  std::unique_ptr<Match<SelectArgs...>>
+  flat::pool_ptr<Match<SelectArgs...>>
   operator()(SelectArgs&&... args) {
-    return std::make_unique<Match<SelectArgs...>>(*this, std::forward<SelectArgs>(args)...);
+    return flat::allocate<Match<SelectArgs...>>(*this, std::forward<SelectArgs>(args)...);
   }
 };
 
@@ -324,25 +359,23 @@ struct Objects : Collection_base {
   using Collection_base::Collection_base;
 
   using value_type = T;
-  class cmp {
-    bool operator()(const std::unique_ptr<T>& l, const std::unique_ptr<T>& r)
-    {
-      return *l < *r;
-    }
-  };
-  flat::set<std::unique_ptr<value_type>> all;    // FIXME: node_set
+  flat::set<flat::pool_ptr<T>> all;
 
   void print(std::ostream& os) const override
   {
     os << "{";
     for (auto const& row : all)
-      os << "\n  " << name << "(" << *row << ")"; // FIXME: node_set
+      os << "\n  " << name << "(" << *row << ")";
     os <<"\n}";
   }
 
   template<typename... Args>
   void insert(Args&&... args) {
-    all.emplace(std::make_unique<value_type>(std::forward<Args>(args)...));
+    all.insert(db.pool.allocate<value_type>(std::forward<Args>(args)...));
+  }
+
+  void insert(flat::pool_ptr<T> p) {
+    all.insert(p);
   }
 
   template<class M>
@@ -409,36 +442,8 @@ struct Objects : Collection_base {
 };
 
 
-class DB {
-  std::map<std::string, std::unique_ptr<Collection_base>> rels;
 
-  template<class Rel>
-  Rel& make_relation(const std::string& name)
-  {
-    auto rel = std::make_unique<Rel>(*this, name);
-    auto p = rel.get();
-    auto itb = rels.emplace(name, std::move(rel));
-    assert(itb.second);
-    return *p;
-  }
-
-public:
-  template<typename... Args>
-  Relation<std::tuple<Args...>>&
-  table(const std::string& name)
-  {
-    static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
-    return make_relation<Relation<std::tuple<Args...>>>(name);
-  }
-
-  template<typename T>
-  Objects<T>&
-  objects(const std::string& name) {
-    return make_relation<Objects<T>>(name);
-  }
-};
-
-#define HEAD_WITH(expr) std::make_unique<head>(([&]() -> void { (void)(expr); }), #expr)
+#define HEAD_WITH(expr) flat::allocate<head>(([&]() -> void { (void)(expr); }), #expr)
 struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
@@ -448,7 +453,7 @@ struct head : Rule::Head {
   void print(std::ostream& os) const override;
 };
 
-#define GUARD(expr) std::make_unique<guard>(([&]() -> bool { return (expr); }), #expr)
+#define GUARD(expr) flat::allocate<guard>(([&]() -> bool { return (expr); }), #expr)
 struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;

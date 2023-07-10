@@ -3,7 +3,7 @@
 
 #include <vector>
 #include <iostream>
-#include <memory>
+#include "flat/memory"
 #include "flat/span"
 
 struct IPrint {
@@ -26,13 +26,13 @@ public:
     virtual Collection_base *collection() { return nullptr; }
   };
 
-  using uhead = std::unique_ptr<Head>;
-  using ubody = std::unique_ptr<Body>;
+  using uhead = flat::pool_ptr<Head>;
+  using ubody = flat::pool_ptr<Body>;
 
   friend Rule operator<<(uhead head, ubody b);
   friend Rule operator& (Rule&& rule, Rule::ubody e);
 
-  Head *get_head() { return head.get(); }
+  uhead get_head() { return head; }
   flat::span<Body*> get_body() { return { reinterpret_cast<Body**>(body.data()), body.size() }; }
   size_t size() const { return body.size(); }
 

@@ -5,14 +5,6 @@
 #include <memory>
 #include <tuple>
 
-// FIXME: remove when we are assured we have C++14 (or higher) also in csp
-#ifndef __cpp_lib_make_unique
-namespace std {
-template<typename T, typename... Args>
-unique_ptr<T> make_unique(Args&&... args) { return unique_ptr<T>(new T(forward<Args>(args)...)); }
-}
-#endif
-
 namespace detail
 {
   template <class F, typename Tuple, size_t... Is>

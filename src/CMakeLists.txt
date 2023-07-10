@@ -2,8 +2,10 @@ set(TARGET_NAME datalol)
 
 add_library(${TARGET_NAME} STATIC
   # Please keep this list sorted
-  syntax.cpp
+  memory.cpp
   query.cpp
+  syntax.cpp
+  trace.cpp
 )
 
 install( TARGETS ${TARGET_NAME}
