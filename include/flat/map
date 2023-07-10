@@ -1,0 +1,87 @@
+// -*- C++ -*-
+
+#pragma once
+
+#include <functional>
+#include <vector>
+#include "sorted_base.h"
+
+namespace flat {
+
+namespace detail {
+
+template<typename Key, typename T, class Cmp>
+struct entry_cmp {
+  using entry_t = std::pair<Key, T>;
+  // TODO: stateful comparators?
+  bool operator()(const entry_t& l, const entry_t& r) const { return Cmp{}(l.first, r.first); }
+  bool operator()(const entry_t& l, const Key& r    ) const { return Cmp{}(l.first, r      ); }
+  bool operator()(const Key&     l, const entry_t& r) const { return Cmp{}(l      , r.first); }
+};
+
+}
+// a fast small map. Use if small (<32 elements) or iteration speed is more important than
+// modification speed
+template <typename Key, typename T,
+          typename Compare = std::less<Key>,
+          typename Sequence = std::vector<std::pair<Key, T>>>
+class map : public sorted_base<Key, std::pair<Key, T>, detail::entry_cmp<Key, T, Compare>> {
+  using super_t =  sorted_base<Key, std::pair<Key, T>, detail::entry_cmp<Key, T, Compare>>;
+public:
+  using super_t::super_t;
+
+  int count(const Key& p) const { return super_t::find_(p).second; }
+  bool contains(const Key& p) const { return super_t::find_(p).second; }
+
+  template<class Pred>
+  map filter(Pred&& pred) const {
+    map res;
+    super_t::filter_(res, std::move(pred));
+    return res;
+  }
+
+  // These are not the stdlib's true emplace. They are convenient, though
+  std::pair<typename super_t::iterator, bool> emplace(const Key& k, T&& v) {
+    return super_t::insert({k, std::move(v)});
+  }
+
+  std::pair<typename super_t::iterator, bool> emplace(const Key& k, const T& v) {
+    return super_t::insert({k, v});
+  }
+
+  T& at(const Key& key) {
+    auto itb = super_t::find_(key);
+    if (!itb.second)
+      throw std::out_of_range("Nonexistent key!");
+    return itb.first->second;
+  }
+
+  const T& at( const Key& key ) const {
+    auto itb = super_t::find_(key);
+    if (!itb.second)
+      throw std::out_of_range("Nonexistent key!");
+    return itb.first->second;
+  }
+
+  T& operator[](const Key& key) {
+    return super_t::insert({key, T{}}).first->second;
+  }
+
+  T& operator[](Key&& key) {
+    return super_t::insert({std::move(key), T{}}).first->second;
+  }
+
+  using super_t::find;
+  using super_t::begin;
+  using super_t::end;
+  typename super_t::iterator begin() { return super_t::mkiter(super_t::storage.begin()); }
+  typename super_t::iterator end() { return super_t::mkiter(super_t::storage.end()); }
+
+  typename super_t::iterator find(const Key& p) {
+    auto itb = super_t::find_(p);
+    return super_t::mkiter(itb.second ? itb.first : super_t::storage.end());
+  }
+
+};
+
+}
