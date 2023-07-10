@@ -13,6 +13,17 @@ void cow_buf::clear()
   destroy = nullptr;
 }
 
+Var_::Var_(const std::string& name)
+  : impl(flat::allocate<Impl>())
+{
+  impl->name = name;
+}
+
+bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
+{
+  return l->get_name() < r->get_name();
+}
+
 void DQuery::add_merge(Collection_base *c)
 {
   if (c)
@@ -22,11 +33,11 @@ void DQuery::add_merge(Collection_base *c)
 void DQuery::configure()
 {
   for (auto& r : rules) {
-    assert(!r.get_body().empty());
-    assert(r.get_head());
+    assert(!r->get_body().empty());
+    assert(r->get_head());
     query_fragment *next = this;
-    add_merge(r.get_head()->collection());
-    auto body = r.get_body();
+    add_merge(r->get_head()->collection());
+    auto body = r->get_body();
     for (int i=body.size()-1; i >= 0; i--) {
       query_fragment *elem = static_cast<query_fragment*>(body[i]);
       elem->next = next;
@@ -40,16 +51,16 @@ void DQuery::run() {
   do {
     changed = 0;
     for (auto& r : rules) {
-      for (size_t i=0; i<=r.size(); ++i) {
+      for (size_t i=0; i<=r->size(); ++i) {
         // FIXME: i<=size() is a dumb hack to allow EDB-only bodies to run
         // Use reachability and SCCs instead.
-        auto coll = i < r.size() ? r.get_body()[i]->collection() : nullptr;
-        if (i < r.size() && !to_merge.contains(coll))
+        auto coll = i < r->size() ? r->get_body()[i]->collection() : nullptr;
+        if (coll && !to_merge.contains(coll))
           continue;
-        r.seminaive_current = i;
-        r.get_body()[0]->eval_body(r, 0);
+        r->seminaive_current = i;
+        r->get_body()[0]->eval_body(*r, 0);
       }
-      changed += r.get_head()->post_head(r);
+      changed += r->get_head()->post_head(*r);
     }
     ++iter;
   } while (changed);

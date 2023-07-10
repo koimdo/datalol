@@ -47,15 +47,19 @@ public:
 
 class Var_ : public IPrint {
 protected:
-  mutable cow_buf p;
-  std::string name;
+  struct Impl {
+    std::string name;
+    mutable cow_buf p;
+  };
+  flat::pool_ptr<Impl> impl;
 
 public:
-  Var_(const Var_&) = delete;
-  Var_(const std::string& name): name(name) {}
-  bool operator<(const Var_& o) const { return name < o.name; }
-  void zap() const { p.clear(); }
-  bool is_unset() const { return !p; }
+  Var_(const Var_&) = default;
+  Var_(const std::string& name);
+  bool operator<(const Var_& o) const { return impl->name < o.impl->name; }
+  void zap() const { impl->p.clear(); }
+  bool is_unset() const { return !impl->p; }
+  const std::string& get_name() const noexcept { return impl->name; }
 };
 
 template<class T>
@@ -65,27 +69,27 @@ public:
 
   bool unify(const T& t) const
   {
-    if (p)
+    if (impl->p)
       return *get() == t;
-    p.assign(t);
+    impl->p.assign(t);
     return true;
   }
 
   bool unify(T&& t) const
   {
-    if (p)
+    if (impl->p)
       return *get() == t;
-    p.assign(std::move(t));
+    impl->p.assign(std::move(t));
     return true;
   }
 
-  const T *get() const { return static_cast<const T*>(p.get()); }
+  const T *get() const { return static_cast<const T*>(impl->p.get()); }
   const T *operator->() const { return get(); }
   const T& operator*() const { return *get(); }
   void print(std::ostream& os) const override
   {
-    os << "?" << name;
-    if (p) {
+    os << "?" << impl->name;
+    if (impl->p) {
       const T& t = *get();
       os << "=" << t;
     }
@@ -146,14 +150,14 @@ public:
 };
 
 namespace detail {
-  template<class S, class R> struct check_arg           : bool_constant<false> {};
-  template<class R> struct check_arg<R,             R > : bool_constant<true> {};
-  template<class R> struct check_arg<Var<R>&, const R&> : bool_constant<true> {};
+  template<class S, class R> struct check_arg   : bool_constant<false> {};
+  template<class R> struct check_arg<R,      R> : bool_constant<true> {};
+  template<class R> struct check_arg<Var<R>, R> : bool_constant<true> {};
 
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
-    using SElem = decltype(std::get<i>(std::declval<const Sel&>()));
-    using RElem = decltype(std::get<i>(std::declval<const Row&>()));
+    using SElem = typename std::tuple_element<i, Sel>::type;
+    using RElem = typename std::tuple_element<i, Row>::type;
     static constexpr bool check1 = check_arg<SElem, RElem>::value;
     static_assert(check1, "Type mismatch");
     static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
@@ -209,10 +213,7 @@ struct DQuery : Query, query_fragment {
   void eval_body(Rule& r, size_t) override;
   void print(std::ostream& os) const override;
   struct cmp {
-    bool operator()(Collection_base *l, Collection_base *r) const
-    {
-      return l->get_name() < r->get_name();
-    }
+    bool operator()(Collection_base *l, Collection_base *r) const;
   };
 
   void add_merge(Collection_base *c);
@@ -307,9 +308,9 @@ struct Relation : Collection_base {
   };
 
   template<typename... SelectArgs>
-  flat::pool_ptr<Match<SelectArgs...>>
+  flat::pool_ptr<Match<typename flat::remove_cvref<SelectArgs>::type...>>
   operator()(SelectArgs&&... args) {
-    return flat::allocate<Match<SelectArgs...>>(*this, std::forward<SelectArgs>(args)...);
+    return flat::allocate<Match<typename flat::remove_cvref<SelectArgs>::type...>>(*this, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
   }
 };
 
@@ -443,7 +444,7 @@ struct Objects : Collection_base {
 
 
 
-#define HEAD_WITH(expr) flat::allocate<head>(([&]() -> void { (void)(expr); }), #expr)
+#define HEAD_WITH(expr,...) flat::allocate<head>(([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr)
 struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
@@ -453,7 +454,7 @@ struct head : Rule::Head {
   void print(std::ostream& os) const override;
 };
 
-#define GUARD(expr) flat::allocate<guard>(([&]() -> bool { return (expr); }), #expr)
+#define GUARD(expr,...) flat::allocate<guard>(([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr)
 struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;

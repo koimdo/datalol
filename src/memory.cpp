@@ -22,7 +22,9 @@ struct dtor_entry {
   destructor_t destroy;
 };
 
-struct autorelease::page : immovable {
+struct autorelease::page {
+  page(const page&) = delete;
+  page(page&&) = delete;
   std::vector<dtor_entry> dtors;
   unsigned char *bump;
   size_t nobjects = 0;
@@ -118,6 +120,7 @@ autorelease::~autorelease()
 {
   clear();
 }
+autorelease::autorelease(autorelease&& o) = default;
 autorelease::autorelease(std::string&& name): name(std::forward<std::string>(name))
 {
   TRACE_POOL << "Created pool [" << this->name << "]\n";

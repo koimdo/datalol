@@ -47,13 +47,6 @@ public:
   }
 };
 
-class immovable {
-protected:
-  immovable() = default;
-  immovable(const immovable&) = delete;
-  immovable(immovable&&) = delete;
-};
-
 struct guard {
   guard(const guard&) = delete;
   guard() = default;
@@ -81,7 +74,7 @@ struct guard {
 };
 
 template<class> class pool_ptr;
-class autorelease : immovable {
+class autorelease {
   struct page;
   std::string name;
   page *pg;
@@ -103,6 +96,9 @@ class autorelease : immovable {
 public:
   ~autorelease();
   autorelease(const autorelease&) = delete;
+  autorelease& operator=(const autorelease&) = delete;
+  autorelease(autorelease&&);
+  autorelease& operator=(autorelease&&) = delete;
   autorelease(std::string&& name);
   void clear();
 

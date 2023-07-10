@@ -31,9 +31,9 @@ struct raw_result : Rule::Head {
 
 static
 Rule::uhead
-print_raw() { return std::make_unique<raw_result>(); }
+print_raw() { return flat::allocate<raw_result>(); }
 
-void select(DQuery&& qf)
+void select(DQuery& qf)
 {
   std::cout << "SELECT(" << (const Query&)qf << "):\n";
   qf.configure();
@@ -81,12 +81,14 @@ int main()
 
   auto& res = db.table<std::string, int, std::string>("res");
   // select(As( $(&A::i) == 1, $(&A::k) == 3, $(&A::j) == x));
-  select(DQuery{{
-        res(s, y, std::string("Bye")) <<
-        R(1, y, 3) &
-        S(s, y, s) &
-        GUARD(s->size() > 3)
-      }});
+
+  auto q1 = DQuery([&]() {
+    res(s, y, std::string("Bye")) <<
+      R(1, y, 3) &
+      S(s, y, s) &
+      GUARD(s->size() > 3);
+  });
+  select(q1);
 
   std::cout << res << "\n";
   // select(DQuery{{
@@ -103,10 +105,11 @@ int main()
   E.insert(3, 4);
 
   Var<int> u("u"), v("v"), w("w");
-  select(DQuery{{
-        Reachable(u, v) << E(u, v),
-        Reachable(u, w) << Reachable(u, v) & E(v, w)
-      }});
-
+  auto q2 = DQuery([&]() {
+    Reachable(u, v) << E(u, v);
+    Reachable(u, w) << Reachable(u, v) & E(v, w);
+    //    WITH_HEAD(std::cout << "Reachable: " << *u << " to " << *v << "\n") << Reachable(u, v);
+  });
+  select(q2);
   
 }
