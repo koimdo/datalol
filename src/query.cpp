@@ -24,19 +24,15 @@ bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
   return l->get_name() < r->get_name();
 }
 
-void DQuery::add_merge(Collection_base *c)
-{
-  if (c)
-    to_merge.insert(c);
-}
-
 void DQuery::configure()
 {
   for (auto& r : rules) {
     assert(!r->get_body().empty());
     assert(r->get_head());
     query_fragment *next = this;
-    add_merge(r->get_head()->collection());
+    auto c = r->get_head()->collection();
+    if (c)
+      to_merge.insert(c);
     auto body = r->get_body();
     for (int i=body.size()-1; i >= 0; i--) {
       query_fragment *elem = static_cast<query_fragment*>(body[i]);
@@ -49,7 +45,7 @@ void DQuery::run() {
   size_t changed ;
   int iter = 0;
   do {
-    changed = 0;
+    std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
       for (size_t i=0; i<=r->size(); ++i) {
         // FIXME: i<=size() is a dumb hack to allow EDB-only bodies to run
@@ -60,9 +56,12 @@ void DQuery::run() {
         r->seminaive_current = i;
         r->get_body()[0]->eval_body(*r, 0);
       }
-      changed += r->get_head()->post_head(*r);
     }
+    changed = 0;
+    for (auto c : to_merge)
+      changed += c->merge();
     ++iter;
+    std::cerr << "Changed: " << changed << "\n";
   } while (changed);
 }
 

@@ -17,7 +17,6 @@ class Rule : public IPrint {
 public:
   struct Head : IPrint {
     virtual void eval_head(Rule&) = 0;
-    virtual size_t post_head(Rule&) { return 0; };
     virtual Collection_base *collection() { return nullptr; }
   };
   struct Body : IPrint {

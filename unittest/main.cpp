@@ -33,10 +33,9 @@ static
 Rule::uhead
 print_raw() { return flat::allocate<raw_result>(); }
 
-void select(DQuery& qf)
+void select(DQuery&& qf)
 {
   std::cout << "SELECT(" << (const Query&)qf << "):\n";
-  qf.configure();
   qf.run();
 }
 
@@ -59,18 +58,6 @@ int main()
   S.insert("Hello", 3, "World");
   std::cout << S << "\n"; 
   
-  Var<int> x("x");
-  Var<int> y("y");
-
-  select(DQuery{{print_raw() << R(1, 2, 3)}});
-  select(DQuery{{print_raw() << R(1, x, y)}});
-  select(DQuery{{print_raw() << R(1, x, x)}});
-  select(DQuery{{print_raw() << R(1, x, 0)}});
-  select(DQuery{{print_raw() << R(x, x, 3)}});
-
-  Var<std::string> s("s");
-  select(DQuery{{print_raw() << S(s, y, s)}});
-
   auto& As = db.objects<A>("AS");
 
   As.insert(0, 1, 2);
@@ -82,19 +69,17 @@ int main()
   auto& res = db.table<std::string, int, std::string>("res");
   // select(As( $(&A::i) == 1, $(&A::k) == 3, $(&A::j) == x));
 
-  auto q1 = DQuery([&]() {
-    res(s, y, std::string("Bye")) <<
-      R(1, y, 3) &
-      S(s, y, s) &
-      GUARD(s->size() > 3);
-  });
-  select(q1);
+  auto q1 = DATALOL(Var<int> x("x"), y("y");
+                    Var<std::string> s("s");
+                    int three = 1 + 2;
+                    res(s, y, std::string("Bye")) <<
+                    R(1, y, three) &
+                    S(s, y, s) &
+                    GUARD(s->size() > 3);
+                    );
 
+  select(std::move(q1));
   std::cout << res << "\n";
-  // select(DQuery{{
-  //       Reachable(x, y) << E(x, y),
-  //       Reachable(x, z) << Reachable(x, y) & E(y, z)
-  //     }});
 
   auto& E = db.table<int, int>("E");
   auto& Reachable = db.table<int, int>("Reachable");
@@ -104,12 +89,11 @@ int main()
   E.insert(3, 3);
   E.insert(3, 4);
 
-  Var<int> u("u"), v("v"), w("w");
-  auto q2 = DQuery([&]() {
-    Reachable(u, v) << E(u, v);
-    Reachable(u, w) << Reachable(u, v) & E(v, w);
-    //    WITH_HEAD(std::cout << "Reachable: " << *u << " to " << *v << "\n") << Reachable(u, v);
-  });
-  select(q2);
+  
+  auto q2 = DATALOL(Var<int> u("u"), v("v"), w("w");
+                    Reachable(u, v) << E(u, v),
+                    Reachable(u, w) << Reachable(u, v) & E(v, w)
+                    );
+  select(std::move(q2));
   
 }

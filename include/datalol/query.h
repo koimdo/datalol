@@ -147,6 +147,7 @@ public:
     , name(name)
   {}
   const std::string& get_name() const noexcept { return name; }
+  virtual size_t merge() = 0;
 };
 
 namespace detail {
@@ -206,18 +207,25 @@ struct Match_base : query_fragment {
   // TODO: any positive content for Match_base. perhaps list of bound vars?
 };
 
-struct DQuery : Query, query_fragment {
-  using Query::Query;
-  void configure();
-  void run();
+#define DATALOL(...) DQuery([&]() { __VA_ARGS__ ; })
+class DQuery : Query, query_fragment {
   void eval_body(Rule& r, size_t) override;
   void print(std::ostream& os) const override;
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
   };
-
-  void add_merge(Collection_base *c);
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
+  void configure();
+
+public:
+  template<typename F>
+  DQuery(F&& build)
+    : Query(std::move(build))
+  {
+    configure();
+  }
+
+  void run();
 };
 
 // TODO: despecialize relations?
@@ -229,33 +237,41 @@ struct Relation : Collection_base {
 
   using value_type = T;
   flat::set<value_type> all;
-  flat::set<value_type> delta;
+  flat::set<value_type> delta, next_delta;
 
-  void merge()
+  size_t merge() override
   {
-    if (delta.empty())
-      return;
-
+    std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
+    std::cerr << "Merging " << name << " delta: ";
+    print_(std::cerr, delta);
+    std::cerr <<"\n";
     if (all.empty()) {
-      all = std::move(delta);
-      return;
+      std::swap(all, delta);
+    } else if (!delta.empty()) {
+      all = all.set_union(delta);
     }
-
-    all = all.set_union(delta);
-    delta.clear();
+    delta = next_delta.diff(all);
+    next_delta.clear();
+    return delta.size();
   }
 
   void print(std::ostream& os) const override
   {
+    print_(os, all);
+  }
+
+  void print_(std::ostream& os, const flat::set<value_type>& s) const
+  {
     os << "{";
-    for (auto const& row : all)
+    for (auto const& row : s)
       os << "\n  " << name << "(" << print_tuple<value_type>(row) << ")";
     os <<"\n}";
   }
 
   template<typename... Args>
   void insert(Args&&... args) {
-    all.emplace(std::forward<Args>(args)...);
+    T it(std::forward<Args>(args)...);
+    all.insert(it);
   }
 
   template<typename... Selector>
@@ -268,7 +284,6 @@ struct Relation : Collection_base {
 
     Relation<value_type>& rel;
     query_type selector;
-    flat::set<value_type> Delta;
 
     void print(std::ostream& os) const override
     {
@@ -295,15 +310,7 @@ struct Relation : Collection_base {
     void eval_head(Rule& r) override
     {
       auto res = transform_each(selector, detail::get_value{});
-      Delta.insert(std::move(res));
-    }
-
-    size_t post_head(Rule& r) override
-    {
-      this->rel.merge();
-      this->rel.delta = Delta.diff(this->rel.all);
-      Delta.clear();
-      return this->rel.delta.size();
+      rel.next_delta.insert(std::move(res));
     }
   };
 
@@ -361,6 +368,10 @@ struct Objects : Collection_base {
 
   using value_type = T;
   flat::set<flat::pool_ptr<T>> all;
+
+  size_t merge() override {
+    return 0;
+  }
 
   void print(std::ostream& os) const override
   {
