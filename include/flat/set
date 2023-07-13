@@ -20,13 +20,13 @@ public:
   int count(const T& p) const { return super_t::find_(p).second; }
   bool contains(const T& p) const { return super_t::find_(p).second; }
 
-  typename super_t::const_reference min() const { return this->storage.front(); }
-  typename super_t::const_reference max() const { return this->storage.back(); }
+  typename super_t::const_reference min() const { return this->storage().front(); }
+  typename super_t::const_reference max() const { return this->storage().back(); }
   typename super_t::const_reference singleton() const
   {
     if (super_t::size() != 1)
       throw std::out_of_range("Not a singleton set!");
-    return this->storage.front();
+    return this->storage().front();
   }
 
   template<class Pred>
@@ -37,34 +37,34 @@ public:
   }
 
   bool is_subset(const set& o) const {
-    return std::includes(this->storage.begin(), this->storage.end(),
-                         o.storage.begin(), o.storage.end());
+    return std::includes(this->storage().begin(), this->storage().end(),
+                         o.storage().begin(), o.storage().end());
   }
 
   set set_union(const set& o) const {
     set res;
-    std::set_union(this->storage.begin(), this->storage.end(),
-                   o.storage.begin(), o.storage.end(),
-                   std::back_inserter(res.storage),
-                   Compare{});
+    std::set_union(this->storage().begin(), this->storage().end(),
+                   o.storage().begin(), o.storage().end(),
+                   std::back_inserter(res.storage()),
+                   super_t::compare());
     return res;
   }
 
   set intersect(const set& o) const {
     set res;
-    std::set_intersection(this->storage.begin(), this->storage.end(),
-                          o.storage.begin(), o.storage.end(),
-                          std::back_inserter(res.storage),
-                          Compare{});
+    std::set_intersection(this->storage().begin(), this->storage().end(),
+                          o.storage().begin(), o.storage().end(),
+                          std::back_inserter(res.storage()),
+                          super_t::compare());
     return res;
   }
 
   set diff(const set& o) const {
     set res;
-    std::set_difference(this->storage.begin(), this->storage.end(),
-                        o.storage.begin(), o.storage.end(),
-                        std::back_inserter(res.storage),
-                        Compare{});
+    std::set_difference(this->storage().begin(), this->storage().end(),
+                        o.storage().begin(), o.storage().end(),
+                        std::back_inserter(res.storage()),
+                        super_t::compare());
     return res;
   }
 };

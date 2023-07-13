@@ -74,12 +74,12 @@ public:
   using super_t::find;
   using super_t::begin;
   using super_t::end;
-  typename super_t::iterator begin() { return super_t::mkiter(super_t::storage.begin()); }
-  typename super_t::iterator end() { return super_t::mkiter(super_t::storage.end()); }
+  typename super_t::iterator begin() { return super_t::mkiter(super_t::storage().begin()); }
+  typename super_t::iterator end() { return super_t::mkiter(super_t::storage().end()); }
 
   typename super_t::iterator find(const Key& p) {
     auto itb = super_t::find_(p);
-    return super_t::mkiter(itb.second ? itb.first : super_t::storage.end());
+    return super_t::mkiter(itb.second ? itb.first : super_t::storage().end());
   }
 
 };
