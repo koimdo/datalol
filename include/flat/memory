@@ -164,7 +164,6 @@ pool_ptr<T> autorelease::allocate(Args&&... args) {
 }
 
 template<typename T, typename... Args>
-static
 pool_ptr<T> allocate(Args&&... args) { return autorelease::current->allocate<T>(std::forward<Args>(args)...); }
 
 }

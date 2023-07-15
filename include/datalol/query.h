@@ -244,8 +244,8 @@ struct Relation : Collection_base {
   bool index_cmp(const value_type& l, const value_type& r)
   {
     return
-      std::get<N>(l) < std::get<N>(r) ||
-      std::get<N>(l) == std::get<N>(r) && l < r;
+      (std::get<N>(l) < std::get<N>(r)) ||
+      (std::get<N>(l) == std::get<N>(r) && l < r);
   }
 
   typedef flat::set<value_type, bool (*)(const value_type& l, const value_type& r)> index_t;
@@ -314,7 +314,7 @@ struct Relation : Collection_base {
       os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
     }
 
-    Collection_base *collection() { return &rel; }
+    Collection_base *collection() override { return &rel; }
 
     Match(Relation<value_type>& rel, Selector&&... sels)
       : rel(rel)

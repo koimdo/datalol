@@ -454,7 +454,7 @@ FROM_STRING(unsigned long long, std::stoull);
 FROM_STRING(float, std::stof);
 FROM_STRING(double, std::stod);
 FROM_STRING(long double, std::stold);
-FROM_STRING(std::string, str_convert);
+//FROM_STRING(std::string, str_convert);
 #undef FROM_STRING
 
 namespace std {
