@@ -424,21 +424,30 @@ struct Objects : Collection_base {
 #define CONCAT(a, b) CONCAT_INNER(a, b)
 #define CONCAT_INNER(a, b) a ## b
 
-#define HEAD_WITH(expr,...) flat::allocate<head>(([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr)
+#define CAPTURE_COMMON()                                                \
+  Rule::vars_t CONCAT(vars__, __LINE__);                                \
+  flat::guard CONCAT(current_guard__, __LINE__) =                       \
+    Query::with_vars(&CONCAT(vars__, __LINE__))
+
+#define HEAD_WITH(expr,...) ({                                          \
+      CAPTURE_COMMON();                                                 \
+      flat::allocate<head>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
+    })
+
 struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
   std::string desc;
-  head(fun_t&& f, const std::string& desc = "<head>");
+  Rule::vars_t vars;
+  head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<head>");
   void eval_head(Rule&) override;
   void print(std::ostream& os) const override;
 };
 
 #define GUARD(expr,...) ({                                              \
-      Rule::vars_t CONCAT(vars__, __LINE__);                            \
-      flat::guard CONCAT(current_guard__, __LINE__) =                   \
-        Query::with_vars(&CONCAT(vars__, __LINE__));                    \
-      flat::allocate<guard>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr);})
+      CAPTURE_COMMON();                                                 \
+      flat::allocate<guard>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
+    })
 
 struct guard : Rule::Body {
   using fun_t = std::function<bool()>;

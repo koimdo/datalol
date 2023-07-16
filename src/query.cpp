@@ -72,7 +72,7 @@ void DQuery::eval_body(Rule& r, size_t)
 void DQuery::print(std::ostream& os) const { Query::print(os); }
 
 
-head::head(fun_t&& f, const std::string& desc): f(f), desc(desc) {}
+head::head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
 void head::eval_head(Rule&) { f(); }
 void head::print(std::ostream& os) const { os << "head(" << desc << ")"; }
 
