@@ -24,6 +24,7 @@ public:
   struct Body : IPrint {
     virtual void eval_body(Rule&, size_t) = 0;
     virtual Collection_base *collection() { return nullptr; }
+    Body *next = nullptr;
   };
 
   using uhead = flat::pool_ptr<Head>;
@@ -115,21 +116,25 @@ protected:
   void print(std::ostream& os) const override;
   flat::autorelease pool;
   static Query *current;
+  static Rule::vars_t *current_vars;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
   friend class Var_;
   flat::pool_ptr<Var_::Impl> mkvar(const std::string& name);
   int get_id(flat::pool_ptr<Var_::Impl> core) const;
   std::vector<flat::pool_ptr<Var_::Impl>> vars;
+
+  flat::guard with_query();
 public:
   template<typename F>
   Query(F&& build)
     : pool("Query")
   {
     flat::autorelease::scoped guard(pool);
-    flat::guard current_query;
-    current_query.set(&current, this);
+    flat::guard current_query = with_query();
     build();
   }
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::vars_t& vs);
+  static
+  flat::guard with_vars(Rule::vars_t *dst);
 };

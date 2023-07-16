@@ -9,7 +9,6 @@
 #include <flat/set>
 #include <flat/map>
 
-
 template<class T>
 class Var : public Var_ {
 public:
@@ -43,11 +42,6 @@ public:
     }
     return os;
   }
-};
-
-struct query_fragment : Rule::Body {
-  query_fragment *next = nullptr;
-  static Rule::vars_t *current_vars;
 };
 
 class Collection_base;
@@ -153,12 +147,12 @@ namespace detail {
 }
 
 template<typename value_type>
-struct Match_base : query_fragment {
+struct Match_base : Rule::Body {
   // TODO: any positive content for Match_base. perhaps list of bound vars?
 };
 
 #define DATALOL(...) DQuery([&]() { __VA_ARGS__ ; })
-class DQuery : Query, query_fragment {
+class DQuery : Query, Rule::Body {
   void eval_body(Rule& r, size_t) override;
   void print(std::ostream& os) const override;
   struct cmp {
@@ -268,7 +262,7 @@ struct Relation : Collection_base {
 
     Match(Relation<value_type>& rel, Selector&&... sels)
       : rel(rel)
-      , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
+      , selector(std::forward<Selector>(sels)...)
     {}
     void eval_body(Rule& r, size_t idx) override
     {
@@ -441,12 +435,12 @@ struct head : Rule::Head {
 };
 
 #define GUARD(expr,...) ({                                              \
-      flat::guard CONCAT(current_guard__, __LINE__);                    \
       Rule::vars_t CONCAT(vars__, __LINE__);                            \
-      CONCAT(current_guard__, __LINE__).set(&query_fragment::current_vars, &CONCAT(vars__, __LINE__)); \
+      flat::guard CONCAT(current_guard__, __LINE__) =                   \
+        Query::with_vars(&CONCAT(vars__, __LINE__));                    \
       flat::allocate<guard>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr);})
 
-struct guard : query_fragment {
+struct guard : Rule::Body {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;

@@ -8,6 +8,8 @@
 
 // Query ::= Rule+
 Query *Query::current = nullptr;
+Rule::vars_t *Query::current_vars = nullptr;
+
 Rule::Rule(uhead head): head(head) {}
 Rule& operator<<(Rule::uhead head, Rule::ubody b)
 {
@@ -111,3 +113,16 @@ int Query::get_id(flat::pool_ptr<Var_::Impl> impl) const
   return it - vars.begin();
 }
 
+flat::guard Query::with_query()
+{
+  flat::guard res;
+  res.set(&current, this);
+  return res;
+}
+
+flat::guard Query::with_vars(Rule::vars_t *dst)
+{
+  flat::guard res;
+  res.set(&current_vars, dst);
+  return res;
+}

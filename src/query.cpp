@@ -1,12 +1,11 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 
-Rule::vars_t *query_fragment::current_vars = nullptr;
 Var_::Var_(const Var_& v)
   : impl(v.impl)
 {
-  if (query_fragment::current_vars) {
-    query_fragment::current_vars->set(Query::current->get_id(impl));
+  if (Query::current_vars) {
+    Query::current_vars->set(Query::current->get_id(impl));
   }
 }
 bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
@@ -25,10 +24,10 @@ void DQuery::configure()
       to_merge.insert(c);
 
     // Now, daisy-chain the rule body
-    query_fragment *next = this;
+    Rule::Body *next = this;
     auto body = r->get_body();
     for (int i=body.size()-1; i >= 0; i--) {
-      query_fragment *elem = static_cast<query_fragment*>(body[i]);
+      Rule::Body *elem = static_cast<Rule::Body*>(body[i]);
       elem->next = next;
       next = elem;
     }
