@@ -36,12 +36,7 @@ public:
   const T& operator*() const { return *get(); }
   friend std::ostream& operator<<(std::ostream& os, const Var& v)
   {
-    os << "?";
-    auto const& name = v.impl->name;
-    if (name.empty())
-      os << "<" << v.impl->id << ">";
-    else
-      os << v.impl->name;
+    os << *v.impl;
     if (v.impl->p) {
       const T& t = *v.get();
       os << "=" << t;
@@ -52,6 +47,7 @@ public:
 
 struct query_fragment : Rule::Body {
   query_fragment *next = nullptr;
+  static Rule::vars_t *current_vars;
 };
 
 class Collection_base;
@@ -431,7 +427,8 @@ struct Objects : Collection_base {
   }
 };
 
-
+#define CONCAT(a, b) CONCAT_INNER(a, b)
+#define CONCAT_INNER(a, b) a ## b
 
 #define HEAD_WITH(expr,...) flat::allocate<head>(([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr)
 struct head : Rule::Head {
@@ -443,12 +440,18 @@ struct head : Rule::Head {
   void print(std::ostream& os) const override;
 };
 
-#define GUARD(expr,...) flat::allocate<guard>(([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr)
+#define GUARD(expr,...) ({                                              \
+      flat::guard CONCAT(current_guard__, __LINE__);                    \
+      Rule::vars_t CONCAT(vars__, __LINE__);                            \
+      CONCAT(current_guard__, __LINE__).set(&query_fragment::current_vars, &CONCAT(vars__, __LINE__)); \
+      flat::allocate<guard>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr);})
+
 struct guard : query_fragment {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
-  guard(fun_t&& f, const std::string& desc = "<guard>");
+  Rule::vars_t vars;
+  guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<guard>");
   void eval_body(Rule& r, size_t idx) override;
   void print(std::ostream& os) const override;
 };

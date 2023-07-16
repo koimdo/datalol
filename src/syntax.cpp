@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 
 #include <datalol/syntax.h>
 
@@ -42,14 +43,39 @@ void Rule::print(std::ostream& os) const
   }
 }
 
+std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
+{
+  os << "?";
+  auto const& name = impl.name;
+  if (name.empty())
+    os << "<" << impl.id << ">";
+  else
+    os << name;
+  return os;
+}
+
 Query::Query(Query&&) = default;
 void Query::print(std::ostream& os) const
 {
+  flat::guard current_query;
+  current_query.set(&current, const_cast<Query*>(this));
   os << "{";
   size_t i=0;
   for (auto const& r : rules)
     os << *r << (rules.size() == ++i ? "" : ",\n");
   os <<"}";
+}
+void Query::print_vars(std::ostream& os, const Rule::vars_t& vs)
+{
+  int i=0;
+  int out = 0;
+  for (auto v : current->vars) {
+    if (vs.test(i)) {
+      os << (out?", ":"") << *v;
+      out++;
+    }
+    i++;
+  }
 }
 
 cow_buf::~cow_buf() { clear(); }
@@ -76,5 +102,12 @@ flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
   res->id = vars.size();
   vars.push_back(res);
   return res;
+}
+
+int Query::get_id(flat::pool_ptr<Var_::Impl> impl) const
+{
+  auto it = std::find(vars.begin(), vars.end(), impl);
+  assert(vars.end() != it);
+  return it - vars.begin();
 }
 

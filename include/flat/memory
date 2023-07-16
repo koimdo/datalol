@@ -142,6 +142,8 @@ public:
   T &operator*() noexcept { return *get(); }
   const T &operator*() const noexcept { return *get(); }
 
+  bool operator==(const pool_ptr& o) const noexcept { return get() == o.get(); }
+
   explicit operator bool() const noexcept { return get(); }
 };
 

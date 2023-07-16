@@ -16,6 +16,7 @@ struct IPrint {
 class Collection_base;
 class Rule : public IPrint {
 public:
+  typedef std::bitset<64> vars_t;
   struct Head : IPrint {
     virtual void eval_head(Rule&) = 0;
     virtual Collection_base *collection() { return nullptr; }
@@ -44,7 +45,7 @@ private:
   void print(std::ostream& os) const override;
   uhead head;
   std::vector<ubody> body;
-  std::bitset<64> recursive;
+  vars_t recursive;
 };
 
 Rule& operator<<(Rule::uhead head, Rule::ubody e);
@@ -96,8 +97,11 @@ protected:
   };
   flat::pool_ptr<Impl> impl;
   friend class Query;
+
+  friend
+  std::ostream& operator<<(std::ostream& os, const Impl&);
 public:
-  Var_(const Var_&) = default;
+  Var_(const Var_&);
   Var_(const std::string& name = std::string());
   bool operator<(const Var_& o) const { return impl->name < o.impl->name; }
   void zap() const { impl->p.clear(); }
@@ -114,6 +118,7 @@ protected:
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
   friend class Var_;
   flat::pool_ptr<Var_::Impl> mkvar(const std::string& name);
+  int get_id(flat::pool_ptr<Var_::Impl> core) const;
   std::vector<flat::pool_ptr<Var_::Impl>> vars;
 public:
   template<typename F>
@@ -126,4 +131,5 @@ public:
     build();
   }
   Query(Query&&);
+  static void print_vars(std::ostream& os, const Rule::vars_t& vs);
 };

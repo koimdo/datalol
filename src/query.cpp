@@ -1,6 +1,14 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 
+Rule::vars_t *query_fragment::current_vars = nullptr;
+Var_::Var_(const Var_& v)
+  : impl(v.impl)
+{
+  if (query_fragment::current_vars) {
+    query_fragment::current_vars->set(Query::current->get_id(impl));
+  }
+}
 bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
   return l->get_name() < r->get_name();
@@ -69,10 +77,14 @@ head::head(fun_t&& f, const std::string& desc): f(f), desc(desc) {}
 void head::eval_head(Rule&) { f(); }
 void head::print(std::ostream& os) const { os << "head(" << desc << ")"; }
 
-guard::guard(fun_t&& f, const std::string& desc): f(f), desc(desc) {}
+guard::guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
 void guard::eval_body(Rule& r, size_t idx)
 {
-  // TODO: bind vars in guards?
   if (f()) next->eval_body(r, idx+1);
 }
-void guard::print(std::ostream& os) const { os << "guard(" << desc << ")"; }
+void guard::print(std::ostream& os) const
+{
+  os << "guard(" << desc << ")[";
+  Query::print_vars(os, vars);
+  os << "]";
+}
