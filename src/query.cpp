@@ -8,13 +8,16 @@ bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
 
 void DQuery::configure()
 {
+  // Step 1: figure out relations that are on the HEAD side
   for (auto& r : rules) {
     assert(!r->get_body().empty());
     assert(r->get_head());
-    query_fragment *next = this;
     auto c = r->get_head()->collection();
     if (c)
       to_merge.insert(c);
+
+    // Now, daisy-chain the rule body
+    query_fragment *next = this;
     auto body = r->get_body();
     for (int i=body.size()-1; i >= 0; i--) {
       query_fragment *elem = static_cast<query_fragment*>(body[i]);
@@ -22,29 +25,36 @@ void DQuery::configure()
       next = elem;
     }
   }
+  // Step 2: Mark recursions in rule bodies
+  // TODO: stratify using SCC on the rule graph.
+  for (auto& r : rules) {
+    for (size_t i=0; i<r->size(); ++i) {
+      auto coll = r->get_body()[i]->collection();
+      if (coll && to_merge.contains(coll))
+        r->recursive.set(i);
+    }
+  }
 }
+
 void DQuery::run() {
-  size_t changed ;
-  int iter = 0;
-  do {
+  size_t changed = 1;
+  for (int iter = 0; changed; iter++) {
     std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
-      for (size_t i=0; i<=r->size(); ++i) {
-        // FIXME: i<=size() is a dumb hack to allow EDB-only bodies to run
-        // Use reachability and SCCs instead.
-        auto coll = i < r->size() ? r->get_body()[i]->collection() : nullptr;
-        if (coll && !to_merge.contains(coll))
-          continue;
-        r->seminaive_current = i;
-        r->get_body()[0]->eval_body(*r, 0);
+      if (r->recursive.none()) {
+        r->run(-1);
+      } else {
+        for (size_t i=0; i<r->size(); ++i) {
+          if (r->recursive.test(i))
+            r->run(i);
+        }
       }
     }
     changed = 0;
     for (auto c : to_merge)
       changed += c->merge();
-    ++iter;
     std::cerr << "Changed: " << changed << "\n";
-  } while (changed);
+  }
 }
 
 void DQuery::eval_body(Rule& r, size_t)

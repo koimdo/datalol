@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <iostream>
+#include <bitset>
 #include "flat/memory"
 #include "flat/span"
 
@@ -29,6 +30,7 @@ public:
 
   friend Rule& operator<<(uhead head, ubody b);
   friend Rule& operator& (Rule& rule, Rule::ubody e);
+  friend class DQuery;
 
   uhead get_head() { return head; }
   flat::span<Body*> get_body() { return { reinterpret_cast<Body**>(body.data()), body.size() }; }
@@ -37,10 +39,12 @@ public:
   size_t seminaive_current;     // FIXME: finer choice of Delta'd relation
   explicit Rule(uhead head);
 private:
+  void run(size_t current_delta);
   void append(ubody b);
   void print(std::ostream& os) const override;
   uhead head;
   std::vector<ubody> body;
+  std::bitset<64> recursive;
 };
 
 Rule& operator<<(Rule::uhead head, Rule::ubody e);

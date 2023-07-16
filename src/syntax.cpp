@@ -21,6 +21,12 @@ Rule& operator& (Rule& rule, Rule::ubody b) {
   return rule;
 }
 
+void Rule::run(size_t current_delta)
+{
+  seminaive_current = current_delta;
+  body[0]->eval_body(*this, 0);
+}
+
 void Rule::append(ubody b)
 {
   body.push_back(b);
@@ -30,8 +36,10 @@ void Rule::print(std::ostream& os) const
   assert(head && !body.empty());
   os << *head << " << ";
   int i=0;
-  for (auto const& b : body)
-    os << (i++ ? " & " : "") << *b;
+  for (auto const& b : body) {
+    os << (i ? " & " : "") << (recursive.test(i) ? "^":"") << *b;
+    i++;
+  }
 }
 
 Query::Query(Query&&) = default;
