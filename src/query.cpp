@@ -1,24 +1,6 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 
-cow_buf::~cow_buf() { clear(); }
-void cow_buf::clear()
-{
-  if (!p)
-    return;
-  if (destroy)
-    (destroy)(p);
-
-  p = nullptr;
-  destroy = nullptr;
-}
-
-Var_::Var_(const std::string& name)
-  : impl(flat::allocate<Impl>())
-{
-  impl->name = name;
-}
-
 bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
   return l->get_name() < r->get_name();

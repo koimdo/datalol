@@ -34,6 +34,7 @@ void Rule::print(std::ostream& os) const
     os << (i++ ? " & " : "") << *b;
 }
 
+Query::Query(Query&&) = default;
 void Query::print(std::ostream& os) const
 {
   os << "{";
@@ -42,3 +43,30 @@ void Query::print(std::ostream& os) const
     os << *r << (rules.size() == ++i ? "" : ",\n");
   os <<"}";
 }
+
+cow_buf::~cow_buf() { clear(); }
+void cow_buf::clear()
+{
+  if (!p)
+    return;
+  if (destroy)
+    (destroy)(p);
+
+  p = nullptr;
+  destroy = nullptr;
+}
+
+Var_::Impl::Impl() = default;
+Var_::Var_(const std::string& name)
+  : impl(Query::current->mkvar(name))
+{
+}
+flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
+{
+  auto res = pool.template allocate<Var_::Impl>();
+  res->name = name;
+  res->id = vars.size();
+  vars.push_back(res);
+  return res;
+}
+

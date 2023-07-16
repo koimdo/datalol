@@ -9,58 +9,6 @@
 #include <flat/set>
 #include <flat/map>
 
-class cow_buf {
-  static constexpr size_t MAX_SIZE = 1024;
-  const void *p = nullptr;
-  void (*destroy)(const void *) = nullptr;
-
-  // Assumption: the held data is never aligned wider than std::align_t
-  alignas(std::max_align_t) unsigned char buf[MAX_SIZE];
-
-public:
-  constexpr explicit operator bool() const noexcept { return p; }
-
-  ~cow_buf();
-  void clear();
-
-  template<class T>
-  void assign(const T& t)
-  {
-    clear();
-    p = &t;
-  }
-
-  template<class T>
-  void assign(T&& t)
-  {
-    // FIXME: wider alignment?
-    clear();
-    ::new (buf) T(std::forward<T>(t));
-    p = buf;
-
-    if (!std::is_trivially_destructible<T>::value)
-      destroy = [](const void *p) { static_cast<const T*>(p)->~T(); };
-  }
-
-  constexpr const void *get() const noexcept { return p; }
-};
-
-class Var_ : public IPrint {
-protected:
-  struct Impl {
-    std::string name;
-    mutable cow_buf p;
-  };
-  flat::pool_ptr<Impl> impl;
-
-public:
-  Var_(const Var_&) = default;
-  Var_(const std::string& name);
-  bool operator<(const Var_& o) const { return impl->name < o.impl->name; }
-  void zap() const { impl->p.clear(); }
-  bool is_unset() const { return !impl->p; }
-  const std::string& get_name() const noexcept { return impl->name; }
-};
 
 template<class T>
 class Var : public Var_ {
@@ -86,13 +34,19 @@ public:
   const T *get() const { return static_cast<const T*>(impl->p.get()); }
   const T *operator->() const { return get(); }
   const T& operator*() const { return *get(); }
-  void print(std::ostream& os) const override
+  friend std::ostream& operator<<(std::ostream& os, const Var& v)
   {
-    os << "?" << impl->name;
-    if (impl->p) {
-      const T& t = *get();
+    os << "?";
+    auto const& name = v.impl->name;
+    if (name.empty())
+      os << "<" << v.impl->id << ">";
+    else
+      os << v.impl->name;
+    if (v.impl->p) {
+      const T& t = *v.get();
       os << "=" << t;
     }
+    return os;
   }
 };
 
