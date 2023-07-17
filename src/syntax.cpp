@@ -106,13 +106,6 @@ flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
   return res;
 }
 
-int Query::get_id(flat::pool_ptr<Var_::Impl> impl) const
-{
-  auto it = std::find(vars.begin(), vars.end(), impl);
-  assert(vars.end() != it);
-  return it - vars.begin();
-}
-
 flat::guard Query::with_query()
 {
   flat::guard res;

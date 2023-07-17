@@ -4,9 +4,8 @@
 Var_::Var_(const Var_& v)
   : impl(v.impl)
 {
-  if (Query::current_vars) {
-    Query::current_vars->set(Query::current->get_id(impl));
-  }
+  assert(Query::current_vars);
+  Query::current_vars->set(impl->id);
 }
 bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
@@ -44,6 +43,7 @@ void DQuery::configure()
 }
 
 void DQuery::run() {
+  auto guard = with_query();
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {
     std::cerr << "Fixpoint iter " << iter << "\n";
@@ -74,7 +74,12 @@ void DQuery::print(std::ostream& os) const { Query::print(os); }
 
 head::head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
 void head::eval_head(Rule&) { f(); }
-void head::print(std::ostream& os) const { os << "head(" << desc << ")"; }
+void head::print(std::ostream& os) const
+{
+  os << "head(" << desc << ")[";
+  Query::print_vars(os, vars);
+  os << "]";
+}
 
 guard::guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
 void guard::eval_body(Rule& r, size_t idx)

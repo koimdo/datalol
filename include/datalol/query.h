@@ -315,7 +315,7 @@ namespace detail {
     Var<prop_t> prop;
     match(match_base<Getter>&& base, Var<prop_t>& prop)
       : match_base<Getter>(std::move(base))
-      , prop(prop)
+      , prop(std::move(prop))
     {}
 
     bool apply() const
@@ -331,6 +331,9 @@ namespace detail {
   template<class Getter>
   std::ostream& operator<<(std::ostream& os, const match<Getter>& m)
   {
+    os << "[";
+    Query::print_vars(os, m.vars);
+    os << "]";
     return os << m.desc << " -> " << m.prop;
   }
 
@@ -397,7 +400,7 @@ struct Objects : Collection_base {
 
     Match(Objects<value_type>& rel, Var<value_type>& that, Selector&&... sels)
       : rel(rel)
-      , that(that)
+      , that(std::move(that))
       , selector(std::forward<Selector>(sels)...)
     {
       std::cerr << "Obj selector size = " << sizeof(selector) << "\n";
