@@ -68,6 +68,11 @@ int main()
 
   auto& res = db.table<std::string, int, std::string>("res");
   // select(As( $(&A::i) == 1, $(&A::k) == 3, $(&A::j) == x));
+  auto qo = DATALOL(Var<A> a("a");
+                    Var<int> i("i"), j("j"), k;
+                    print_raw() << As(a, $_(a->i) == i, k == $_(a->k));
+                    );
+  select(std::move(qo));
 
   auto q1 = DATALOL(Var<int> x("x"), y("y");
                     Var<std::string> s("s");

@@ -14,6 +14,12 @@ class Var : public Var_ {
 public:
   using Var_::Var_;
 
+  void assign(const T& t)
+  {
+    assert(!impl->p);
+    impl->p.assign(t);
+  }
+
   bool unify(const T& t) const
   {
     if (impl->p)
@@ -290,45 +296,62 @@ struct Relation : Collection_base {
 };
 
 namespace detail {
-  template<class T>
   struct match_elem {};
 
-  template<class T, class M>
-  struct data_base : match_elem<T> {
-    M T::*m;
-    data_base(M T::*m): m(m) {}
-    const M& get(const T& t) const { return t.*m; }
+  template<class Getter>
+  struct match_base {
+    Getter getter;
+    Rule::vars_t vars;
+    const char *desc;
+    using prop_t = typename flat::remove_cvref<decltype(std::declval<Getter>()())>::type;
+    match_base(const Rule::vars_t& vars, Getter&& getter_, const char *desc)
+      : vars(vars), getter(std::move(getter_)), desc(desc)
+    {}
   };
 
-  template<class T, class M, class V>
-  struct data_eq : data_base<T, M> {
-    const V& v;
-    data_eq(M T::*m, const V& v): data_base<T, M>(m), v(v) {}
-    bool apply(const T& t) const { return this->get(t) == v; }
+  template<class Getter>
+  struct match : match_base<Getter>, match_elem {
+    using typename match_base<Getter>::prop_t;
+    Var<prop_t> prop;
+    match(match_base<Getter>&& base, Var<prop_t>& prop)
+      : match_base<Getter>(std::move(base))
+      , prop(prop)
+    {}
+
+    bool apply() const
+    {
+      return this->prop.unify(this->getter());
+    }
+    match(const match&) = delete;
+    match(match&&) = default;
   };
 
-  template<class T, class M>
-  struct data_bind : data_base<T, M> {
-    const Var<M>& v;
-    data_bind(M T::*m, const Var<M>& v): data_base<T, M>(m), v(v) {}
-    bool apply(const T& t) const { return v.unify(this->get(t)); }
+  template<class Getter> struct get_var<match<Getter>> { static const Var_* get(const match<Getter>& m) { return &m.prop; } };
+
+  template<class Getter>
+  std::ostream& operator<<(std::ostream& os, const match<Getter>& m)
+  {
+    return os << m.desc << " -> " << m.prop;
+  }
+
+  template<typename Getter>
+  match<Getter> operator==(match_base<Getter>&& g, Var<typename match_base<Getter>::prop_t>& v)
+  {
+    return match<Getter>(std::move(g), v);
+  }
+
+  template<typename Getter>
+  match<Getter> operator==(Var<typename match_base<Getter>::prop_t>& v, match_base<Getter>&& g)
+  {
+    return match<Getter>(std::move(g), v);
+  }
+
+  struct apply_sel {
+    template<class S>
+    bool operator()(int, const S& sel) { return sel.apply(); }
   };
-
-  template<class T, class M>
-  struct get_var<data_bind<T, M>> { static const Var_* get(const data_bind<T, M>& d) { return &d.v; } };
-
-  template<class T, class M>
-  struct match_data_factory {
-    M T::* m;
-    constexpr match_data_factory(M T::*m): m(m) {}
-
-    data_bind<T, M> operator==(const Var<M>& v) { return data_bind<T, M>(m, v); }
-
-    template<class V>
-    data_eq<T, M, V> operator==(const V& v) { return data_eq<T, M, V>(m, v); }
-  };
-
 }
+
 template<typename T>
 struct Objects : Collection_base {
   friend class DB;
@@ -358,80 +381,64 @@ struct Objects : Collection_base {
     all.insert(p);
   }
 
-  template<class M>
-  detail::match_data_factory<T, M> operator[](M T::*p) { return p; }
-
-  struct apply_sels {
-    apply_sels(const value_type& t): t(t) {}
-    const value_type& t;
-    template<class S>
-    bool operator()(int, const S& sel) { return sel.apply(t); }
-  };
-
   template<typename... Selector>
   struct Match : Match_base<value_type> {
     using query_type = std::tuple<Selector...>;
-    static_assert(detail::all<std::is_base_of<detail::match_elem<T>, Selector>::value...>::value, "Proper selectors");
+    static_assert(detail::all<std::is_base_of<detail::match_elem, Selector>::value...>::value, "Proper selectors");
 
     Objects<value_type>& rel;
+    Var<value_type> that;
     query_type selector;
-
-    // TODO: move to printing or something
-    std::array<const Var_*, sizeof...(Selector)> vars = {0};
-    int nvars = 0;
-    const value_type *last = nullptr;
 
     void print(std::ostream& os) const override
     {
-      if (last)
-        os << "<" << *last << "> : ";
-      os << "{";
-      for (int i=0; i<nvars; i++)
-        os << ", " << *vars[i];
-      os << "}";
+      os << "<" << that << "> : " << print_tuple<query_type>(selector);
     }
-    Match(Objects<value_type>& rel, Selector&&... sels)
+
+    Match(Objects<value_type>& rel, Var<value_type>& that, Selector&&... sels)
       : rel(rel)
-      , selector(std::forward<Selector>(sels)...) // FIXME: don't copy vars!
+      , that(that)
+      , selector(std::forward<Selector>(sels)...)
     {
-      detail::backtrack bt(vars.data());
-      for_each_in_tuple(bt, selector);
-      nvars = bt.nvars;
+      std::cerr << "Obj selector size = " << sizeof(selector) << "\n";
+      // TODO: verify only `that` is referenced in selectors
     }
+
     void eval_body(Rule& r, size_t idx) override
     {
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
       for_each_in_tuple(bt, selector); // Record unset vars
       for (auto const& urow : this->rel.all) {
-        const value_type& row = *urow;
-        if (for_each_in_tuple(apply_sels(row), selector)) {
-          this->last = &row;
+        that.assign(*urow);
+        if (for_each_in_tuple(detail::apply_sel{}, selector)) {
           this->next->eval_body(r, idx+1);
         }
+        that.zap();
         bt.undo();
       }
     }
   };
 
   template<typename... SelectArgs>
-  Match<SelectArgs...>
-  operator()(SelectArgs&&... args) {
-    return Match<SelectArgs...>(*this, std::forward<SelectArgs>(args)...);
+  flat::pool_ptr<Match<typename flat::remove_cvref<SelectArgs>::type...>>
+  operator()(Var<value_type>& that, SelectArgs&&... args) {
+    return flat::allocate<Match<typename flat::remove_cvref<SelectArgs>::type...>>(*this, that, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
   }
 };
 
 #define CONCAT(a, b) CONCAT_INNER(a, b)
 #define CONCAT_INNER(a, b) a ## b
+#define UNIQ(label) CONCAT(label, CONCAT(__, __LINE__))
 
-#define CAPTURE_COMMON()                                                \
-  Rule::vars_t CONCAT(vars__, __LINE__);                                \
-  flat::guard CONCAT(current_guard__, __LINE__) =                       \
-    Query::with_vars(&CONCAT(vars__, __LINE__))
+#define CAPTURE_COMMON()                                  \
+  Rule::vars_t UNIQ(vars);                                \
+  flat::guard UNIQ(current_guard) =                       \
+    Query::with_vars(&UNIQ(vars))
 
 #define HEAD_WITH(expr,...) ({                                          \
       CAPTURE_COMMON();                                                 \
-      flat::allocate<head>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
+      flat::allocate<head>(UNIQ(vars), ([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
     })
 
 struct head : Rule::Head {
@@ -446,7 +453,7 @@ struct head : Rule::Head {
 
 #define GUARD(expr,...) ({                                              \
       CAPTURE_COMMON();                                                 \
-      flat::allocate<guard>(CONCAT(vars__, __LINE__), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
+      flat::allocate<guard>(UNIQ(vars), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
     })
 
 struct guard : Rule::Body {
@@ -458,3 +465,10 @@ struct guard : Rule::Body {
   void eval_body(Rule& r, size_t idx) override;
   void print(std::ostream& os) const override;
 };
+
+#define $_(expr,...) ({                                                 \
+      CAPTURE_COMMON();                                                 \
+      auto UNIQ(extract) = ([=,##__VA_ARGS__]() { return (expr); });    \
+      detail::match_base<decltype(UNIQ(extract))>(UNIQ(vars), std::move(UNIQ(extract)), #expr); \
+    })
+
