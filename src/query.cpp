@@ -1,12 +1,6 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 
-Var_::Var_(const Var_& v)
-  : impl(v.impl)
-{
-  assert(Query::current_vars);
-  Query::current_vars->set(impl->id);
-}
 bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
   return l->get_name() < r->get_name();
@@ -67,23 +61,19 @@ void DQuery::run() {
 void DQuery::print(std::ostream& os) const { Query::print(os); }
 
 
-head::head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc)
+head::head(fun_t&& f, const std::string& desc)
   : Head(eval_head)
-  , vars(vars)
   , f(f)
   , desc(desc)
 {}
 void head::eval_head(Rule::Elem& self, Rule&, size_t) { static_cast<head&>(self).f(); }
 void head::print(std::ostream& os) const
 {
-  os << "head(" << desc << ")[";
-  Query::print_vars(os, vars);
-  os << "]";
+  os << "head(" << desc << ")";
 }
 
-guard::guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc)
+guard::guard(fun_t&& f, const std::string& desc)
   : Rule::Elem(&eval_body)
-  , vars(vars)
   , f(f)
   , desc(desc)
 {}
@@ -94,7 +84,5 @@ void guard::eval_body(Rule::Elem& self_, Rule& r, size_t idx)
 }
 void guard::print(std::ostream& os) const
 {
-  os << "guard(" << desc << ")[";
-  Query::print_vars(os, vars);
-  os << "]";
+  os << "guard(" << desc << ")";
 }

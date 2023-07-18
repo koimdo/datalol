@@ -7,8 +7,8 @@
 // (fact rules are not allowed)
 
 // Query ::= Rule+
-Query *Query::current = nullptr;
-Rule::vars_t *Query::current_vars = nullptr;
+Query *current_query = nullptr;
+Rule::vars_t *current_vars = nullptr;
 
 Rule::Rule(uhead head): head(head)
 {
@@ -19,7 +19,7 @@ Rule& operator<<(Rule::uhead head, Rule::ubody b)
 {
   auto res = flat::allocate<Rule>(head);
   res->append(b);
-  Query::current->rules.push_back(res);
+  current_query->rules.push_back(res);
   return *res;
 }
 
@@ -39,13 +39,21 @@ void Rule::append(ubody b)
   assert(b->eval_);
   body.push_back(b);
 }
+
+static std::ostream& print_with_vars(std::ostream& os, const Rule::Elem& e)
+{
+  os << "[";
+  Query::print_vars(os, e.vars);
+  return os << "]" << e;
+}
+
 void Rule::print(std::ostream& os) const
 {
   assert(head && !body.empty());
-  os << *head << " << ";
+  print_with_vars(os, *head) << " << ";
   int i=0;
   for (auto const& b : body) {
-    os << (i ? " & " : "") << (recursive.test(i) ? "^":"") << *b;
+    print_with_vars(os << (i ? " & " : "") << (recursive.test(i) ? "^":""), *b);
     i++;
   }
 }
@@ -64,19 +72,19 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
 Query::Query(Query&&) = default;
 void Query::print(std::ostream& os) const
 {
-  flat::guard current_query;
-  current_query.set(&current, const_cast<Query*>(this));
+  flat::guard guard = const_cast<Query*>(this)->with_query();
   os << "{";
   size_t i=0;
   for (auto const& r : rules)
     os << *r << (rules.size() == ++i ? "" : ",\n");
   os <<"}";
 }
+
 void Query::print_vars(std::ostream& os, const Rule::vars_t& vs)
 {
   int i=0;
   int out = 0;
-  for (auto v : current->vars) {
+  for (auto v : current_query->vars) {
     if (vs.test(i)) {
       os << (out?", ":"") << *v;
       out++;
@@ -99,9 +107,24 @@ void cow_buf::clear()
 
 Var_::Impl::Impl() = default;
 Var_::Var_(const std::string& name)
-  : impl(Query::current->mkvar(name))
+  : impl(current_query->mkvar(name))
 {
 }
+
+Var_::Var_(const Var_& v)
+  : impl(v.impl)
+{
+  assert(current_vars);
+  current_vars->set(impl->id);
+}
+
+Rule::Elem::Elem(eval_t eval_)
+  : eval_(eval_)
+{
+  if (current_vars)
+    vars = *current_vars;  
+}
+
 flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
 {
   auto res = pool.template allocate<Var_::Impl>();
@@ -114,7 +137,7 @@ flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
 flat::guard Query::with_query()
 {
   flat::guard res;
-  res.set(&current, this);
+  res.set(&current_query, this);
   return res;
 }
 

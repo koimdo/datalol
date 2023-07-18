@@ -21,7 +21,8 @@ public:
     typedef void (*eval_t)(Elem&, Rule&, size_t);
     eval_t eval_ = nullptr;
     Elem *next = nullptr;
-    Elem(eval_t eval_): eval_(eval_) {}
+    vars_t vars;
+    Elem(eval_t eval_);
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() { return nullptr; }
   };
@@ -120,8 +121,6 @@ protected:
   std::vector<flat::pool_ptr<Rule>> rules;
   void print(std::ostream& os) const override;
   flat::autorelease pool;
-  static Query *current;
-  static Rule::vars_t *current_vars;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
   friend class Var_;
   flat::pool_ptr<Var_::Impl> mkvar(const std::string& name);

@@ -440,30 +440,28 @@ struct Objects : Collection_base {
 
 #define HEAD_WITH(expr,...) ({                                          \
       CAPTURE_COMMON();                                                 \
-      flat::allocate<head>(UNIQ(vars), ([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
+      flat::allocate<head>(([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
     })
 
 struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
   std::string desc;
-  Rule::vars_t vars;
-  head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<head>");
+  head(fun_t&& f, const std::string& desc = "<head>");
   static void eval_head(Rule::Elem&, Rule&, size_t);
   void print(std::ostream& os) const override;
 };
 
 #define GUARD(expr,...) ({                                              \
       CAPTURE_COMMON();                                                 \
-      flat::allocate<guard>(UNIQ(vars), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
+      flat::allocate<guard>(([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
     })
 
 struct guard : Rule::Elem {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
-  Rule::vars_t vars;
-  guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<guard>");
+  guard(fun_t&& f, const std::string& desc = "<guard>");
   static void eval_body(Rule::Elem& self_, Rule& r, size_t idx);
   void print(std::ostream& os) const override;
 };
