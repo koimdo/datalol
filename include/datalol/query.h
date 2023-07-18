@@ -152,14 +152,8 @@ namespace detail {
   };
 }
 
-template<typename value_type>
-struct Match_base : Rule::Body {
-  // TODO: any positive content for Match_base. perhaps list of bound vars?
-};
-
 #define DATALOL(...) DQuery([&]() { __VA_ARGS__ ; })
-class DQuery : Query, Rule::Body {
-  void eval_body(Rule& r, size_t) override;
+class DQuery : Query {
   void print(std::ostream& os) const override;
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
@@ -249,7 +243,7 @@ struct Relation : Collection_base {
   }
 
   template<typename... Selector>
-  struct Match : Match_base<value_type>, public Rule::Head {
+  struct Match : public Rule::Head {
     Match(const Match&) = default;
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
@@ -267,24 +261,27 @@ struct Relation : Collection_base {
     Collection_base *collection() override { return &rel; }
 
     Match(Relation<value_type>& rel, Selector&&... sels)
-      : rel(rel)
+      : Head(eval_head, eval_body)
+      , rel(rel)
       , selector(std::forward<Selector>(sels)...)
     {}
-    void eval_body(Rule& r, size_t idx) override
+    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
+      Match& self = static_cast<Match&>(self_);
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
-      for_each_in_tuple(bt, selector); // Record unset vars
-      for (auto const& row : idx == r.seminaive_current ? this->rel.delta : this->rel.all) {
-        if (for_each_in_tuple(detail::unify1(), selector, row))
-          this->next->eval_body(r, idx+1);
+      for_each_in_tuple(bt, self.selector); // Record unset vars
+      for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
+        if (for_each_in_tuple(detail::unify1(), self.selector, row))
+          self.next->eval(r, idx+1);
         bt.undo();
       }
     }
-    void eval_head(Rule& r) override
+    static void eval_head(Rule::Elem& self_, Rule& r, size_t)
     {
-      auto res = transform_each(selector, detail::get_value{});
-      rel.next_delta.insert(std::move(res));
+      Match& self = static_cast<Match&>(self_);
+      auto res = transform_each(self.selector, detail::get_value{});
+      self.rel.next_delta.insert(std::move(res));
     }
   };
 
@@ -385,7 +382,7 @@ struct Objects : Collection_base {
   }
 
   template<typename... Selector>
-  struct Match : Match_base<value_type> {
+  struct Match : Rule::Elem {   // TODO: upgrade to Rule::Head
     using query_type = std::tuple<Selector...>;
     static_assert(detail::all<std::is_base_of<detail::match_elem, Selector>::value...>::value, "Proper selectors");
 
@@ -399,7 +396,8 @@ struct Objects : Collection_base {
     }
 
     Match(Objects<value_type>& rel, Var<value_type>& that, Selector&&... sels)
-      : rel(rel)
+      : Rule::Elem(eval_body)
+      , rel(rel)
       , that(std::move(that))
       , selector(std::forward<Selector>(sels)...)
     {
@@ -407,17 +405,18 @@ struct Objects : Collection_base {
       // TODO: verify only `that` is referenced in selectors
     }
 
-    void eval_body(Rule& r, size_t idx) override
+    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
+      Match& self = static_cast<Match&>(self_);
       const Var_ *vars[sizeof...(Selector)];
       detail::backtrack bt(vars);      // Cannot have more unset vars than query size
-      for_each_in_tuple(bt, selector); // Record unset vars
-      for (auto const& urow : this->rel.all) {
-        that.assign(*urow);
-        if (for_each_in_tuple(detail::apply_sel{}, selector)) {
-          this->next->eval_body(r, idx+1);
+      for_each_in_tuple(bt, self.selector); // Record unset vars
+      for (auto const& urow : self.rel.all) {
+        self.that.assign(*urow);
+        if (for_each_in_tuple(detail::apply_sel{}, self.selector)) {
+          self.next->eval(r, idx+1);
         }
-        that.zap();
+        self.that.zap();
         bt.undo();
       }
     }
@@ -450,7 +449,7 @@ struct head : Rule::Head {
   std::string desc;
   Rule::vars_t vars;
   head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<head>");
-  void eval_head(Rule&) override;
+  static void eval_head(Rule::Elem&, Rule&, size_t);
   void print(std::ostream& os) const override;
 };
 
@@ -459,13 +458,13 @@ struct head : Rule::Head {
       flat::allocate<guard>(UNIQ(vars), ([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
     })
 
-struct guard : Rule::Body {
+struct guard : Rule::Elem {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
   Rule::vars_t vars;
   guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc = "<guard>");
-  void eval_body(Rule& r, size_t idx) override;
+  static void eval_body(Rule::Elem& self_, Rule& r, size_t idx);
   void print(std::ostream& os) const override;
 };
 

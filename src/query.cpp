@@ -23,10 +23,10 @@ void DQuery::configure()
       to_merge.insert(c);
 
     // Now, daisy-chain the rule body
-    Rule::Body *next = this;
+    Rule::Elem *next = r->get_head().get(flat::unsafe_extract_pointer{});
     auto body = r->get_body();
     for (int i=body.size()-1; i >= 0; i--) {
-      Rule::Body *elem = static_cast<Rule::Body*>(body[i]);
+      Rule::Elem *elem = static_cast<Rule::Elem*>(body[i]);
       elem->next = next;
       next = elem;
     }
@@ -64,16 +64,16 @@ void DQuery::run() {
   }
 }
 
-void DQuery::eval_body(Rule& r, size_t)
-{
-  r.get_head()->eval_head(r);
-}
-
 void DQuery::print(std::ostream& os) const { Query::print(os); }
 
 
-head::head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
-void head::eval_head(Rule&) { f(); }
+head::head(const Rule::vars_t& vars, fun_t&& f, const std::string& desc)
+  : Head(eval_head)
+  , vars(vars)
+  , f(f)
+  , desc(desc)
+{}
+void head::eval_head(Rule::Elem& self, Rule&, size_t) { static_cast<head&>(self).f(); }
 void head::print(std::ostream& os) const
 {
   os << "head(" << desc << ")[";
@@ -81,10 +81,16 @@ void head::print(std::ostream& os) const
   os << "]";
 }
 
-guard::guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc): vars(vars), f(f), desc(desc) {}
-void guard::eval_body(Rule& r, size_t idx)
+guard::guard(const Rule::vars_t& vars, fun_t&& f, const std::string& desc)
+  : Rule::Elem(&eval_body)
+  , vars(vars)
+  , f(f)
+  , desc(desc)
+{}
+void guard::eval_body(Rule::Elem& self_, Rule& r, size_t idx)
 {
-  if (f()) next->eval_body(r, idx+1);
+  guard& self = static_cast<guard&>(self_);
+  if (self.f()) self.next->eval(r, idx+1);
 }
 void guard::print(std::ostream& os) const
 {

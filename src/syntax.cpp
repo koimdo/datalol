@@ -10,7 +10,11 @@
 Query *Query::current = nullptr;
 Rule::vars_t *Query::current_vars = nullptr;
 
-Rule::Rule(uhead head): head(head) {}
+Rule::Rule(uhead head): head(head)
+{
+  head->eval_ = head->eval_head;
+}
+
 Rule& operator<<(Rule::uhead head, Rule::ubody b)
 {
   auto res = flat::allocate<Rule>(head);
@@ -27,11 +31,12 @@ Rule& operator& (Rule& rule, Rule::ubody b) {
 void Rule::run(size_t current_delta)
 {
   seminaive_current = current_delta;
-  body[0]->eval_body(*this, 0);
+  body[0]->eval(*this, 0);
 }
 
 void Rule::append(ubody b)
 {
+  assert(b->eval_);
   body.push_back(b);
 }
 void Rule::print(std::ostream& os) const

@@ -17,25 +17,29 @@ class Collection_base;
 class Rule : public IPrint {
 public:
   typedef std::bitset<64> vars_t;
-  struct Head : IPrint {
-    virtual void eval_head(Rule&) = 0;
+  struct Elem : IPrint {
+    typedef void (*eval_t)(Elem&, Rule&, size_t);
+    eval_t eval_ = nullptr;
+    Elem *next = nullptr;
+    Elem(eval_t eval_): eval_(eval_) {}
+    void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() { return nullptr; }
   };
-  struct Body : IPrint {
-    virtual void eval_body(Rule&, size_t) = 0;
-    virtual Collection_base *collection() { return nullptr; }
-    Body *next = nullptr;
+  struct Head : Elem {
+    eval_t eval_head;
+    Head(eval_t eval): Elem(nullptr), eval_head(eval) {}
+    Head(eval_t head, eval_t body): Elem(body), eval_head(head) {}
   };
 
   using uhead = flat::pool_ptr<Head>;
-  using ubody = flat::pool_ptr<Body>;
+  using ubody = flat::pool_ptr<Elem>;
 
   friend Rule& operator<<(uhead head, ubody b);
   friend Rule& operator& (Rule& rule, Rule::ubody e);
   friend class DQuery;
 
   uhead get_head() { return head; }
-  flat::span<Body*> get_body() { return { reinterpret_cast<Body**>(body.data()), body.size() }; }
+  flat::span<Elem*> get_body() { return { reinterpret_cast<Elem**>(body.data()), body.size() }; }
   size_t size() const { return body.size(); }
 
   size_t seminaive_current;     // FIXME: finer choice of Delta'd relation
