@@ -17,11 +17,27 @@ class Collection_base;
 class Rule : public IPrint {
 public:
   typedef std::bitset<64> vars_t;
-  struct Elem : IPrint {
+  struct with_vars {
+    vars_t vars;
+    with_vars();
+
+    template<typename Make>
+    static
+    auto capture(Make&& make) -> decltype(make())
+    {
+      Rule::vars_t vars;
+      flat::guard vars_guard = capture_helper(&vars);
+      return make();
+    }
+  private:
+    static
+    flat::guard capture_helper(Rule::vars_t *dst);
+  };
+
+  struct Elem : IPrint, public with_vars {
     typedef void (*eval_t)(Elem&, Rule&, size_t);
     eval_t eval_ = nullptr;
     Elem *next = nullptr;
-    vars_t vars;
     Elem(eval_t eval_);
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() { return nullptr; }
@@ -138,6 +154,4 @@ public:
   }
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::vars_t& vs);
-  static
-  flat::guard with_vars(Rule::vars_t *dst);
 };

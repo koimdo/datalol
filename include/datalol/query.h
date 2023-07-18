@@ -296,13 +296,12 @@ namespace detail {
   struct match_elem {};
 
   template<class Getter>
-  struct match_base {
+  struct match_base : Rule::with_vars {
     Getter getter;
-    Rule::vars_t vars;
     const char *desc;
     using prop_t = typename flat::remove_cvref<decltype(std::declval<Getter>()())>::type;
-    match_base(const Rule::vars_t& vars, Getter&& getter_, const char *desc)
-      : vars(vars), getter(std::move(getter_)), desc(desc)
+    match_base(const char *desc, Getter&& getter_)
+      : getter(std::move(getter_)), desc(desc)
     {}
   };
 
@@ -429,46 +428,35 @@ struct Objects : Collection_base {
   }
 };
 
-#define CONCAT(a, b) CONCAT_INNER(a, b)
-#define CONCAT_INNER(a, b) a ## b
-#define UNIQ(label) CONCAT(label, CONCAT(__, __LINE__))
-
-#define CAPTURE_COMMON()                                  \
-  Rule::vars_t UNIQ(vars);                                \
-  flat::guard UNIQ(current_guard) =                       \
-    Query::with_vars(&UNIQ(vars))
-
-#define HEAD_WITH(expr,...) ({                                          \
-      CAPTURE_COMMON();                                                 \
-      flat::allocate<head>(([=,##__VA_ARGS__]() -> void { (void)(expr); }), #expr); \
-    })
-
 struct head : Rule::Head {
   using fun_t = std::function<void()>;
   fun_t f;
   std::string desc;
-  head(fun_t&& f, const std::string& desc = "<head>");
+  head(const std::string& desc, fun_t&& f);
   static void eval_head(Rule::Elem&, Rule&, size_t);
   void print(std::ostream& os) const override;
 };
-
-#define GUARD(expr,...) ({                                              \
-      CAPTURE_COMMON();                                                 \
-      flat::allocate<guard>(([=,##__VA_ARGS__]() -> bool { return (expr); }), #expr); \
-    })
 
 struct guard : Rule::Elem {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
-  guard(fun_t&& f, const std::string& desc = "<guard>");
+  guard(const std::string& desc, fun_t&& f);
   static void eval_body(Rule::Elem& self_, Rule& r, size_t idx);
   void print(std::ostream& os) const override;
 };
 
-#define $_(expr,...) ({                                                 \
-      CAPTURE_COMMON();                                                 \
-      auto UNIQ(extract) = ([=,##__VA_ARGS__]() { return (expr); });    \
-      detail::match_base<decltype(UNIQ(extract))>(UNIQ(vars), std::move(UNIQ(extract)), #expr); \
-    })
+#define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() { return (type)(expr); })
+
+#define HEAD_WITH(expr,...)                                             \
+  Rule::with_vars::capture([&]() { return flat::allocate<head> (CAPTURE_HELPER(expr, void, ##__VA_ARGS__)); })
+
+#define GUARD(expr,...)                                                 \
+  Rule::with_vars::capture([&]() { return flat::allocate<guard>(CAPTURE_HELPER(expr, bool, ##__VA_ARGS__)); })
+
+#define $_(expr,...)                                                    \
+  Rule::with_vars::capture([&]() {                                      \
+    auto desc_thunk = std::make_pair(CAPTURE_HELPER(expr, decltype(expr), ##__VA_ARGS__)); \
+    return detail::match_base<decltype(desc_thunk.second)>(desc_thunk.first, std::move(desc_thunk.second)); \
+  })
 

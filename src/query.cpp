@@ -61,7 +61,7 @@ void DQuery::run() {
 void DQuery::print(std::ostream& os) const { Query::print(os); }
 
 
-head::head(fun_t&& f, const std::string& desc)
+head::head(const std::string& desc, fun_t&& f)
   : Head(eval_head)
   , f(f)
   , desc(desc)
@@ -72,7 +72,7 @@ void head::print(std::ostream& os) const
   os << "head(" << desc << ")";
 }
 
-guard::guard(fun_t&& f, const std::string& desc)
+guard::guard(const std::string& desc, fun_t&& f)
   : Rule::Elem(&eval_body)
   , f(f)
   , desc(desc)

@@ -111,6 +111,14 @@ Var_::Var_(const std::string& name)
 {
 }
 
+
+flat::guard Rule::with_vars::capture_helper(Rule::vars_t *dst)
+{
+  flat::guard res;
+  res.set(&current_vars, dst);
+  return res;
+}
+
 Var_::Var_(const Var_& v)
   : impl(v.impl)
 {
@@ -118,11 +126,14 @@ Var_::Var_(const Var_& v)
   current_vars->set(impl->id);
 }
 
+Rule::with_vars::with_vars()
+{
+  if (current_vars)
+    vars = *current_vars;
+}
 Rule::Elem::Elem(eval_t eval_)
   : eval_(eval_)
 {
-  if (current_vars)
-    vars = *current_vars;  
 }
 
 flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
@@ -138,12 +149,5 @@ flat::guard Query::with_query()
 {
   flat::guard res;
   res.set(&current_query, this);
-  return res;
-}
-
-flat::guard Query::with_vars(Rule::vars_t *dst)
-{
-  flat::guard res;
-  res.set(&current_vars, dst);
   return res;
 }
