@@ -118,7 +118,7 @@ protected:
     int id;
     mutable cow_buf p;
   };
-  flat::pool_ptr<Impl> impl;
+  Impl *impl;
   friend class Query;
 
   friend

@@ -107,7 +107,7 @@ void cow_buf::clear()
 
 Var_::Impl::Impl() = default;
 Var_::Var_(const std::string& name)
-  : impl(current_query->mkvar(name))
+  : impl(current_query->mkvar(name).get(flat::unsafe_extract_pointer{}))
 {
 }
 
