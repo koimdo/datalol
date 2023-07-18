@@ -41,6 +41,7 @@ public:
     Elem(eval_t eval_);
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() { return nullptr; }
+    Elem(const Elem&) = delete;
   };
   struct Head : Elem {
     eval_t eval_head;
@@ -126,8 +127,9 @@ public:
   Var_(const Var_&);
   Var_(Var_&&) = default;
   Var_(const std::string& name = std::string());
-  bool operator<(const Var_& o) const { return impl->name < o.impl->name; }
+  bool operator<(const Var_& o) const { return impl->id < o.impl->id; }
   void zap() const { impl->p.clear(); }
+  int get_id() const noexcept { return impl->id; }
   bool is_unset() const { return !impl->p; }
   const std::string& get_name() const noexcept { return impl->name; }
 };

@@ -19,7 +19,8 @@ struct A {
 
 
 struct raw_result : Rule::Head {
-  void eval_head(Rule& r) override
+  raw_result(): Head(&eval_) {}
+  static void eval_(Rule::Elem&, Rule& r, size_t)
   {
     std::cout << r << "\n";
   }

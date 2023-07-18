@@ -125,6 +125,24 @@ namespace detail {
   template<class T> struct get_var { static const Var_* get(const T&) { return nullptr; } };
   template<class T> struct get_var<Var<T>> { static const Var_* get(const Var<T>& v) { return &v; } };
 
+  struct mark_vars_ {
+    Rule::vars_t res;
+    template<typename T>
+    bool operator()(int, const T& t)
+    {
+      if (const Var_ *v = get_var<T>::get(t))
+        res.set(v->get_id());
+      return true;
+    }
+  };
+  template<typename... Selector>
+  Rule::vars_t mark_vars(const std::tuple<Selector...>& sels)
+  {
+    mark_vars_ mv;
+    for_each_in_tuple(mv, sels);
+    return mv.res;
+  }
+
   struct backtrack {
     const Var_ **vars;
     int nvars = 0;
@@ -244,7 +262,6 @@ struct Relation : Collection_base {
 
   template<typename... Selector>
   struct Match : public Rule::Head {
-    Match(const Match&) = default;
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
     static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
@@ -264,7 +281,9 @@ struct Relation : Collection_base {
       : Head(eval_head, eval_body)
       , rel(rel)
       , selector(std::forward<Selector>(sels)...)
-    {}
+    {
+      vars = detail::mark_vars(selector);
+    }
     static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
       Match& self = static_cast<Match&>(self_);
@@ -401,6 +420,8 @@ struct Objects : Collection_base {
       , selector(std::forward<Selector>(sels)...)
     {
       std::cerr << "Obj selector size = " << sizeof(selector) << "\n";
+      vars = detail::mark_vars(selector);
+      vars.set(that.get_id());
       // TODO: verify only `that` is referenced in selectors
     }
 
