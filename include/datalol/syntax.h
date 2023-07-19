@@ -6,6 +6,7 @@
 #include <bitset>
 #include "flat/memory"
 #include "flat/span"
+#include "flat/set"
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
@@ -54,7 +55,7 @@ public:
 
   friend Rule& operator<<(uhead head, ubody b);
   friend Rule& operator& (Rule& rule, Rule::ubody e);
-  friend class DQuery;
+  friend class Query;
 
   uhead get_head() { return head; }
   flat::span<Elem*> get_body() { return { reinterpret_cast<Elem**>(body.data()), body.size() }; }
@@ -135,7 +136,7 @@ public:
 };
 
 class Query : public IPrint {
-protected:
+private:
   std::vector<flat::pool_ptr<Rule>> rules;
   void print(std::ostream& os) const override;
   flat::autorelease pool;
@@ -145,6 +146,12 @@ protected:
   std::vector<flat::pool_ptr<Var_::Impl>> vars;
 
   flat::guard with_query();
+
+  struct cmp {
+    bool operator()(Collection_base *l, Collection_base *r) const;
+  };
+  flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
+  void configure();
 public:
   template<typename F>
   Query(F&& build)
@@ -153,7 +160,11 @@ public:
     flat::autorelease::scoped guard(pool);
     flat::guard current_query = with_query();
     build();
+    configure();
   }
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::with_vars& vs);
+  void run();
+};
+
 };

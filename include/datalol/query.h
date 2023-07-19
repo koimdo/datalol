@@ -170,25 +170,7 @@ namespace detail {
   };
 }
 
-#define DATALOL(...) DQuery([&]() { __VA_ARGS__ ; })
-class DQuery : Query {
-  void print(std::ostream& os) const override;
-  struct cmp {
-    bool operator()(Collection_base *l, Collection_base *r) const;
-  };
-  flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
-  void configure();
-
-public:
-  template<typename F>
-  DQuery(F&& build)
-    : Query(std::move(build))
-  {
-    configure();
-  }
-
-  void run();
-};
+#define DATALOL(...) Query([&]() { __VA_ARGS__ ; })
 
 // TODO: despecialize relations?
 

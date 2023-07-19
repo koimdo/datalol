@@ -1,12 +1,12 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 
-bool DQuery::cmp::operator()(Collection_base *l, Collection_base *r) const
+bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
   return l->get_name() < r->get_name();
 }
 
-void DQuery::configure()
+void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side
   for (auto& r : rules) {
@@ -36,7 +36,7 @@ void DQuery::configure()
   }
 }
 
-void DQuery::run() {
+void Query::run() {
   auto guard = with_query();
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {
@@ -57,9 +57,6 @@ void DQuery::run() {
     std::cerr << "Changed: " << changed << "\n";
   }
 }
-
-void DQuery::print(std::ostream& os) const { Query::print(os); }
-
 
 head::head(const std::string& desc, fun_t&& f)
   : Head(eval_head)

@@ -34,7 +34,7 @@ static
 Rule::uhead
 print_raw() { return flat::allocate<raw_result>(); }
 
-void select(DQuery&& qf)
+void select(Query&& qf)
 {
   std::cout << "SELECT(" << (const Query&)qf << "):\n";
   qf.run();
