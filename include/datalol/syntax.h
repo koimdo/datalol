@@ -41,7 +41,7 @@ public:
     Elem *next = nullptr;
     Elem(eval_t eval_);
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
-    virtual Collection_base *collection() { return nullptr; }
+    virtual Collection_base *collection() const { return nullptr; }
     Elem(const Elem&) = delete;
   };
   struct Head : Elem {
@@ -58,7 +58,7 @@ public:
   friend class Query;
 
   uhead get_head() { return head; }
-  flat::span<Elem*> get_body() { return { reinterpret_cast<Elem**>(body.data()), body.size() }; }
+  flat::span<ubody> get_body() { return body; }
   size_t size() const { return body.size(); }
 
   size_t seminaive_current;     // FIXME: finer choice of Delta'd relation
@@ -124,6 +124,7 @@ protected:
 
   friend
   std::ostream& operator<<(std::ostream& os, const Impl&);
+  Var_(flat::pool_ptr<Impl> p);
 public:
   Var_(const Var_&);
   Var_(Var_&&) = default;

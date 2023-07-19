@@ -28,6 +28,7 @@ Rule& operator<<(Rule::uhead head, Rule::ubody b)
 }
 
 Rule& operator& (Rule& rule, Rule::ubody b) {
+  rule.body.back()->next = b.get(flat::unsafe_extract_pointer{});
   rule.append(b);
   return rule;
 }
@@ -41,6 +42,7 @@ void Rule::run(size_t current_delta)
 void Rule::append(ubody b)
 {
   assert(b->eval_);
+  b->next = head.get(flat::unsafe_extract_pointer{});
   body.push_back(b);
 }
 
@@ -112,8 +114,12 @@ void cow_buf::clear()
 }
 
 Var_::Impl::Impl() = default;
+Var_::Var_(flat::pool_ptr<Impl> p)
+  : impl(p.get(flat::unsafe_extract_pointer{}))
+{
+}
 Var_::Var_(const std::string& name)
-  : impl(current_query->mkvar(name).get(flat::unsafe_extract_pointer{}))
+  : Var_(current_query->mkvar(name))
 {
 }
 

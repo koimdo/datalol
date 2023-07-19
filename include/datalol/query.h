@@ -257,7 +257,7 @@ struct Relation : Collection_base {
       os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
     }
 
-    Collection_base *collection() override { return &rel; }
+    Collection_base *collection() const override { return &rel; }
 
     Match(Relation<value_type>& rel, Selector&&... sels)
       : Head(eval_head, eval_body)

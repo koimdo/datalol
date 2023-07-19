@@ -15,15 +15,6 @@ void Query::configure()
     auto c = r.get_head()->collection();
     if (c)
       to_merge.insert(c);
-
-    // Now, daisy-chain the rule body
-    Rule::Elem *next = r.get_head().get(flat::unsafe_extract_pointer{});
-    auto body = r.get_body();
-    for (int i=body.size()-1; i >= 0; i--) {
-      Rule::Elem *elem = static_cast<Rule::Elem*>(body[i]);
-      elem->next = next;
-      next = elem;
-    }
   }
   // Step 2: Mark recursions in rule bodies
   // TODO: stratify using SCC on the rule graph.
