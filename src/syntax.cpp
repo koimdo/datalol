@@ -20,10 +20,11 @@ Rule::Rule(uhead head): head(head)
 
 Rule& operator<<(Rule::uhead head, Rule::ubody b)
 {
-  auto res = flat::allocate<Rule>(head);
-  res->append(b);
-  current_query->rules.push_back(res);
-  return *res;
+  auto& rules = current_query->rules;
+  rules.push_back(Rule(head));
+  auto& res = rules.back();
+  res.append(b);
+  return res;
 }
 
 Rule& operator& (Rule& rule, Rule::ubody b) {
@@ -79,7 +80,7 @@ void Query::print(std::ostream& os) const
   os << "{";
   size_t i=0;
   for (auto const& r : rules)
-    os << *r << (rules.size() == ++i ? "" : ",\n");
+    os << r << (rules.size() == ++i ? "" : ",\n");
   os <<"}";
 }
 

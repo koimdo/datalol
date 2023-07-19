@@ -10,15 +10,15 @@ void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side
   for (auto& r : rules) {
-    assert(!r->get_body().empty());
-    assert(r->get_head());
-    auto c = r->get_head()->collection();
+    assert(!r.get_body().empty());
+    assert(r.get_head());
+    auto c = r.get_head()->collection();
     if (c)
       to_merge.insert(c);
 
     // Now, daisy-chain the rule body
-    Rule::Elem *next = r->get_head().get(flat::unsafe_extract_pointer{});
-    auto body = r->get_body();
+    Rule::Elem *next = r.get_head().get(flat::unsafe_extract_pointer{});
+    auto body = r.get_body();
     for (int i=body.size()-1; i >= 0; i--) {
       Rule::Elem *elem = static_cast<Rule::Elem*>(body[i]);
       elem->next = next;
@@ -28,10 +28,10 @@ void Query::configure()
   // Step 2: Mark recursions in rule bodies
   // TODO: stratify using SCC on the rule graph.
   for (auto& r : rules) {
-    for (size_t i=0; i<r->size(); ++i) {
-      auto coll = r->get_body()[i]->collection();
+    for (size_t i=0; i<r.size(); ++i) {
+      auto coll = r.get_body()[i]->collection();
       if (coll && to_merge.contains(coll))
-        r->recursive.set(i);
+        r.recursive.set(i);
     }
   }
 }
@@ -42,12 +42,12 @@ void Query::run() {
   for (int iter = 0; changed; iter++) {
     std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
-      if (r->recursive.none()) {
-        r->run(-1);
+      if (r.recursive.none()) {
+        r.run(-1);
       } else {
-        for (size_t i=0; i<r->size(); ++i) {
-          if (r->recursive.test(i))
-            r->run(i);
+        for (size_t i=0; i<r.size(); ++i) {
+          if (r.recursive.test(i))
+            r.run(i);
         }
       }
     }

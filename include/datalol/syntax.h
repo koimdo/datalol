@@ -137,7 +137,7 @@ public:
 
 class Query : public IPrint {
 private:
-  std::vector<flat::pool_ptr<Rule>> rules;
+  std::vector<Rule> rules;
   void print(std::ostream& os) const override;
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
