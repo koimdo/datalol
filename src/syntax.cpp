@@ -13,6 +13,9 @@ Rule::vars_t *current_vars = nullptr;
 Rule::Rule(uhead head): head(head)
 {
   head->eval_ = head->eval_head;
+  assert(head->negative.none() || head->positive.none());
+  if (head->positive.any())
+    std::swap(head->positive, head->negative);
 }
 
 Rule& operator<<(Rule::uhead head, Rule::ubody b)
@@ -43,7 +46,7 @@ void Rule::append(ubody b)
 static std::ostream& print_with_vars(std::ostream& os, const Rule::Elem& e)
 {
   os << "[";
-  Query::print_vars(os, e.vars);
+  Query::print_vars(os, e);
   return os << "]" << e;
 }
 
@@ -80,16 +83,18 @@ void Query::print(std::ostream& os) const
   os <<"}";
 }
 
-void Query::print_vars(std::ostream& os, const Rule::vars_t& vs)
+void Query::print_vars(std::ostream& os, const Rule::with_vars& vs)
 {
   int i=0;
   int out = 0;
   for (auto v : current_query->vars) {
-    if (vs.test(i)) {
-      os << (out?", ":"") << *v;
-      out++;
-    }
+    bool is_pos = vs.positive.test(i);
+    bool is_neg = vs.negative.test(i);
     i++;
+    if (!is_pos && !is_neg)
+      continue;
+    os << (out?", ":"") << (is_pos ? "+":"") << (is_neg ? "-":"") << *v;
+    out++;
   }
 }
 
@@ -129,7 +134,7 @@ Var_::Var_(const Var_& v)
 Rule::with_vars::with_vars()
 {
   if (current_vars)
-    vars = *current_vars;
+    negative = *current_vars;
 }
 Rule::Elem::Elem(eval_t eval_)
   : eval_(eval_)

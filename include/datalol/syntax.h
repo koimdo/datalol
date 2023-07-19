@@ -18,7 +18,7 @@ class Rule : public IPrint {
 public:
   typedef std::bitset<64> vars_t;
   struct with_vars {
-    vars_t vars;
+    vars_t positive, negative;
     with_vars();
 
     template<typename Make>
@@ -155,5 +155,5 @@ public:
     build();
   }
   Query(Query&&);
-  static void print_vars(std::ostream& os, const Rule::vars_t& vs);
+  static void print_vars(std::ostream& os, const Rule::with_vars& vs);
 };

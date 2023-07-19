@@ -282,7 +282,7 @@ struct Relation : Collection_base {
       , rel(rel)
       , selector(std::forward<Selector>(sels)...)
     {
-      vars = detail::mark_vars(selector);
+      positive = detail::mark_vars(selector);
     }
     static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
@@ -331,7 +331,9 @@ namespace detail {
     match(match_base<Getter>&& base, Var<prop_t>& prop)
       : match_base<Getter>(std::move(base))
       , prop(std::move(prop))
-    {}
+    {
+      Rule::with_vars::positive.set(prop.get_id());
+    }
 
     bool apply() const
     {
@@ -347,7 +349,7 @@ namespace detail {
   std::ostream& operator<<(std::ostream& os, const match<Getter>& m)
   {
     os << "[";
-    Query::print_vars(os, m.vars);
+    Query::print_vars(os, m);
     os << "]";
     return os << m.desc << " -> " << m.prop;
   }
@@ -420,8 +422,8 @@ struct Objects : Collection_base {
       , selector(std::forward<Selector>(sels)...)
     {
       std::cerr << "Obj selector size = " << sizeof(selector) << "\n";
-      vars = detail::mark_vars(selector);
-      vars.set(that.get_id());
+      positive = detail::mark_vars(selector);
+      positive.set(that.get_id());
       // TODO: verify only `that` is referenced in selectors
     }
 
