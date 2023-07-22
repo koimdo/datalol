@@ -15,6 +15,7 @@ struct IPrint {
 };
 
 class Collection_base;
+class Var_;
 class Rule : public IPrint {
 public:
   typedef std::bitset<64> vars_t;
@@ -42,6 +43,7 @@ public:
     Elem(eval_t eval_);
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() const { return nullptr; }
+    virtual void add_undo(Var_*) { assert(false && "Must implement add_undo() if it has positive vars"); }
     Elem(const Elem&) = delete;
   };
   struct Head : Elem {
@@ -123,7 +125,7 @@ protected:
     alignas(T) unsigned char buf[sizeof(T)];
   };
 
-  Impl *impl;
+  Impl *impl = nullptr;
   friend class Query;
 
   friend
@@ -136,9 +138,11 @@ protected:
 public:
   Var_(const Var_&);
   Var_(Var_&&) = default;
+  Var_& operator=(const Var_&) = delete;
+  Var_& operator=(Var_&&) = default;
+  Var_() = default;
   void zap() const { impl->p.clear(); }
   int get_id() const noexcept { return impl->id; }
-  bool is_unset() const { return !impl->p; }
 };
 
 template<class T>
@@ -171,6 +175,7 @@ public:
   }
 
   const T *get() const noexcept { return static_cast<const T*>(impl->p.get()); }
+  explicit operator bool() const noexcept { return get(); }
   const T *operator->() const noexcept { return get(); }
   const T& operator*() const noexcept { return *get(); }
   friend std::ostream& operator<<(std::ostream& os, const Var& v)

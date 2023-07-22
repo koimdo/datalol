@@ -6,6 +6,16 @@ bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
   return l->get_name() < r->get_name();
 }
 
+static
+void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::Elem& e)
+{
+  auto neg = e.negative;
+  neg &= ~bound;
+  if (neg.none())
+    return;
+  std::cerr << "Error in rule " << r << ": unbound vars" << "\n";
+  assert(false);
+}
 void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side
@@ -24,6 +34,29 @@ void Query::configure()
       if (coll && to_merge.contains(coll))
         r.recursive.set(i);
     }
+  }
+
+  // Step 3: set undo variables
+  for (auto& r : rules) {
+    Rule::vars_t bound;
+    int i=0;
+    for (auto elem : r.get_body()) {
+      auto pos = elem->positive;
+      verify_neg(bound, r, *elem);
+
+      if (pos.any())
+        elem->add_undo(nullptr);
+      pos &= ~bound;
+      for (auto v : vars)
+        if (pos.test(v->id)) {
+          Var_ vv(v);
+          elem->add_undo(&vv);
+        }
+      bound |= pos;
+      i++;
+    }
+
+    verify_neg(bound, r, *r.get_head());
   }
 }
 

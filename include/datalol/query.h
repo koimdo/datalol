@@ -103,22 +103,14 @@ namespace detail {
     return mv.res;
   }
 
-  struct backtrack {
-    const Var_ **vars;
+  template<size_t MAX_VARS>
+  struct undo_helper {
+    Var_ vars[MAX_VARS];
     int nvars = 0;
-
-    backtrack(const Var_ **vars): vars(vars) {}
-
-    template<typename T>
-    bool operator()(int, const T& t) {
-      const Var_ *v = get_var<T>::get(t);
-      if (v && v->is_unset())
-        vars[nvars++] = v;
-      return true;
-    }
+    void add_undo_(Var_* v) { if (v) vars[nvars++] = std::move(*v); }
     void undo() {
       for (int i=0; i<nvars; i++)
-        vars[i]->zap();
+        vars[i].zap();
     }
   };
 
@@ -203,7 +195,7 @@ struct Relation : Collection_base {
   }
 
   template<typename... Selector>
-  struct Match : public Rule::Head {
+  struct Match : public Rule::Head, private detail::undo_helper<sizeof...(Selector)> {
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
     static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
@@ -217,6 +209,8 @@ struct Relation : Collection_base {
       os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
     }
 
+    void add_undo(Var_* v) override { this->add_undo_(v); }
+
     Collection_base *collection() const override { return &rel; }
 
     Match(Relation<value_type>& rel, Selector&&... sels)
@@ -229,13 +223,10 @@ struct Relation : Collection_base {
     static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
       Match& self = static_cast<Match&>(self_);
-      const Var_ *vars[sizeof...(Selector)];
-      detail::backtrack bt(vars);      // Cannot have more unset vars than query size
-      for_each_in_tuple(bt, self.selector); // Record unset vars
       for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
         if (for_each_in_tuple(detail::unify1(), self.selector, row))
           self.next->eval(r, idx+1);
-        bt.undo();
+        self.undo();
       }
     }
     static void eval_head(Rule::Elem& self_, Rule& r, size_t)
@@ -344,7 +335,7 @@ struct Objects : Collection_base {
   }
 
   template<typename... Selector>
-  struct Match : Rule::Elem {   // TODO: upgrade to Rule::Head
+  struct Match : Rule::Elem, private detail::undo_helper<1+sizeof...(Selector)> {   // TODO: upgrade to Rule::Head
     using query_type = std::tuple<Selector...>;
     static_assert(detail::all<std::is_base_of<detail::match_elem, Selector>::value...>::value, "Proper selectors");
 
@@ -356,6 +347,8 @@ struct Objects : Collection_base {
     {
       os << "<" << that << "> : " << print_tuple<query_type>(selector);
     }
+
+    void add_undo(Var_* v) override { this->add_undo_(v); }
 
     Match(Objects<value_type>& rel, Var<value_type>& that, Selector&&... sels)
       : Rule::Elem(eval_body)
@@ -372,16 +365,12 @@ struct Objects : Collection_base {
     static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
     {
       Match& self = static_cast<Match&>(self_);
-      const Var_ *vars[sizeof...(Selector)];
-      detail::backtrack bt(vars);      // Cannot have more unset vars than query size
-      for_each_in_tuple(bt, self.selector); // Record unset vars
       for (auto const& urow : self.rel.all) {
         self.that.assign(*urow);
         if (for_each_in_tuple(detail::apply_sel{}, self.selector)) {
           self.next->eval(r, idx+1);
         }
-        self.that.zap();
-        bt.undo();
+        self.undo();
       }
     }
   };
@@ -424,4 +413,3 @@ struct guard : Rule::Elem {
     auto desc_thunk = std::make_pair(CAPTURE_HELPER(expr, decltype(expr), ##__VA_ARGS__)); \
     return detail::match_base<decltype(desc_thunk.second)>(desc_thunk.first, std::move(desc_thunk.second)); \
   })
-

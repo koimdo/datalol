@@ -132,6 +132,7 @@ Rule::with_vars::with_vars()
   if (current_vars)
     negative = *current_vars;
 }
+
 Rule::Elem::Elem(eval_t eval_)
   : eval_(eval_)
 {
