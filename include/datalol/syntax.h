@@ -76,12 +76,8 @@ Rule& operator<<(Rule::uhead head, Rule::ubody e);
 Rule& operator& (Rule& rule, Rule::ubody e);
 
 class cow_buf {
-  static constexpr size_t MAX_SIZE = 1024;
   const void *p = nullptr;
-  void (*destroy)(const void *) = nullptr;
-
-  // Assumption: the held data is never aligned wider than std::align_t
-  alignas(std::max_align_t) unsigned char buf[MAX_SIZE];
+  void (*destroy)(const void *) = nullptr; // Not NULL if both owning and non-trivial dtor
 
 public:
   constexpr explicit operator bool() const noexcept { return p; }
@@ -97,9 +93,8 @@ public:
   }
 
   template<class T>
-  void assign(T&& t)
+  void assign(void *buf, T&& t)
   {
-    // FIXME: wider alignment?
     clear();
     ::new (buf) T(std::forward<T>(t));
     p = buf;
@@ -119,32 +114,86 @@ protected:
     int id;
     mutable cow_buf p;
   };
+
+  static_assert(std::is_standard_layout<Impl>::value, "Must be standard layout!");
+
+  template<class T>
+  struct with_buf {
+    Impl impl;
+    alignas(T) unsigned char buf[sizeof(T)];
+  };
+
   Impl *impl;
   friend class Query;
 
   friend
   std::ostream& operator<<(std::ostream& os, const Impl&);
-  Var_(flat::pool_ptr<Impl> p);
+  Var_(Impl *impl): impl(impl) {}
+
+  template<class T>
+  static
+  Var_ mkvar(const std::string& name);
 public:
   Var_(const Var_&);
   Var_(Var_&&) = default;
-  Var_(const std::string& name = std::string());
-  bool operator<(const Var_& o) const { return impl->id < o.impl->id; }
   void zap() const { impl->p.clear(); }
   int get_id() const noexcept { return impl->id; }
   bool is_unset() const { return !impl->p; }
-  const std::string& get_name() const noexcept { return impl->name; }
+};
+
+template<class T>
+class Var : public Var_ {
+public:
+  Var(const std::string& name = std::string())
+    : Var_(Var_::mkvar<T>(name))
+  {}
+
+  void assign(const T& t)
+  {
+    assert(!impl->p);
+    impl->p.assign(t);
+  }
+
+  bool unify(const T& t) const
+  {
+    if (impl->p)
+      return *get() == t;
+    impl->p.assign(t);
+    return true;
+  }
+
+  bool unify(T&& t) const
+  {
+    if (impl->p)
+      return *get() == t;
+    impl->p.assign(static_cast<void*>(((with_buf<T>*)impl)->buf), std::move(t));
+    return true;
+  }
+
+  const T *get() const noexcept { return static_cast<const T*>(impl->p.get()); }
+  const T *operator->() const noexcept { return get(); }
+  const T& operator*() const noexcept { return *get(); }
+  friend std::ostream& operator<<(std::ostream& os, const Var& v)
+  {
+    os << *v.impl;
+    if (v.impl->p) {
+      const T& t = *v.get();
+      os << "=" << t;
+    }
+    return os;
+  }
 };
 
 class Query : public IPrint {
 private:
+  static Query *current;
   std::vector<Rule> rules;
   void print(std::ostream& os) const override;
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
+
   friend class Var_;
-  flat::pool_ptr<Var_::Impl> mkvar(const std::string& name);
-  std::vector<flat::pool_ptr<Var_::Impl>> vars;
+  std::vector<Var_::Impl*> vars;
 
   flat::guard with_query();
 
@@ -168,4 +217,13 @@ public:
   void run();
 };
 
-};
+template<class T>
+Var_ Var_::mkvar(const std::string& name)
+{
+  auto res = Query::current->pool.template allocate<Var_::with_buf<T>>();
+  Impl *impl = &(res->impl);
+  impl->name = name;
+  impl->id = Query::current->vars.size();
+  Query::current->vars.push_back(impl);
+  return impl;
+}

@@ -9,46 +9,6 @@
 #include <flat/set>
 #include <flat/map>
 
-template<class T>
-class Var : public Var_ {
-public:
-  using Var_::Var_;
-
-  void assign(const T& t)
-  {
-    assert(!impl->p);
-    impl->p.assign(t);
-  }
-
-  bool unify(const T& t) const
-  {
-    if (impl->p)
-      return *get() == t;
-    impl->p.assign(t);
-    return true;
-  }
-
-  bool unify(T&& t) const
-  {
-    if (impl->p)
-      return *get() == t;
-    impl->p.assign(std::move(t));
-    return true;
-  }
-
-  const T *get() const { return static_cast<const T*>(impl->p.get()); }
-  const T *operator->() const { return get(); }
-  const T& operator*() const { return *get(); }
-  friend std::ostream& operator<<(std::ostream& os, const Var& v)
-  {
-    os << *v.impl;
-    if (v.impl->p) {
-      const T& t = *v.get();
-      os << "=" << t;
-    }
-    return os;
-  }
-};
 
 class Collection_base;
 template<class T> class Relation;

@@ -7,7 +7,7 @@
 // (fact rules are not allowed)
 
 // Query ::= Rule+
-Query *current_query = nullptr;
+Query *Query::current = nullptr;
 Rule::vars_t *current_vars = nullptr;
 
 Rule::Rule(uhead head): head(head)
@@ -20,7 +20,7 @@ Rule::Rule(uhead head): head(head)
 
 Rule& operator<<(Rule::uhead head, Rule::ubody b)
 {
-  auto& rules = current_query->rules;
+  auto& rules = Query::current->rules;
   rules.push_back(Rule(head));
   auto& res = rules.back();
   res.append(b);
@@ -90,7 +90,7 @@ void Query::print_vars(std::ostream& os, const Rule::with_vars& vs)
 {
   int i=0;
   int out = 0;
-  for (auto v : current_query->vars) {
+  for (auto v : current->vars) {
     bool is_pos = vs.positive.test(i);
     bool is_neg = vs.negative.test(i);
     i++;
@@ -104,8 +104,6 @@ void Query::print_vars(std::ostream& os, const Rule::with_vars& vs)
 cow_buf::~cow_buf() { clear(); }
 void cow_buf::clear()
 {
-  if (!p)
-    return;
   if (destroy)
     (destroy)(p);
 
@@ -114,15 +112,6 @@ void cow_buf::clear()
 }
 
 Var_::Impl::Impl() = default;
-Var_::Var_(flat::pool_ptr<Impl> p)
-  : impl(p.get(flat::unsafe_extract_pointer{}))
-{
-}
-Var_::Var_(const std::string& name)
-  : Var_(current_query->mkvar(name))
-{
-}
-
 
 flat::guard Rule::with_vars::capture_helper(Rule::vars_t *dst)
 {
@@ -148,18 +137,9 @@ Rule::Elem::Elem(eval_t eval_)
 {
 }
 
-flat::pool_ptr<Var_::Impl> Query::mkvar(const std::string& name)
-{
-  auto res = pool.template allocate<Var_::Impl>();
-  res->name = name;
-  res->id = vars.size();
-  vars.push_back(res);
-  return res;
-}
-
 flat::guard Query::with_query()
 {
   flat::guard res;
-  res.set(&current_query, this);
+  res.set(&current, this);
   return res;
 }
