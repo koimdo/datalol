@@ -126,16 +126,40 @@ namespace detail {
 
 #define DATALOL(...) Query([&]() { __VA_ARGS__ ; })
 
+template<typename T, typename Compare = std::less<T>>
+struct Typed_collection : Collection_base {
+  using Collection_base::Collection_base;
+
+  flat::set<T, Compare> all;
+  flat::set<T, Compare> delta, next_delta;
+
+  size_t merge() override final
+  {
+    std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
+    std::cerr << "Merging " << name << " delta: ";
+    //print_(std::cerr, delta);
+    std::cerr <<"\n";
+    if (all.empty()) {
+      std::swap(all, delta);
+    } else if (!delta.empty()) {
+      all = all.set_union(delta);
+    }
+    delta = next_delta.diff(all);
+    // TODO: combined union/diff operation
+    // FIXME: indices
+    next_delta.clear();
+    return delta.size();
+  }
+};
+
 // TODO: despecialize relations?
 
 template<typename T>
-struct Relation : Collection_base {
+struct Relation : Typed_collection<T> {
   friend class DB;
-  using Collection_base::Collection_base;
+  using Typed_collection<T>::Typed_collection;
 
   using value_type = T;
-  flat::set<value_type> all;
-  flat::set<value_type> delta, next_delta;
   static constexpr int arity = std::tuple_size<T>::value;
   template<size_t N>
   static
@@ -154,25 +178,9 @@ struct Relation : Collection_base {
   }
   std::array<index_t, arity> indices = make_indices(std::make_index_sequence<arity>());
 
-  size_t merge() override
-  {
-    std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
-    std::cerr << "Merging " << name << " delta: ";
-    print_(std::cerr, delta);
-    std::cerr <<"\n";
-    if (all.empty()) {
-      std::swap(all, delta);
-    } else if (!delta.empty()) {
-      all = all.set_union(delta);
-    }
-    delta = next_delta.diff(all);
-    next_delta.clear();
-    return delta.size();
-  }
-
   void print(std::ostream& os) const override
   {
-    print_(os, all);
+    print_(os, this->all);
     for (int i=0; i<arity; i++) {
       os << "\nIndex " << i << ": ";
       print_(os, indices[i]);
@@ -184,20 +192,20 @@ struct Relation : Collection_base {
   {
     os << "{";
     for (auto const& row : s)
-      os << "\n  " << name << "(" << print_tuple<value_type>(row) << ")";
+      os << "\n  " << this->name << "(" << print_tuple<value_type>(row) << ")";
     os <<"\n}";
   }
 
   template<typename... Args>
   void insert(Args&&... args) {
     T it(std::forward<Args>(args)...);
-    all.insert(it);
+    this->all.insert(it);
     for (int i=0; i<arity; i++)
       indices[i].insert(it);
   }
 
   template<typename... Selector>
-  struct Match : public Rule::Head, private detail::undo_helper<sizeof...(Selector)> {
+  struct Match : public Rule::Head, private detail::undo_helper {
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
     static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
@@ -308,36 +316,31 @@ namespace detail {
 }
 
 template<typename T>
-struct Objects : Collection_base {
+struct Objects : Typed_collection<flat::pool_ptr<T>> {
   friend class DB;
-  using Collection_base::Collection_base;
+  using Typed_collection<flat::pool_ptr<T>>::Typed_collection;
 
   using value_type = T;
-  flat::set<flat::pool_ptr<T>> all;
-
-  size_t merge() override {
-    return 0;
-  }
 
   void print(std::ostream& os) const override
   {
     os << "{";
-    for (auto const& row : all)
-      os << "\n  " << name << "(" << *row << ")";
+    for (auto const& row : this->all)
+      os << "\n  " << this->name << "(" << *row << ")";
     os <<"\n}";
   }
 
   template<typename... Args>
   void insert(Args&&... args) {
-    all.insert(db.pool.allocate<value_type>(std::forward<Args>(args)...));
+    this->all.insert(this->db.pool.template allocate<value_type>(std::forward<Args>(args)...));
   }
 
   void insert(flat::pool_ptr<T> p) {
-    all.insert(p);
+    this->all.insert(p);
   }
 
   template<typename... Selector>
-  struct Match : Rule::Elem, private detail::undo_helper<1+sizeof...(Selector)> {   // TODO: upgrade to Rule::Head
+  struct Match : Rule::Elem, private detail::undo_helper {   // TODO: upgrade to Rule::Head
     using query_type = std::tuple<Selector...>;
     static_assert(detail::all<std::is_base_of<detail::match_elem, Selector>::value...>::value, "Proper selectors");
 
