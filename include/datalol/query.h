@@ -103,11 +103,13 @@ namespace detail {
     return mv.res;
   }
 
-  template<size_t MAX_VARS>
   struct undo_helper {
-    Var_ vars[MAX_VARS];
-    int nvars = 0;
-    void add_undo_(Var_* v) { if (v) vars[nvars++] = std::move(*v); }
+    Var_ vars[Rule::MAX_VARS];
+    size_t nvars = 0;
+    void add_undo_(Var_* v) {
+      assert(nvars != Rule::MAX_VARS);
+      if (v) vars[nvars++] = std::move(*v);
+    }
     void undo() {
       for (int i=0; i<nvars; i++)
         vars[i].zap();

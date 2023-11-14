@@ -18,7 +18,8 @@ class Collection_base;
 class Var_;
 class Rule : public IPrint {
 public:
-  typedef std::bitset<64> vars_t;
+  static constexpr size_t MAX_VARS = 64;
+  typedef std::bitset<MAX_VARS> vars_t;
   struct with_vars {
     vars_t positive, negative;
     with_vars();
