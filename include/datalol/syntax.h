@@ -14,69 +14,137 @@ struct IPrint {
   virtual ~IPrint() {}
 };
 
+template<class T, size_t MAX_SIZE>
+//using static_stack = std::vector<T>;
+struct static_stack {
+  static_assert(std::is_trivially_destructible<T>::value, "Must be trivially destructible");
+  static_assert(std::is_trivially_move_constructible<T>::value, "Must be trivially movable");
+
+  alignas(T) unsigned char buf[MAX_SIZE*sizeof(T)];
+  size_t nitems = 0;
+
+  template<typename... Args>
+  T& emplace_back(Args&&... args) {
+    assert(nitems != MAX_SIZE);
+    void *p = end();
+    new (p) T(std::forward<Args>(args)...);
+    nitems++;
+    return *static_cast<T*>(p);
+  }
+
+  T& back() noexcept {
+    assert(nitems);
+    return *(begin() + nitems - 1);
+  }
+
+  const T& back() const noexcept {
+    assert(nitems);
+    return *(begin() + nitems - 1);
+  }
+
+  T& operator[](size_t n) {
+    assert(n < nitems);
+    return *(begin()+n);
+  }
+
+  const T& operator[](size_t n) const {
+    assert(n < nitems);
+    return *(begin()+n);
+  }
+
+  T *begin() noexcept { return reinterpret_cast<T*>(buf); }
+  T *end()  noexcept { return begin() + nitems; }
+  const T *begin() const noexcept { return reinterpret_cast<const T*>(buf); }
+  const T *end() const noexcept { return begin() + nitems; }
+
+  size_t size() const noexcept { return nitems; }
+};
+
 class Collection_base;
 class Var_;
-class Rule : public IPrint {
+class Rule {
 public:
   static constexpr size_t MAX_VARS = 64;
   typedef std::bitset<MAX_VARS> vars_t;
   struct with_vars {
+    with_vars(const vars_t& positive, nullptr_t) noexcept;
+    with_vars(nullptr_t, const vars_t& negative) noexcept;
     vars_t positive, negative;
-    with_vars();
 
     template<typename Make>
     static
-    auto capture(Make&& make) -> decltype(make())
+    auto capture(Make&& make) -> std::pair<decltype(make()), Rule::vars_t>
     {
       Rule::vars_t vars;
       flat::guard vars_guard = capture_helper(&vars);
-      return make();
+      auto m = make();
+      return {std::move(m), std::move(vars)};
     }
   private:
     static
     flat::guard capture_helper(Rule::vars_t *dst);
   };
 
-  struct Elem : IPrint, public with_vars {
+  struct Elem : IPrint {
     typedef void (*eval_t)(Elem&, Rule&, size_t);
     eval_t eval_ = nullptr;
-    Elem *next = nullptr;
     Elem(eval_t eval_);
+    Elem(const Elem&) = delete;
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
     virtual Collection_base *collection() const { return nullptr; }
+  };
+
+  struct Body : Elem {
+    using Elem::Elem;
+    Elem *next = nullptr;
     virtual void add_undo(Var_*) { assert(false && "Must implement add_undo() if it has positive vars"); }
-    Elem(const Elem&) = delete;
   };
+
   struct Head : Elem {
-    eval_t eval_head;
-    Head(eval_t eval): Elem(nullptr), eval_head(eval) {}
-    Head(eval_t head, eval_t body): Elem(body), eval_head(head) {}
+    using Elem::Elem;
   };
 
-  using uhead = flat::pool_ptr<Head>;
-  using ubody = flat::pool_ptr<Elem>;
+  struct elem_meta {
+    with_vars vars;
+    Collection_base *collection;
+    elem_meta(const elem_meta&) = default;
+  };
 
-  friend Rule& operator<<(uhead head, ubody b);
-  friend Rule& operator& (Rule& rule, Rule::ubody e);
+
+  using uelem = flat::pool_ptr<Elem>;
+  using uhead = flat::pool_ptr<Head>;
+  using ubody = flat::pool_ptr<Body>;
+
+  struct susp_Body {
+    virtual std::pair<elem_meta, ubody> apply_Body() = 0;
+  };
+
+  struct susp_Head {
+    virtual std::pair<elem_meta, uhead> apply_Head() = 0;
+  };
+
   friend class Query;
 
-  uhead get_head() { return head; }
-  flat::span<ubody> get_body() { return body; }
-  size_t size() const { return body.size(); }
+  size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
 
-  size_t seminaive_current;     // FIXME: finer choice of Delta'd relation
-  explicit Rule(uhead head);
+  class cursor {
+    friend cursor operator<<(susp_Head&& h, susp_Body&& b);
+    friend cursor&& operator&(cursor&& r, susp_Body&& b);
+    cursor(susp_Head&& h, susp_Body&& b);
+    void append(susp_Body&& b);
+
+    Rule *r;
+  public:
+
+    ~cursor();
+  };
+
 private:
-  void run(size_t current_delta);
-  void append(ubody b);
-  void print(std::ostream& os) const override;
-  uhead head;
-  std::vector<ubody> body;
-  std::bitset<128> recursive;
+  unsigned head = 0, last = 0;
 };
 
-Rule& operator<<(Rule::uhead head, Rule::ubody e);
-Rule& operator& (Rule& rule, Rule::ubody e);
+Rule::cursor operator<<(Rule::susp_Head&& h, Rule::susp_Body&& b);
+Rule::cursor&& operator&(Rule::cursor&& r, Rule::susp_Body&& b);
 
 class cow_buf {
   const void *p = nullptr;
@@ -136,12 +204,14 @@ protected:
   template<class T>
   static
   Var_ mkvar(const std::string& name);
+
+  static
+  void register_var(const Var_*);
+
 public:
-  Var_(const Var_&);
+  Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
-  Var_& operator=(Var_&&) = default;
-  Var_() = default;
   void zap() const { impl->p.clear(); }
   int get_id() const noexcept { return impl->id; }
 };
@@ -152,6 +222,9 @@ public:
   Var(const std::string& name = std::string())
     : Var_(Var_::mkvar<T>(name))
   {}
+
+  Var(const Var& v): Var_(v) { register_var(this); }
+  Var(Var&&) = default;
 
   void assign(const T& t)
   {
@@ -192,14 +265,27 @@ public:
 
 class Query : public IPrint {
 private:
+  static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
-  std::vector<Rule> rules;
-  void print(std::ostream& os) const override;
+
+  static_stack<std::pair<Rule::elem_meta, Rule::uelem>, MAX_ELEMS> elems;
+  static_stack<Rule, MAX_ELEMS> rules;
+  std::bitset<MAX_ELEMS> recursive;
+
+  Rule::elem_meta& get_meta(unsigned i);
+  Rule::uelem get_elem(unsigned i);
+
+  void add_elem(const Rule::elem_meta& meta, const Rule::uelem& e);
+  Rule *start_rule();
+  void end_rule(Rule *r);
+  void run_rule(Rule& r, size_t current_delta);
+  void print(std::ostream& os) const override final;
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
 
   friend class Var_;
-  std::vector<Var_::Impl*> vars;
+  friend class Rule::cursor;
+  static_stack<Var_, Rule::MAX_VARS> vars;
 
   flat::guard with_query();
 
@@ -230,6 +316,6 @@ Var_ Var_::mkvar(const std::string& name)
   Impl *impl = &(res->impl);
   impl->name = name;
   impl->id = Query::current->vars.size();
-  Query::current->vars.push_back(impl);
+  Query::current->vars.emplace_back(Var_(impl));
   return impl;
 }

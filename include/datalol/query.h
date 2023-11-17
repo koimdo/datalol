@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <datalol/tuple_util.h>
 #include <functional>
+#include <array>
 
 #include <flat/set>
 #include <flat/map>
@@ -104,15 +105,13 @@ namespace detail {
   }
 
   struct undo_helper {
-    Var_ vars[Rule::MAX_VARS];
-    size_t nvars = 0;
+    static_stack<Var_, Rule::MAX_VARS> st;
     void add_undo_(Var_* v) {
-      assert(nvars != Rule::MAX_VARS);
-      if (v) vars[nvars++] = std::move(*v);
+      if (v) st.emplace_back(*v);
     }
     void undo() {
-      for (int i=0; i<nvars; i++)
-        vars[i].zap();
+      for (auto v : st)
+        v.zap();
     }
   };
 
@@ -167,7 +166,7 @@ struct Relation : Typed_collection<T> {
   {
     return
       (std::get<N>(l) < std::get<N>(r)) ||
-      (std::get<N>(l) == std::get<N>(r) && l < r);
+      (!(std::get<N>(r) < std::get<N>(l)) && l < r);
   }
 
   typedef flat::set<value_type, bool (*)(const value_type& l, const value_type& r)> index_t;
@@ -178,7 +177,7 @@ struct Relation : Typed_collection<T> {
   }
   std::array<index_t, arity> indices = make_indices(std::make_index_sequence<arity>());
 
-  void print(std::ostream& os) const override
+  void print(std::ostream& os) const override final
   {
     print_(os, this->all);
     for (int i=0; i<arity; i++) {
@@ -205,7 +204,7 @@ struct Relation : Typed_collection<T> {
   }
 
   template<typename... Selector>
-  struct Match : public Rule::Head, private detail::undo_helper {
+  struct Match {
     using query_type = std::tuple<Selector...>;
     static constexpr int arity = std::tuple_size<query_type>::value;
     static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
@@ -214,43 +213,76 @@ struct Relation : Typed_collection<T> {
     Relation<value_type>& rel;
     query_type selector;
 
-    void print(std::ostream& os) const override
+    void print_common(std::ostream& os) const
     {
       os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
     }
 
-    void add_undo(Var_* v) override { this->add_undo_(v); }
-
-    Collection_base *collection() const override { return &rel; }
-
     Match(Relation<value_type>& rel, Selector&&... sels)
-      : Head(eval_head, eval_body)
-      , rel(rel)
+      : rel(rel)
       , selector(std::forward<Selector>(sels)...)
     {
-      positive = detail::mark_vars(selector);
     }
-    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
-    {
-      Match& self = static_cast<Match&>(self_);
-      for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
-        if (for_each_in_tuple(detail::unify1(), self.selector, row))
-          self.next->eval(r, idx+1);
-        self.undo();
+  };
+
+  template<typename... Selector>
+  struct Match_select  : public Rule::susp_Head, public Rule::susp_Body {
+    using Match_base = Match<Selector...>;
+    Match_base m;
+    Match_select(Relation<value_type>& rel, Selector&&... sels)
+      : m(rel, std::move(sels)...)
+    {}
+    struct Head : public Match_base, Rule::Head {
+      static void eval(Rule::Elem& self_, Rule&, size_t)
+      {
+        Head& self = static_cast<Head&>(self_);
+        auto res = transform_each(self.selector, detail::get_value{});
+        self.rel.next_delta.insert(std::move(res));
       }
-    }
-    static void eval_head(Rule::Elem& self_, Rule& r, size_t)
+      Head(Match_base&& m): Match_base(std::move(m)), Rule::Head(eval) {}
+      void print(std::ostream& os) const override final { this->print_common(os); }
+    };
+
+    struct Body : public Match_base, public Rule::Body, private detail::undo_helper {
+      void add_undo(Var_* v) override final { this->add_undo_(v); }
+
+      static void eval(Rule::Elem& self_, Rule& r, size_t idx)
+      {
+        Body& self = static_cast<Body&>(self_);
+        for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
+          if (for_each_in_tuple(detail::unify1(), self.selector, row))
+            self.next->eval(r, idx+1);
+          self.undo();
+        }
+      }
+      Body(Match_base&& m): Match_base(std::move(m)), Rule::Body(eval) {}
+      void print(std::ostream& os) const override final { this->print_common(os); }
+    };
+
+    Rule::vars_t get_vars() const
     {
-      Match& self = static_cast<Match&>(self_);
-      auto res = transform_each(self.selector, detail::get_value{});
-      self.rel.next_delta.insert(std::move(res));
+      return detail::mark_vars(m.selector);
+    }
+
+    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+    {
+      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), &m.rel };
+      auto p = flat::allocate<Body>(std::move(m));
+      return std::make_pair(meta, p);
+    }
+
+    std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
+    {
+      Rule::elem_meta meta = { Rule::with_vars(nullptr, get_vars()), &m.rel };
+      auto p = flat::allocate<Head>(std::move(m));
+      return std::make_pair(meta, p);
     }
   };
 
   template<typename... SelectArgs>
-  flat::pool_ptr<Match<typename flat::remove_cvref<SelectArgs>::type...>>
+  Match_select<typename flat::remove_cvref<SelectArgs>::type...>
   operator()(SelectArgs&&... args) {
-    return flat::allocate<Match<typename flat::remove_cvref<SelectArgs>::type...>>(*this, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
+    return Match_select<typename flat::remove_cvref<SelectArgs>::type...>(*this, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
   }
 };
 
@@ -322,7 +354,7 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
 
   using value_type = T;
 
-  void print(std::ostream& os) const override
+  void print(std::ostream& os) const override final
   {
     os << "{";
     for (auto const& row : this->all)
@@ -393,25 +425,45 @@ struct head : Rule::Head {
   std::string desc;
   head(const std::string& desc, fun_t&& f);
   static void eval_head(Rule::Elem&, Rule&, size_t);
-  void print(std::ostream& os) const override;
+  void print(std::ostream& os) const override final;
 };
 
-struct guard : Rule::Elem {
+struct head_susp : public Rule::susp_Head {
+  std::pair<flat::pool_ptr<head>, Rule::vars_t> g;
+  head_susp(std::pair<flat::pool_ptr<head>, Rule::vars_t>&& gg): g(std::move(gg)) {}
+  std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
+  {
+    Rule::elem_meta meta = { Rule::with_vars(nullptr, g.second), nullptr };
+    return std::make_pair(meta, g.first);
+  }
+};
+
+struct guard : Rule::Body {
   using fun_t = std::function<bool()>;
   fun_t f;
   std::string desc;
   guard(const std::string& desc, fun_t&& f);
   static void eval_body(Rule::Elem& self_, Rule& r, size_t idx);
-  void print(std::ostream& os) const override;
+  void print(std::ostream& os) const override final;
+};
+
+struct guard_susp : public Rule::susp_Body {
+  std::pair<flat::pool_ptr<guard>, Rule::vars_t> g;
+  guard_susp(std::pair<flat::pool_ptr<guard>, Rule::vars_t>&& gg): g(std::move(gg)) {}
+  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+  {
+    Rule::elem_meta meta = { Rule::with_vars(nullptr, g.second), nullptr };
+    return std::make_pair(meta, g.first);
+  }
 };
 
 #define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() { return (type)(expr); })
 
 #define HEAD_WITH(expr,...)                                             \
-  Rule::with_vars::capture([&]() { return flat::allocate<head> (CAPTURE_HELPER(expr, void, ##__VA_ARGS__)); })
+  head_susp{Rule::with_vars::capture([&]() { return flat::allocate<head> (CAPTURE_HELPER(expr, void, ##__VA_ARGS__)); })}
 
 #define GUARD(expr,...)                                                 \
-  Rule::with_vars::capture([&]() { return flat::allocate<guard>(CAPTURE_HELPER(expr, bool, ##__VA_ARGS__)); })
+  guard_susp{Rule::with_vars::capture([&]() { return flat::allocate<guard>(CAPTURE_HELPER(expr, bool, ##__VA_ARGS__)); })}
 
 #define $_(expr,...)                                                    \
   Rule::with_vars::capture([&]() {                                      \
