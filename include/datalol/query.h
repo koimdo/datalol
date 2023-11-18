@@ -286,67 +286,6 @@ struct Relation : Typed_collection<T> {
   }
 };
 
-namespace detail {
-  struct match_elem {};
-
-  template<class Getter>
-  struct match_base : Rule::with_vars {
-    Getter getter;
-    const char *desc;
-    using prop_t = typename flat::remove_cvref<decltype(std::declval<Getter>()())>::type;
-    match_base(const char *desc, Getter&& getter_)
-      : getter(std::move(getter_)), desc(desc)
-    {}
-  };
-
-  template<class Getter>
-  struct match : match_base<Getter>, match_elem {
-    using typename match_base<Getter>::prop_t;
-    Var<prop_t> prop;
-    match(match_base<Getter>&& base, Var<prop_t>& prop)
-      : match_base<Getter>(std::move(base))
-      , prop(std::move(prop))
-    {
-      Rule::with_vars::positive.set(prop.get_id());
-    }
-
-    bool apply() const
-    {
-      return this->prop.unify(this->getter());
-    }
-    match(const match&) = delete;
-    match(match&&) = default;
-  };
-
-  template<class Getter> struct get_var<match<Getter>> { static const Var_* get(const match<Getter>& m) { return &m.prop; } };
-
-  template<class Getter>
-  std::ostream& operator<<(std::ostream& os, const match<Getter>& m)
-  {
-    os << "[";
-    Query::print_vars(os, m);
-    os << "]";
-    return os << m.desc << " -> " << m.prop;
-  }
-
-  template<typename Getter>
-  match<Getter> operator==(match_base<Getter>&& g, Var<typename match_base<Getter>::prop_t>& v)
-  {
-    return match<Getter>(std::move(g), v);
-  }
-
-  template<typename Getter>
-  match<Getter> operator==(Var<typename match_base<Getter>::prop_t>& v, match_base<Getter>&& g)
-  {
-    return match<Getter>(std::move(g), v);
-  }
-
-  struct apply_sel {
-    template<class S>
-    bool operator()(int, const S& sel) { return sel.apply(); }
-  };
-}
-
 template<typename T>
 struct Objects : Typed_collection<flat::pool_ptr<T>> {
   friend class DB;
@@ -371,51 +310,58 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
     this->all.insert(p);
   }
 
-  template<typename... Selector>
-  struct Match : Rule::Elem, private detail::undo_helper {   // TODO: upgrade to Rule::Head
-    using query_type = std::tuple<Selector...>;
-    static_assert(detail::all<std::is_base_of<detail::match_elem, Selector>::value...>::value, "Proper selectors");
-
+  struct Match_base {
     Objects<value_type>& rel;
     Var<value_type> that;
-    query_type selector;
 
-    void print(std::ostream& os) const override
-    {
-      os << "<" << that << "> : " << print_tuple<query_type>(selector);
-    }
-
-    void add_undo(Var_* v) override { this->add_undo_(v); }
-
-    Match(Objects<value_type>& rel, Var<value_type>& that, Selector&&... sels)
-      : Rule::Elem(eval_body)
-      , rel(rel)
+    Match_base(Objects<value_type>& rel, Var<value_type>& that)
+      : rel(rel)
       , that(std::move(that))
-      , selector(std::forward<Selector>(sels)...)
-    {
-      std::cerr << "Obj selector size = " << sizeof(selector) << "\n";
-      positive = detail::mark_vars(selector);
-      positive.set(that.get_id());
-      // TODO: verify only `that` is referenced in selectors
-    }
+    {}
 
-    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+    void print_common(std::ostream& os) const
     {
-      Match& self = static_cast<Match&>(self_);
-      for (auto const& urow : self.rel.all) {
-        self.that.assign(*urow);
-        if (for_each_in_tuple(detail::apply_sel{}, self.selector)) {
-          self.next->eval(r, idx+1);
-        }
-        self.undo();
-      }
+      os << "<" << that << ">";
     }
   };
 
-  template<typename... SelectArgs>
-  flat::pool_ptr<Match<typename flat::remove_cvref<SelectArgs>::type...>>
-  operator()(Var<value_type>& that, SelectArgs&&... args) {
-    return flat::allocate<Match<typename flat::remove_cvref<SelectArgs>::type...>>(*this, that, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
+  struct Match_select : public Rule::susp_Body { // TODO: also Rule::Head
+    Match_base m;
+    Match_select(Objects<value_type>& rel, Var<value_type>& that)
+      : m(rel, that)
+    {}
+
+    Rule::elem_meta meta() const noexcept {
+      Rule::vars_t vars;
+      vars.set(m.that.get_id());
+      return { Rule::with_vars(vars, nullptr), &m.rel };
+    }
+    struct Body : public Match_base, Rule::Body {
+      Body(Match_base&& m): Match_base(std::move(m)), Rule::Body(eval_body) {}
+      void add_undo(Var_* v) override final { /* TODO: assert v is null or `that` */ }
+      void print(std::ostream& os) const override final { this->print_common(os); }
+      static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+      {
+        // FIXME: if `that` is set, just check `rel.contains(*that)`
+        Body& self = static_cast<Body&>(self_);
+        for (auto const& urow : self.rel.all) {
+          if (self.that.unify(*urow)) {
+            self.next->eval(r, idx+1);
+          }
+          self.that.zap();
+        }
+      }
+    };
+
+    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+    {
+      return {meta(), flat::allocate<Body>(std::move(m))};
+    }
+  };
+
+  Match_select
+  operator()(Var<value_type>& that) {
+    return Match_select(*this, that);
   }
 };
 
