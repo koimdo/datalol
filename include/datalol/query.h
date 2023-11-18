@@ -368,29 +368,31 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
 
 // TODO: fold head, guard definitions into thunk_susp?
 template<typename Res>
-struct head : thunk<Res>, Rule::Head {
+struct head : Rule::Head {
   using thunk_t = thunk<Res>;
+  thunk_t fun;
   head(thunk_t&& th)
-    : thunk_t(std::move(th))
+    : fun(std::move(th))
     , Rule::Head(eval_head)
   {}
-  static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).apply(); }
-  void print(std::ostream& os) const override final { thunk_t::print(os); }
+  static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).fun.apply(); }
+  void print(std::ostream& os) const override final { os << fun; }
 };
 
 template<typename Res>
-struct guard : thunk<Res>, Rule::Body {
+struct guard : Rule::Body {
   using thunk_t = thunk<Res>;
-  guard(thunk_t&& th)
-    : thunk_t(std::move(th))
+  thunk_t fun;
+  guard(thunk_t&& fun)
+    : fun(std::move(fun))
     , Rule::Body(eval_body)
   {}
   static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
   {
     guard& self = static_cast<guard&>(self_);
-    if (self.apply()) self.next->eval(r, idx+1);
+    if (self.fun.apply()) self.next->eval(r, idx+1);
   }
-  void print(std::ostream& os) const override final { thunk_t::print(os); }
+  void print(std::ostream& os) const override final { os << fun; }
 };
 
 template<class Res>
@@ -447,8 +449,7 @@ struct binder_susp : Rule::susp_Body {
     }
     void print(std::ostream& os) const override final
     {
-      os << var << " == ";
-      fun.print(os);
+      os << var << " == " << fun;
     }
   };
   std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final

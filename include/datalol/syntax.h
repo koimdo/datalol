@@ -329,7 +329,11 @@ struct thunk {
     : desc(desc)
     , fun(std::move(fun))
   {}
-  void print(std::ostream& os) const { os << "THUNK(" << desc << ")";}
+  friend
+  std::ostream& operator<<(std::ostream& os, const thunk& t)
+  {
+    return os << "THUNK(" << t.desc << ")";
+  }
 };
 
 template<class F>
