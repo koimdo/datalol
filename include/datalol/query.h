@@ -419,51 +419,59 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
   }
 };
 
-struct head : Rule::Head {
-  using fun_t = std::function<void()>;
-  fun_t f;
-  std::string desc;
-  head(const std::string& desc, fun_t&& f);
-  static void eval_head(Rule::Elem&, Rule&, size_t);
-  void print(std::ostream& os) const override final;
+
+// TODO: fold head, guard definitions into thunk_susp?
+template<typename Res>
+struct head : thunk<Res>, Rule::Head {
+  using thunk_t = thunk<Res>;
+  head(thunk_t&& th)
+    : thunk_t(std::move(th))
+    , Rule::Head(eval_head)
+  {}
+  static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).apply(); }
+  void print(std::ostream& os) const override final { os << "$_(" << thunk_t::desc << ")"; }
 };
 
-struct head_susp : public Rule::susp_Head {
-  std::pair<flat::pool_ptr<head>, Rule::vars_t> g;
-  head_susp(std::pair<flat::pool_ptr<head>, Rule::vars_t>&& gg): g(std::move(gg)) {}
+template<typename Res>
+struct guard : thunk<Res>, Rule::Body {
+  using thunk_t = thunk<Res>;
+  guard(thunk_t&& th)
+    : thunk_t(std::move(th))
+    , Rule::Body(eval_body)
+  {}
+  static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+  {
+    guard& self = static_cast<guard&>(self_);
+    if (self.apply()) self.next->eval(r, idx+1);
+  }
+  void print(std::ostream& os) const override final { os << "$_(" << thunk_t::desc << ")"; }
+};
+
+template<class Res>
+struct thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
+  using thunk_t = thunk<Res>;
+  std::pair<thunk_t, Rule::vars_t> tv;
+
+  thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
+    : tv(std::move(tt)) {}
+
+  Rule::elem_meta meta() const noexcept { return { Rule::with_vars(nullptr, tv.second), nullptr }; }
+
   std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
   {
-    Rule::elem_meta meta = { Rule::with_vars(nullptr, g.second), nullptr };
-    return std::make_pair(meta, g.first);
+    return std::make_pair(meta(), flat::allocate<head<Res>>(std::move(tv.first)));
   }
-};
 
-struct guard : Rule::Body {
-  using fun_t = std::function<bool()>;
-  fun_t f;
-  std::string desc;
-  guard(const std::string& desc, fun_t&& f);
-  static void eval_body(Rule::Elem& self_, Rule& r, size_t idx);
-  void print(std::ostream& os) const override final;
-};
-
-struct guard_susp : public Rule::susp_Body {
-  std::pair<flat::pool_ptr<guard>, Rule::vars_t> g;
-  guard_susp(std::pair<flat::pool_ptr<guard>, Rule::vars_t>&& gg): g(std::move(gg)) {}
   std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
   {
-    Rule::elem_meta meta = { Rule::with_vars(nullptr, g.second), nullptr };
-    return std::make_pair(meta, g.first);
+    return std::make_pair(meta(), flat::allocate<guard<Res>>(std::move(tv.first)));
   }
 };
 
-#define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() { return (type)(expr); })
+#define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() -> type { return (expr); } )
 
-#define HEAD_WITH(expr,...)                                             \
-  head_susp{Rule::with_vars::capture([&]() { return flat::allocate<head> (CAPTURE_HELPER(expr, void, ##__VA_ARGS__)); })}
-
-#define GUARD(expr,...)                                                 \
-  guard_susp{Rule::with_vars::capture([&]() { return flat::allocate<guard>(CAPTURE_HELPER(expr, bool, ##__VA_ARGS__)); })}
+#define THUNK(expr,...)                                                 \
+  thunk_susp<decltype(expr)>{Rule::with_vars::capture([&]() { return make_thunk(CAPTURE_HELPER(expr, decltype(expr), ##__VA_ARGS__)); })}
 
 #define $_(expr,...)                                                    \
   Rule::with_vars::capture([&]() {                                      \

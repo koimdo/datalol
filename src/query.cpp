@@ -103,28 +103,4 @@ void Query::run() {
   }
 }
 
-head::head(const std::string& desc, fun_t&& f)
-  : Head(eval_head)
-  , f(f)
-  , desc(desc)
-{}
-void head::eval_head(Rule::Elem& self, Rule&, size_t) { static_cast<head&>(self).f(); }
-void head::print(std::ostream& os) const
-{
-  os << "head(" << desc << ")";
-}
 
-guard::guard(const std::string& desc, fun_t&& f)
-  : Rule::Body(&eval_body)
-  , f(f)
-  , desc(desc)
-{}
-void guard::eval_body(Rule::Elem& self_, Rule& r, size_t idx)
-{
-  guard& self = static_cast<guard&>(self_);
-  if (self.f()) self.next->eval(r, idx+1);
-}
-void guard::print(std::ostream& os) const
-{
-  os << "guard(" << desc << ")";
-}

@@ -319,3 +319,26 @@ Var_ Var_::mkvar(const std::string& name)
   Query::current->vars.emplace_back(Var_(impl));
   return impl;
 }
+
+template<class Res>
+struct thunk {
+  // TODO: move-only function
+  using fun_t = std::function<Res()>;
+  using result_t = Res;
+  fun_t fun;
+  std::string desc;
+
+  Res apply() const { return fun(); }
+
+  template<typename Fun>
+  thunk(const std::string& desc, Fun&& fun)
+    : desc(desc)
+    , fun(std::move(fun))
+  {}
+};
+
+template<class F>
+auto make_thunk(const std::string& desc, F&& fun) -> thunk<decltype(fun())>
+{
+  return thunk<decltype(fun())>(desc, std::move(fun));
+}
