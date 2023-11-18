@@ -375,7 +375,7 @@ struct head : thunk<Res>, Rule::Head {
     , Rule::Head(eval_head)
   {}
   static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).apply(); }
-  void print(std::ostream& os) const override final { os << "$_(" << thunk_t::desc << ")"; }
+  void print(std::ostream& os) const override final { thunk_t::print(os); }
 };
 
 template<typename Res>
@@ -390,7 +390,7 @@ struct guard : thunk<Res>, Rule::Body {
     guard& self = static_cast<guard&>(self_);
     if (self.apply()) self.next->eval(r, idx+1);
   }
-  void print(std::ostream& os) const override final { os << "$_(" << thunk_t::desc << ")"; }
+  void print(std::ostream& os) const override final { thunk_t::print(os); }
 };
 
 template<class Res>
@@ -413,6 +413,66 @@ struct thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
     return std::make_pair(meta(), flat::allocate<guard<Res>>(std::move(tv.first)));
   }
 };
+
+template<typename T>
+struct binder_susp : Rule::susp_Body {
+  using thunk_t = thunk<T>;
+  std::pair<thunk_t, Rule::vars_t> tv;
+  Var<T>& bound;
+  binder_susp(thunk_susp<T>&& ts, Var<T>& bound)
+    : tv(std::move(ts.tv))
+    , bound(bound) {}
+
+  struct Binder : Rule::Body {
+    thunk_t fun;
+    Var<T> var;
+    bool bound = false;
+    Binder(thunk_t&& fun, Var<T>& var)
+      : Rule::Body(eval)
+      , fun(std::move(fun))
+      , var(std::move(var)) {}
+    static void eval(Rule::Elem& self_, Rule& r, size_t idx)
+    {
+      Binder& self = static_cast<Binder&>(self_);
+      if (self.var.unify(self.fun.apply()))
+        self.next->eval(r, idx+1);
+      if (self.bound)
+        self.var.zap();
+    }
+    void add_undo(Var_ *v) override final
+    {
+      assert(!v || v->get_id() == var.get_id());
+      if (v)
+        bound = true;
+    }
+    void print(std::ostream& os) const override final
+    {
+      os << var << " == ";
+      fun.print(os);
+    }
+  };
+  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+  {
+    Rule::vars_t positive;
+    positive.set(bound.get_id());
+    positive &= ~tv.second;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    Rule::elem_meta meta = { Rule::with_vars(positive, tv.second), nullptr };
+    auto p = flat::allocate<Binder>(std::move(tv.first), bound);
+    return std::make_pair(meta, p);
+  }
+};
+
+template<typename T>
+binder_susp<T> operator==(thunk_susp<T>&& getter, Var<T>& v)
+{
+  return binder_susp<T>(std::move(getter), v);
+}
+
+template<typename T>
+binder_susp<T> operator==(Var<T>& v, thunk_susp<T>&& getter)
+{
+  return binder_susp<T>(std::move(getter), v);
+}
 
 #define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() -> type { return (expr); } )
 

@@ -150,6 +150,10 @@ Rule::with_vars::with_vars(const Rule::vars_t& pos, nullptr_t) noexcept
 Rule::with_vars::with_vars(nullptr_t, const Rule::vars_t& neg) noexcept
   : negative(neg)
 {}
+Rule::with_vars::with_vars(const Rule::vars_t& pos, const Rule::vars_t& neg) noexcept
+  : positive(pos)
+  , negative(neg)
+{}
 
 
 Rule::Elem::Elem(eval_t eval_)

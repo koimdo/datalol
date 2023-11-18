@@ -69,6 +69,7 @@ public:
   struct with_vars {
     with_vars(const vars_t& positive, nullptr_t) noexcept;
     with_vars(nullptr_t, const vars_t& negative) noexcept;
+    with_vars(const vars_t& positive, const vars_t& negative) noexcept;
     vars_t positive, negative;
 
     template<typename Make>
@@ -91,7 +92,6 @@ public:
     Elem(eval_t eval_);
     Elem(const Elem&) = delete;
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
-    virtual Collection_base *collection() const { return nullptr; }
   };
 
   struct Body : Elem {
@@ -226,12 +226,6 @@ public:
   Var(const Var& v): Var_(v) { register_var(this); }
   Var(Var&&) = default;
 
-  void assign(const T& t)
-  {
-    assert(!impl->p);
-    impl->p.assign(t);
-  }
-
   bool unify(const T& t) const
   {
     if (impl->p)
@@ -335,6 +329,7 @@ struct thunk {
     : desc(desc)
     , fun(std::move(fun))
   {}
+  void print(std::ostream& os) const { os << "THUNK(" << desc << ")";}
 };
 
 template<class F>
