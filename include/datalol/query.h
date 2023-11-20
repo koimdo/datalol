@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <datalol/tuple_util.h>
-#include <functional>
 #include <array>
 
 #include <flat/set>
@@ -121,6 +120,37 @@ namespace detail {
     template<typename T>
     constexpr const T& operator()(const T& t) const { return t; }
   };
+
+  struct generic_print {
+    std::ostream& os;
+    template<typename T>
+    bool operator () (int i, T const &v)
+    {
+      os << (i? ", " : "") << v;
+      return true;
+    }
+    template<typename T>
+    bool operator () (int i, const Var<T>& v)
+    {
+      os << (i? ", " : "");
+      Var<T>::do_print(os, v);
+      return true;
+    }
+  };
+
+  template<typename T>
+  struct print_tuple {
+    const T& t;
+    print_tuple(const T& t): t(t) {}
+    friend std::ostream& operator<<(std::ostream& os, const print_tuple& p)
+    {
+      os << "<";
+      auto intr = !for_each_in_tuple(generic_print{os}, p.t);
+      if (intr)
+        os << ", ...";
+      return os << ">";
+    }
+  };
 }
 
 #define DATALOL(...) Query([&]() { __VA_ARGS__ ; })
@@ -191,7 +221,7 @@ struct Relation : Typed_collection<T> {
   {
     os << "{";
     for (auto const& row : s)
-      os << "\n  " << this->name << "(" << print_tuple<value_type>(row) << ")";
+      os << "\n  " << this->name << "(" << detail::print_tuple<value_type>(row) << ")";
     os <<"\n}";
   }
 
@@ -215,7 +245,7 @@ struct Relation : Typed_collection<T> {
 
     void print_common(std::ostream& os) const
     {
-      os << rel.name << "(" << print_tuple<query_type>(selector) << ")";
+      os << rel.name << "(" << detail::print_tuple<query_type>(selector) << ")";
     }
 
     Match(Relation<value_type>& rel, Selector&&... sels)
@@ -321,7 +351,9 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
 
     void print_common(std::ostream& os) const
     {
-      os << "<" << that << ">";
+      os << "<";
+      Var<value_type>::do_print(os, that);
+      os << ">";
     }
   };
 
@@ -337,12 +369,17 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
       return { Rule::with_vars(vars, nullptr), &m.rel };
     }
     struct Body : public Match_base, Rule::Body {
+      bool bound = false;
       Body(Match_base&& m): Match_base(std::move(m)), Rule::Body(eval_body) {}
-      void add_undo(Var_* v) override final { /* TODO: assert v is null or `that` */ }
+      void add_undo(Var_* v) override final
+      {
+        assert(!v || v->get_id() == Body::that.get_id());
+        bound = v;
+      }
       void print(std::ostream& os) const override final { this->print_common(os); }
       static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
       {
-        // FIXME: if `that` is set, just check `rel.contains(*that)`
+        // FIXME: if `bound` is set, just check `rel.contains(*that)`
         Body& self = static_cast<Body&>(self_);
         for (auto const& urow : self.rel.all) {
           if (self.that.unify(*urow)) {
@@ -449,7 +486,7 @@ struct binder_susp : Rule::susp_Body {
     }
     void print(std::ostream& os) const override final
     {
-      os << var << " == " << fun;
+      Var<T>::do_print(os, var) << " == " << fun;
     }
   };
   std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
@@ -475,13 +512,8 @@ binder_susp<T> operator==(Var<T>& v, thunk_susp<T>&& getter)
   return binder_susp<T>(std::move(getter), v);
 }
 
-#define CAPTURE_HELPER(expr,type,...) #expr, ([=,##__VA_ARGS__]() -> type { return (expr); } )
+#define CAPTURE_HELPER(expr,...) #expr, ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } )
 
 #define THUNK(expr,...)                                                 \
-  thunk_susp<decltype(expr)>{Rule::with_vars::capture([&]() { return make_thunk(CAPTURE_HELPER(expr, decltype(expr), ##__VA_ARGS__)); })}
+  thunk_susp<decltype(expr)>{Rule::with_vars::capture([&]() { return make_thunk(CAPTURE_HELPER(expr, ##__VA_ARGS__)); })}
 
-#define $_(expr,...)                                                    \
-  Rule::with_vars::capture([&]() {                                      \
-    auto desc_thunk = std::make_pair(CAPTURE_HELPER(expr, decltype(expr), ##__VA_ARGS__)); \
-    return detail::match_base<decltype(desc_thunk.second)>(desc_thunk.first, std::move(desc_thunk.second)); \
-  })

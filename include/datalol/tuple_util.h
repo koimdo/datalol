@@ -58,27 +58,3 @@ for_each_in_tuple(F&& f, const T0& t0, const Ts&... ts)
   static_assert(detail::all<(arity == std::tuple_size<Ts>::value)...>::value, "All tuples must have the same arity");
   return detail::for_each<0, arity, F, T0, Ts...>::run(std::forward<F>(f), t0, ts...);
 }
-
-struct generic_print {
-  std::ostream& os;
-  template<typename T>
-  bool operator () (int i, T const &v)
-  {
-    os << (i? ", " : "") << v;
-    return true;
-  }
-};
-
-template<typename T>
-struct print_tuple {
-  const T& t;
-  print_tuple(const T& t): t(t) {}
-  friend std::ostream& operator<<(std::ostream& os, const print_tuple& p)
-  {
-    os << "<";
-    auto intr = !for_each_in_tuple(generic_print{os}, p.t);
-    if (intr)
-      os << ", ...";
-    return os << ">";
-  }
-};

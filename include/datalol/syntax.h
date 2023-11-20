@@ -208,6 +208,8 @@ protected:
   static
   void register_var(const Var_*);
 
+  const std::string& get_name() const noexcept { return impl->name; }
+
 public:
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
@@ -242,11 +244,16 @@ public:
     return true;
   }
 
-  const T *get() const noexcept { return static_cast<const T*>(impl->p.get()); }
-  explicit operator bool() const noexcept { return get(); }
+  const T *get() const noexcept
+  {
+    const T *res = static_cast<const T*>(impl->p.get());
+    assert(res && "Unbound var dereferenced");
+    return res;
+  }
   const T *operator->() const noexcept { return get(); }
+  operator const T&() const noexcept { return *get(); }
   const T& operator*() const noexcept { return *get(); }
-  friend std::ostream& operator<<(std::ostream& os, const Var& v)
+  static std::ostream& do_print(std::ostream& os, const Var& v)
   {
     os << *v.impl;
     if (v.impl->p) {
