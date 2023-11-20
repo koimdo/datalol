@@ -321,21 +321,20 @@ Var_ Var_::mkvar(const std::string& name)
   return impl;
 }
 
-template<class Res>
+template<typename Fun>
 struct thunk {
-  // TODO: move-only function
-  using fun_t = std::function<Res()>;
-  using result_t = Res;
+  using fun_t = Fun;
+  using result_t = decltype(std::declval<Fun>()());
   fun_t fun;
-  std::string desc;
+  const char *desc;
 
-  Res apply() const { return fun(); }
+  result_t apply() const { return fun(); }
 
-  template<typename Fun>
-  thunk(const std::string& desc, Fun&& fun)
+  thunk(const char *desc, Fun&& fun)
     : desc(desc)
     , fun(std::move(fun))
-  {}
+  {
+  }
   friend
   std::ostream& operator<<(std::ostream& os, const thunk& t)
   {
@@ -344,7 +343,127 @@ struct thunk {
 };
 
 template<class F>
-auto make_thunk(const std::string& desc, F&& fun) -> thunk<decltype(fun())>
+auto make_thunk(const char *desc, F&& fun) -> thunk<F>
 {
-  return thunk<decltype(fun())>(desc, std::move(fun));
+  //std::cerr << "sizeof(Thunk [" << desc << "]): " << sizeof(thunk<Res, F>) << "\n";
+  return thunk<F>(desc, std::move(fun));
 }
+
+template<typename Fun>
+struct head : Rule::Head {
+  using thunk_t = thunk<Fun>;
+  thunk_t fun;
+  head(thunk_t&& th)
+    : fun(std::move(th))
+    , Rule::Head(eval_head)
+  {}
+  static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).fun.apply(); }
+  void print(std::ostream& os) const override final { os << fun; }
+};
+
+template<typename Fun>
+struct guard : Rule::Body {
+  using thunk_t = thunk<Fun>;
+  thunk_t fun;
+  guard(thunk_t&& fun)
+    : fun(std::move(fun))
+    , Rule::Body(eval_body)
+  {}
+  static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+  {
+    guard& self = static_cast<guard&>(self_);
+    if (self.fun.apply()) self.next->eval(r, idx+1);
+  }
+  void print(std::ostream& os) const override final { os << fun; }
+};
+
+template<typename Fun>
+struct thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
+  using thunk_t = thunk<Fun>;
+  std::pair<thunk_t, Rule::vars_t> tv;
+
+  thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
+    : tv(std::move(tt)) {}
+
+  Rule::elem_meta meta() const noexcept { return { Rule::with_vars(nullptr, tv.second), nullptr }; }
+
+  std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
+  {
+    return std::make_pair(meta(), flat::allocate<head<Fun>>(std::move(tv.first)));
+  }
+
+  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+  {
+    return std::make_pair(meta(), flat::allocate<guard<Fun>>(std::move(tv.first)));
+  }
+};
+
+template<class F>
+thunk_susp<F> make_susp(std::pair<thunk<F>, Rule::vars_t>&& tt) {
+  return thunk_susp<F>(std::move(tt));
+}
+
+template<typename Fun>
+struct binder_susp : Rule::susp_Body {
+  using thunk_t = thunk<Fun>;
+  std::pair<thunk_t, Rule::vars_t> tv;
+  using bound_t = Var<typename thunk_t::result_t>;
+  bound_t& bound;
+  binder_susp(thunk_susp<Fun>&& ts, bound_t& bound)
+    : tv(std::move(ts.tv))
+    , bound(bound) {}
+
+  struct Binder : Rule::Body {
+    thunk_t fun;
+    bound_t var;
+    bool bound = false;
+    Binder(thunk_t&& fun, bound_t& var)
+      : Rule::Body(eval)
+      , fun(std::move(fun))
+      , var(std::move(var)) {}
+    static void eval(Rule::Elem& self_, Rule& r, size_t idx)
+    {
+      Binder& self = static_cast<Binder&>(self_);
+      if (self.var.unify(self.fun.apply()))
+        self.next->eval(r, idx+1);
+      if (self.bound)
+        self.var.zap();
+    }
+    void add_undo(Var_ *v) override final
+    {
+      assert(!v || v->get_id() == var.get_id());
+      if (v)
+        bound = true;
+    }
+    void print(std::ostream& os) const override final
+    {
+      bound_t::do_print(os, var) << " == " << fun;
+    }
+  };
+  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+  {
+    Rule::vars_t positive;
+    positive.set(bound.get_id());
+    positive &= ~tv.second;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    Rule::elem_meta meta = { Rule::with_vars(positive, tv.second), nullptr };
+    auto p = flat::allocate<Binder>(std::move(tv.first), bound);
+    return std::make_pair(meta, p);
+  }
+};
+
+template<typename Fun>
+binder_susp<Fun> operator==(thunk_susp<Fun>&& getter, typename binder_susp<Fun>::bound_t& v)
+{
+  return binder_susp<Fun>(std::move(getter), v);
+}
+
+template<typename Fun>
+binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fun>&& getter)
+{
+  return binder_susp<Fun>(std::move(getter), v);
+}
+
+#define THUNK(expr,...)                                                 \
+  make_susp(Rule::with_vars::capture([&]() {                            \
+    return make_thunk(#expr, ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } )); \
+  }))
