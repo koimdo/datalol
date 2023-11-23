@@ -263,7 +263,7 @@ struct Relation : Typed_collection<T> {
       : m(rel, std::move(sels)...)
     {}
     struct Head : public Match_base, Rule::Head {
-      static void eval(Rule::Elem& self_, Rule&, size_t)
+      static void eval(Rule::Elem& self_)
       {
         Head& self = static_cast<Head&>(self_);
         auto res = transform_each(self.selector, detail::get_value{});
@@ -276,12 +276,18 @@ struct Relation : Typed_collection<T> {
     struct Body : public Match_base, public Rule::Body, private detail::undo_helper {
       void add_undo(Var_* v) override final { this->add_undo_(v); }
 
-      static void eval(Rule::Elem& self_, Rule& r, size_t idx)
+      flat::set<value_type>& actual()
+      {
+        return this->rule().use_delta() ? this->rel.delta : this->rel.all;
+      }
+
+      // Fully unbound (TODO: indices for partially-bound)
+      static void eval(Rule::Elem& self_)
       {
         Body& self = static_cast<Body&>(self_);
-        for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
+        for (auto const& row : self.actual()) {
           if (for_each_in_tuple(detail::unify1(), self.selector, row))
-            self.next(r, idx);
+            self.next();
           self.undo();
         }
       }
@@ -377,13 +383,13 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
         bound = v;
       }
       void print(std::ostream& os) const override final { this->print_common(os); }
-      static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+      static void eval_body(Rule::Elem& self_)
       {
         // FIXME: if `bound` is set, just check `rel.contains(*that)`
         Body& self = static_cast<Body&>(self_);
         for (auto const& urow : self.rel.all) {
           if (self.that.unify(*urow)) {
-            self.next(r, idx);
+            self.next();
           }
           self.that.zap();
         }

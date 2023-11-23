@@ -67,10 +67,12 @@ void Query::configure()
   // Final step: chain rule body (and head) for execution
   for (auto& r : rules) {
     auto next = get_elem(r.head);
+    next->rule_ = &r;
     for (size_t i=r.last-1; i!=r.head; i--) {
       auto e = get_elem(i).cast<Rule::Body>();
       e->next_ = next.get(flat::unsafe_extract_pointer{});
       next = e;
+      e->rule_ = &r;
     }
   }
 }
@@ -78,7 +80,9 @@ void Query::configure()
 void Query::run_rule(Rule& r, size_t current_delta)
 {
   r.seminaive_current = current_delta;
-  get_elem(r.head+1)->eval(r, r.head+1);
+  auto start = r.head+1;
+  r.idx = start;
+  get_elem(start)->eval();
 }
 
 void Query::run() {

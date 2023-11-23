@@ -87,13 +87,17 @@ public:
   };
 
   class Elem : public IPrint {
-    typedef void (*eval_t)(Elem&, Rule&, size_t);
+    typedef void (*eval_t)(Elem&);
+    friend class Query;
     eval_t eval_ = nullptr;
+    Rule *rule_;
   protected:
     Elem(eval_t eval_);
+    void set_eval(eval_t eval_);
     Elem(const Elem&) = delete;
+    Rule& rule() noexcept { return *rule_; }
   public:
-    void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
+    void eval() { (*eval_)(*this); }
   };
 
   class Body : public Elem {
@@ -101,7 +105,10 @@ public:
     Elem *next_ = nullptr;
     friend class Query;
   protected:
-    void next(Rule& r, size_t idx) { next_->eval(r, idx+1); }
+    void next() {
+      ++rule().idx;
+      next_->eval();
+    }
   public:
     virtual void add_undo(Var_*) { assert(false && "Must implement add_undo() if it has positive vars"); }
   };
@@ -131,7 +138,6 @@ public:
 
   friend class Query;
 
-  size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
 
   class cursor {
     friend cursor operator<<(susp_Head&& h, susp_Body&& b);
@@ -145,8 +151,11 @@ public:
     ~cursor();
   };
 
+  bool use_delta() const noexcept { return seminaive_current == idx; }
 private:
   unsigned head = 0, last = 0;
+  size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
+  size_t idx;
 };
 
 Rule::cursor operator<<(Rule::susp_Head&& h, Rule::susp_Body&& b);
@@ -376,7 +385,7 @@ class thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
       : elem_common(std::move(th))
       , Rule::Head(eval_head)
     {}
-    static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).fun.apply(); }
+    static void eval_head(Rule::Elem& self) { (void)static_cast<head&>(self).fun.apply(); }
     void print(std::ostream& os) const override final { elem_common::print_(os); }
   };
 
@@ -385,10 +394,10 @@ class thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
       : elem_common(std::move(fun))
       , Rule::Body(eval_body)
     {}
-    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+    static void eval_body(Rule::Elem& self_)
     {
       guard& self = static_cast<guard&>(self_);
-      if (self.fun.apply()) self.next(r, idx);
+      if (self.fun.apply()) self.next();
     }
     void print(std::ostream& os) const override final { elem_common::print_(os); }
   };
@@ -438,11 +447,11 @@ private:
       : Rule::Body(eval)
       , fun(std::move(fun))
       , var(std::move(var)) {}
-    static void eval(Rule::Elem& self_, Rule& r, size_t idx)
+    static void eval(Rule::Elem& self_)
     {
       Binder& self = static_cast<Binder&>(self_);
       if (self.var.unify(self.fun.apply()))
-        self.next(r, idx);
+        self.next();
       if (self.bound)
         self.var.zap();
     }
