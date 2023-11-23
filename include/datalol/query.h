@@ -281,7 +281,7 @@ struct Relation : Typed_collection<T> {
         Body& self = static_cast<Body&>(self_);
         for (auto const& row : idx == r.seminaive_current ? self.rel.delta : self.rel.all) {
           if (for_each_in_tuple(detail::unify1(), self.selector, row))
-            self.next->eval(r, idx+1);
+            self.next(r, idx);
           self.undo();
         }
       }
@@ -383,7 +383,7 @@ struct Objects : Typed_collection<flat::pool_ptr<T>> {
         Body& self = static_cast<Body&>(self_);
         for (auto const& urow : self.rel.all) {
           if (self.that.unify(*urow)) {
-            self.next->eval(r, idx+1);
+            self.next(r, idx);
           }
           self.that.zap();
         }

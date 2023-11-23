@@ -16,13 +16,13 @@ struct IPrint {
 
 template<class T, size_t MAX_SIZE>
 //using static_stack = std::vector<T>;
-struct static_stack {
+class static_stack {
   static_assert(std::is_trivially_destructible<T>::value, "Must be trivially destructible");
   static_assert(std::is_trivially_move_constructible<T>::value, "Must be trivially movable");
 
   alignas(T) unsigned char buf[MAX_SIZE*sizeof(T)];
   size_t nitems = 0;
-
+public:
   template<typename... Args>
   T& emplace_back(Args&&... args) {
     assert(nitems != MAX_SIZE);
@@ -86,21 +86,27 @@ public:
     flat::guard capture_helper(Rule::vars_t *dst);
   };
 
-  struct Elem : IPrint {
+  class Elem : public IPrint {
     typedef void (*eval_t)(Elem&, Rule&, size_t);
     eval_t eval_ = nullptr;
+  protected:
     Elem(eval_t eval_);
     Elem(const Elem&) = delete;
+  public:
     void eval(Rule& r, size_t idx) { (*eval_)(*this, r, idx); }
   };
 
-  struct Body : Elem {
+  class Body : public Elem {
     using Elem::Elem;
-    Elem *next = nullptr;
+    Elem *next_ = nullptr;
+    friend class Query;
+  protected:
+    void next(Rule& r, size_t idx) { next_->eval(r, idx+1); }
+  public:
     virtual void add_undo(Var_*) { assert(false && "Must implement add_undo() if it has positive vars"); }
   };
 
-  struct Head : Elem {
+  class Head : public Elem {
     using Elem::Elem;
   };
 
@@ -322,11 +328,13 @@ Var_ Var_::mkvar(const std::string& name)
 }
 
 template<typename Fun>
-struct thunk {
+class thunk {
   using fun_t = Fun;
-  using result_t = decltype(std::declval<Fun>()());
   fun_t fun;
   const char *desc;
+
+public:
+  using result_t = decltype(std::declval<Fun>()());
 
   result_t apply() const { return fun(); }
 
@@ -349,53 +357,59 @@ auto make_thunk(const char *desc, F&& fun) -> thunk<F>
   return thunk<F>(desc, std::move(fun));
 }
 
+template<typename> class binder_susp;
 template<typename Fun>
-struct head : Rule::Head {
-  using thunk_t = thunk<Fun>;
-  thunk_t fun;
-  head(thunk_t&& th)
-    : fun(std::move(th))
-    , Rule::Head(eval_head)
-  {}
-  static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).fun.apply(); }
-  void print(std::ostream& os) const override final { os << fun; }
-};
-
-template<typename Fun>
-struct guard : Rule::Body {
-  using thunk_t = thunk<Fun>;
-  thunk_t fun;
-  guard(thunk_t&& fun)
-    : fun(std::move(fun))
-    , Rule::Body(eval_body)
-  {}
-  static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
-  {
-    guard& self = static_cast<guard&>(self_);
-    if (self.fun.apply()) self.next->eval(r, idx+1);
-  }
-  void print(std::ostream& os) const override final { os << fun; }
-};
-
-template<typename Fun>
-struct thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
+class thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
   using thunk_t = thunk<Fun>;
   std::pair<thunk_t, Rule::vars_t> tv;
 
-  thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
-    : tv(std::move(tt)) {}
+  struct elem_common {
+    thunk_t fun;
+    elem_common(thunk_t&& th)
+      : fun(std::move(th))
+    {}
+    void print_(std::ostream& os) const { os << fun; }
+  };
+
+  struct head : elem_common, Rule::Head {
+    head(thunk_t&& th)
+      : elem_common(std::move(th))
+      , Rule::Head(eval_head)
+    {}
+    static void eval_head(Rule::Elem& self, Rule&, size_t) { (void)static_cast<head&>(self).fun.apply(); }
+    void print(std::ostream& os) const override final { elem_common::print_(os); }
+  };
+
+  struct guard : elem_common, Rule::Body {
+    guard(thunk_t&& fun)
+      : elem_common(std::move(fun))
+      , Rule::Body(eval_body)
+    {}
+    static void eval_body(Rule::Elem& self_, Rule& r, size_t idx)
+    {
+      guard& self = static_cast<guard&>(self_);
+      if (self.fun.apply()) self.next(r, idx);
+    }
+    void print(std::ostream& os) const override final { elem_common::print_(os); }
+  };
 
   Rule::elem_meta meta() const noexcept { return { Rule::with_vars(nullptr, tv.second), nullptr }; }
 
   std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
   {
-    return std::make_pair(meta(), flat::allocate<head<Fun>>(std::move(tv.first)));
+    return std::make_pair(meta(), flat::allocate<head>(std::move(tv.first)));
   }
 
   std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
   {
-    return std::make_pair(meta(), flat::allocate<guard<Fun>>(std::move(tv.first)));
+    return std::make_pair(meta(), flat::allocate<guard>(std::move(tv.first)));
   }
+
+  friend class binder_susp<Fun>;
+public:
+  thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
+    : tv(std::move(tt)) {}
+
 };
 
 template<class F>
@@ -404,14 +418,17 @@ thunk_susp<F> make_susp(std::pair<thunk<F>, Rule::vars_t>&& tt) {
 }
 
 template<typename Fun>
-struct binder_susp : Rule::susp_Body {
+class binder_susp : public Rule::susp_Body {
+public:
   using thunk_t = thunk<Fun>;
-  std::pair<thunk_t, Rule::vars_t> tv;
   using bound_t = Var<typename thunk_t::result_t>;
-  bound_t& bound;
   binder_susp(thunk_susp<Fun>&& ts, bound_t& bound)
     : tv(std::move(ts.tv))
     , bound(bound) {}
+
+private:
+  std::pair<thunk_t, Rule::vars_t> tv;
+  bound_t& bound;
 
   struct Binder : Rule::Body {
     thunk_t fun;
@@ -425,7 +442,7 @@ struct binder_susp : Rule::susp_Body {
     {
       Binder& self = static_cast<Binder&>(self_);
       if (self.var.unify(self.fun.apply()))
-        self.next->eval(r, idx+1);
+        self.next(r, idx);
       if (self.bound)
         self.var.zap();
     }

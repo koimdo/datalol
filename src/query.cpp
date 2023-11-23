@@ -69,7 +69,7 @@ void Query::configure()
     auto next = get_elem(r.head);
     for (size_t i=r.last-1; i!=r.head; i--) {
       auto e = get_elem(i).cast<Rule::Body>();
-      e->next = next.get(flat::unsafe_extract_pointer{});
+      e->next_ = next.get(flat::unsafe_extract_pointer{});
       next = e;
     }
   }
