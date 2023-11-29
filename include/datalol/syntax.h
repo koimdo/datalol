@@ -7,6 +7,7 @@
 #include "flat/memory"
 #include "flat/span"
 #include "flat/set"
+#include "debug.h"
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
@@ -284,6 +285,7 @@ private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
 
+  debug_info *dbg;
   static_stack<std::pair<Rule::elem_meta, Rule::uelem>, MAX_ELEMS> elems;
   static_stack<Rule, MAX_ELEMS> rules;
   std::bitset<MAX_ELEMS> recursive;
@@ -312,12 +314,15 @@ private:
   void configure();
 public:
   template<typename F>
-  Query(F&& build)
+  Query(debug_info *dbg, F&& build)
     : pool("Query")
+    , dbg(dbg)
   {
     flat::autorelease::scoped guard(pool);
     flat::guard current_query = with_query();
     build();
+    if (name.empty())
+      name = (format{} << dbg->file << ":" << dbg->line);
     configure();
   }
   Query(Query&&);

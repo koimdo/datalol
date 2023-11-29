@@ -153,7 +153,9 @@ namespace detail {
   };
 }
 
-#define DATALOL(...) Query([&]() { __VA_ARGS__ ; })
+#define DATALOL(...) Query(DEBUG_INFO(), [&]() {                        \
+    __VA_ARGS__                                                         \
+  })
 
 template<typename T, typename Compare = std::less<T>>
 struct Typed_collection : Collection_base {

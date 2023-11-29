@@ -1,0 +1,25 @@
+#pragma once
+
+#ifndef  INFO_ALIGNMENT
+#if defined(__LP64__)
+#define  INFO_ALIGNMENT  16
+#else
+#define  INFO_ALIGNMENT  8
+#endif
+#endif
+
+struct alignas(INFO_ALIGNMENT) debug_info {
+  const char *file;
+  const int line;
+  unsigned tripcount;
+};
+
+#define DEBUG_INFO()                                              \
+  ({                                                              \
+    static struct debug_info here                                 \
+      __attribute__((__used__, __section__("info")))              \
+      = { __FILE__, __LINE__ };                                   \
+    &here;                                                        \
+  })
+
+bool is_debug() noexcept;
