@@ -65,10 +65,40 @@ namespace detail {
   template<class R> struct check_arg<R,      R> : bool_constant<true> {};
   template<class R> struct check_arg<Var<R>, R> : bool_constant<true> {};
 
+  template<typename T, typename = void>
+  struct tuple_lift {
+    static constexpr size_t size = 1;
+
+    template<size_t>
+    using element_type = T;
+
+    template<size_t>
+    static
+    const T& get(const T& t) { return t; }
+    template<size_t>
+    static
+    T&& get(T&& t) { return std::move(t); }
+  };
+
+  template<typename T>
+  struct tuple_lift<T, std::void_t< decltype(std::tuple_size<T>::value) >> {
+    static constexpr size_t size = std::tuple_size<T>::value;
+
+    template<size_t I>
+    using element_type = typename std::tuple_element<I, T>::type;
+
+    template<size_t I>
+    static
+    const T& get(const T& t) { return std::get<I>(t); }
+    template<size_t I>
+    static
+    T&& get(T&& t) { return std::get<I>(std::move(t)); }
+  };
+
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
-    using SElem = typename std::tuple_element<i, Sel>::type;
-    using RElem = typename std::tuple_element<i, Row>::type;
+    using SElem = typename tuple_lift<Sel>::element_type<i>;
+    using RElem = typename tuple_lift<Row>::element_type<i>;
     static constexpr bool check1 = check_arg<SElem, RElem>::value;
     static_assert(check1, "Type mismatch");
     static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
@@ -152,6 +182,96 @@ namespace detail {
     }
   };
 }
+
+template<typename Derived, typename Sel>
+struct Matcher_base : public Rule::Body, private detail::undo_helper {
+  Sel selector;
+  const char *name;
+
+  Matcher_base(Sel&& sel, const char *name)
+    : Rule::Body(run_full)
+    , selector(std::forward<Sel>(sel))
+    , name(name)
+  {}
+
+  void add_undo(Var_* v) override final { this->add_undo_(v); }
+
+  void print(std::ostream& os) const override final
+  {
+    os << name << "(" << detail::print_tuple<Sel>(selector) << ")";
+  }
+
+  static
+  void run_full(Rule::Elem& self_)
+  {
+    Derived& self = static_cast<Derived&>(self_);
+    for (auto const& row : self.get_coll()) {
+      // FIXME: lift
+      if (for_each_in_tuple(detail::unify1(), self.selector, row))
+        self.next();
+      self.undo();
+    }
+  }
+};
+
+template<typename... Sel>
+std::tuple<typename flat::remove_cvref<Sel>::type...>
+build_selector(Sel&&... sel)
+{
+  return std::tuple<typename flat::remove_cvref<Sel>::type...>
+    (std::forward<typename flat::remove_cvref<Sel>::type>(sel)...);
+}
+
+template<typename Coll>
+class external {
+  // FIXME: use cow_buf
+  const Coll *coll;
+  const char *name;
+public:
+  using value_type = typename Coll::value_type;
+  using const_reference = typename Coll::const_reference;
+  using const_iterator = typename Coll::const_iterator;
+
+  external(const char *name, const Coll& coll_): name(name), coll(&coll_) {}
+  external(const char *name, Coll&& coll_)
+    : external(name, *flat::allocate<Coll>(std::move(coll_)))
+  {}
+
+  template<typename Sel>
+  struct susp : public Rule::susp_Body {
+    Sel selector;
+    external& ext;
+    susp(external& ext, Sel&& sel)
+      : ext(ext)
+      , selector(std::move(sel))
+    {}
+    struct Body : Matcher_base<Body, Sel> {
+      Body(Sel&& sel, const char *name, const Coll *coll)
+        : Matcher_base<Body, Sel>(std::move(sel), name)
+        , coll(coll)
+      {}
+      const Coll *coll;
+      const Coll& get_coll() const noexcept { return *coll; }
+    };
+
+    Rule::vars_t get_vars() const
+    {
+      return detail::mark_vars(selector);
+    }
+
+    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+    {
+      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), nullptr };
+      auto p = flat::allocate<Body>(std::move(selector), ext.name, ext.coll);
+      return std::make_pair(meta, p);
+    }
+  };
+
+  template<typename... SelectArgs>
+  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(args...))> {
+    return susp<decltype(build_selector(args...))>(*this, build_selector(args...));
+  }
+};
 
 template<typename T, typename Compare = std::less<T>>
 struct Typed_collection : Collection_base {
