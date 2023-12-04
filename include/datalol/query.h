@@ -1,6 +1,7 @@
 #pragma once
 
 #include "syntax.h"
+#include "debug.h"
 
 #include <cstddef>
 #include <datalol/tuple_util.h>
@@ -8,57 +9,7 @@
 
 #include <flat/set>
 #include <flat/map>
-
-
-class Collection_base;
-template<class T> class Relation;
-template<class T> class Objects;
-
-class DB {
-  template<class T> friend class Relation;
-  template<class T> friend class Objects;
-  flat::autorelease pool;
-  flat::map<std::string, flat::pool_ptr<Collection_base>> rels;
-
-  template<class Rel>
-  Rel& make_relation(const std::string& name)
-  {
-    auto rel = pool.allocate<Rel>(*this, name);
-    auto itb = rels.emplace(name, rel);
-    assert(itb.second);
-    return *rel;
-  }
-
-public:
-  DB(): pool("db") {}
-  template<typename... Args>
-  Relation<std::tuple<Args...>>&
-  table(const std::string& name)
-  {
-    static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
-    return make_relation<Relation<std::tuple<Args...>>>(name);
-  }
-
-  template<typename T>
-  Objects<T>&
-  objects(const std::string& name) {
-    return make_relation<Objects<T>>(name);
-  }
-};
-
-class Collection_base : public IPrint {
-protected:
-  DB& db;
-  std::string name;
-public:
-  Collection_base(const Collection_base&) = delete;
-  Collection_base(DB& db, const std::string& name)
-    : db(db)
-    , name(name)
-  {}
-  const std::string& get_name() const noexcept { return name; }
-  virtual size_t merge() = 0;
-};
+#include <type_traits>
 
 namespace detail {
   template<class S, class R> struct check_arg   : bool_constant<false> {};
@@ -181,24 +132,25 @@ namespace detail {
       return os << ">";
     }
   };
+
 }
 
-template<typename Derived, typename Sel>
+template<typename Derived, typename Sel, typename Origin>
 struct Matcher_base : public Rule::Body, private detail::undo_helper {
   Sel selector;
-  const char *name;
+  Origin& origin;
 
-  Matcher_base(Sel&& sel, const char *name)
+  Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(run_full)
     , selector(std::forward<Sel>(sel))
-    , name(name)
+    , origin(origin)
   {}
 
   void add_undo(Var_* v) override final { this->add_undo_(v); }
 
   void print(std::ostream& os) const override final
   {
-    os << name << "(" << detail::print_tuple<Sel>(selector) << ")";
+    os << origin.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
   }
 
   static
@@ -214,6 +166,25 @@ struct Matcher_base : public Rule::Body, private detail::undo_helper {
   }
 };
 
+template<typename Sel, typename Origin>
+struct Matcher_susp_base {
+  using value_type = typename Origin::value_type;
+  static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
+  static_assert(detail::check_query_t<Sel, value_type, 0, std::tuple_size<Sel>::value>::value, "Type mismatch");
+
+  Sel selector;
+  Origin& origin;
+  Matcher_susp_base(Origin& origin, Sel&& sel)
+    : selector(std::move(sel))
+    , origin(origin)
+  {}
+
+  Rule::vars_t get_vars() const
+  {
+    return detail::mark_vars(selector);
+  }
+};
+
 template<typename... Sel>
 std::tuple<typename flat::remove_cvref<Sel>::type...>
 build_selector(Sel&&... sel)
@@ -223,46 +194,37 @@ build_selector(Sel&&... sel)
 }
 
 template<typename Coll>
-class external {
+class external : public Collection_base {
   // FIXME: use cow_buf
   const Coll *coll;
-  const char *name;
 public:
   using value_type = typename Coll::value_type;
-  using const_reference = typename Coll::const_reference;
-  using const_iterator = typename Coll::const_iterator;
 
-  external(const char *name, const Coll& coll_): name(name), coll(&coll_) {}
+  void print(std::ostream& os) const override final
+  {
+    os << name << " = external<" << GetName<value_type>() << ">, size=" << coll->size();
+  }
+  size_t merge() override final { assert(false && "Cannot merge into external relations"); }
+  external(const char *name, const Coll& coll_)
+    : Collection_base(name)
+    , coll(&coll_) {}
   external(const char *name, Coll&& coll_)
     : external(name, *flat::allocate<Coll>(std::move(coll_)))
   {}
 
   template<typename Sel>
-  struct susp : public Rule::susp_Body {
-    Sel selector;
-    external& ext;
-    susp(external& ext, Sel&& sel)
-      : ext(ext)
-      , selector(std::move(sel))
-    {}
-    struct Body : Matcher_base<Body, Sel> {
-      Body(Sel&& sel, const char *name, const Coll *coll)
-        : Matcher_base<Body, Sel>(std::move(sel), name)
-        , coll(coll)
-      {}
-      const Coll *coll;
-      const Coll& get_coll() const noexcept { return *coll; }
+  struct susp : public Matcher_susp_base<Sel, external>, public Rule::susp_Body {
+    using super_t = Matcher_susp_base<Sel, external>;
+    using super_t::Matcher_susp_base;
+    struct Body : Matcher_base<Body, Sel, external> {
+      using Matcher_base<Body, Sel, external>::Matcher_base;
+      const Coll& get_coll() const noexcept { return *this->origin.coll; }
     };
-
-    Rule::vars_t get_vars() const
-    {
-      return detail::mark_vars(selector);
-    }
 
     std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
     {
-      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), nullptr };
-      auto p = flat::allocate<Body>(std::move(selector), ext.name, ext.coll);
+      Rule::elem_meta meta = { Rule::with_vars(super_t::get_vars(), nullptr), &this->origin };
+      auto p = flat::allocate<Body>(std::move(super_t::selector), super_t::origin);
       return std::make_pair(meta, p);
     }
   };
@@ -273,19 +235,31 @@ public:
   }
 };
 
-template<typename T, typename Compare = std::less<T>>
-struct Typed_collection : Collection_base {
+// TODO: despecialize relations?
+template<typename... Args>
+struct table : Collection_base {
   using Collection_base::Collection_base;
 
-  flat::set<T, Compare> all;
-  flat::set<T, Compare> delta, next_delta;
+  static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
+  using value_type = std::tuple<Args...>;
+  static constexpr int arity = sizeof...(Args);
+
+
+  flat::set<value_type> all;
+  flat::set<value_type> delta, next_delta;
+
+  void append(value_type&& t)
+  {
+    if (!all.contains(t))
+      next_delta.insert(std::move(t));
+  }
 
   size_t merge() override final
   {
-    std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
-    std::cerr << "Merging " << name << " delta: ";
-    //print_(std::cerr, delta);
-    std::cerr <<"\n";
+    // std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
+    // std::cerr << "Merging " << name << " delta: ";
+    // //print_(std::cerr, delta);
+    // std::cerr <<"\n";
     if (all.empty()) {
       std::swap(all, delta);
     } else if (!delta.empty()) {
@@ -297,17 +271,7 @@ struct Typed_collection : Collection_base {
     next_delta.clear();
     return delta.size();
   }
-};
-
-// TODO: despecialize relations?
-
-template<typename T>
-struct Relation : Typed_collection<T> {
-  friend class DB;
-  using Typed_collection<T>::Typed_collection;
-
-  using value_type = T;
-  static constexpr int arity = std::tuple_size<T>::value;
+  
   template<size_t N>
   static
   bool index_cmp(const value_type& l, const value_type& r)
@@ -343,185 +307,63 @@ struct Relation : Typed_collection<T> {
     os <<"\n}";
   }
 
-  template<typename... Args>
   void insert(Args&&... args) {
-    T it(std::forward<Args>(args)...);
+    value_type it(std::forward<Args>(args)...);
     this->all.insert(it);
     for (int i=0; i<arity; i++)
       indices[i].insert(it);
   }
 
-  template<typename... Selector>
-  struct Match {
-    using query_type = std::tuple<Selector...>;
-    static constexpr int arity = std::tuple_size<query_type>::value;
-    static_assert(std::tuple_size<value_type>::value == arity, "Inconsistent lengths");
-    static_assert(detail::check_query_t<query_type, value_type, 0, arity>::value, "Type mismatch");
+  template<typename Sel>
+  struct susp : public Matcher_susp_base<Sel, table>, public Rule::susp_Head, public Rule::susp_Body {
+    using super_t = Matcher_susp_base<Sel, table>;
+    using super_t::Matcher_susp_base;
 
-    Relation<value_type>& rel;
-    query_type selector;
-
-    void print_common(std::ostream& os) const
-    {
-      os << rel.name << "(" << detail::print_tuple<query_type>(selector) << ")";
-    }
-
-    Match(Relation<value_type>& rel, Selector&&... sels)
-      : rel(rel)
-      , selector(std::forward<Selector>(sels)...)
-    {
-    }
-  };
-
-  template<typename... Selector>
-  struct Match_select  : public Rule::susp_Head, public Rule::susp_Body {
-    using Match_base = Match<Selector...>;
-    Match_base m;
-    Match_select(Relation<value_type>& rel, Selector&&... sels)
-      : m(rel, std::move(sels)...)
-    {}
-    struct Head : public Match_base, Rule::Head {
+    struct Head : Rule::Head {
+      Sel selector;
+      table& rel;
+      Head(Sel&& selector, table& rel)
+        : Rule::Head(eval)
+        , selector(std::move(selector))
+        , rel(rel)
+      {}
       static void eval(Rule::Elem& self_)
       {
         Head& self = static_cast<Head&>(self_);
         auto res = transform_each(self.selector, detail::get_value{});
-        self.rel.next_delta.insert(std::move(res));
+        self.rel.append(std::move(res));
       }
-      Head(Match_base&& m): Match_base(std::move(m)), Rule::Head(eval) {}
-      void print(std::ostream& os) const override final { this->print_common(os); }
+      void print(std::ostream& os) const override final
+      {
+        os << rel.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
+      }
     };
 
-    struct Body : public Match_base, public Rule::Body, private detail::undo_helper {
-      void add_undo(Var_* v) override final { this->add_undo_(v); }
-
-      flat::set<value_type>& actual()
+    struct Body : Matcher_base<Body, Sel, table> {
+      using Matcher_base<Body, Sel, table>::Matcher_base;
+      const flat::set<value_type>& get_coll() noexcept
       {
-        return this->rule().use_delta() ? this->rel.delta : this->rel.all;
+        return this->rule().use_delta() ? this->origin.delta : this->origin.all;
       }
-
-      // Fully unbound (TODO: indices for partially-bound)
-      static void eval(Rule::Elem& self_)
-      {
-        Body& self = static_cast<Body&>(self_);
-        for (auto const& row : self.actual()) {
-          if (for_each_in_tuple(detail::unify1(), self.selector, row))
-            self.next();
-          self.undo();
-        }
-      }
-      Body(Match_base&& m): Match_base(std::move(m)), Rule::Body(eval) {}
-      void print(std::ostream& os) const override final { this->print_common(os); }
     };
-
-    Rule::vars_t get_vars() const
-    {
-      return detail::mark_vars(m.selector);
-    }
 
     std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
     {
-      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), &m.rel };
-      auto p = flat::allocate<Body>(std::move(m));
+      Rule::elem_meta meta = { Rule::with_vars(super_t::get_vars(), nullptr), &this->origin };
+      auto p = flat::allocate<Body>(std::move(super_t::selector), super_t::origin);
       return std::make_pair(meta, p);
     }
 
     std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
     {
-      Rule::elem_meta meta = { Rule::with_vars(nullptr, get_vars()), &m.rel };
-      auto p = flat::allocate<Head>(std::move(m));
+      Rule::elem_meta meta = { Rule::with_vars(nullptr, super_t::get_vars()), &this->origin };
+      auto p = flat::allocate<Head>(std::move(super_t::selector), super_t::origin);
       return std::make_pair(meta, p);
     }
   };
-
+  
   template<typename... SelectArgs>
-  Match_select<typename flat::remove_cvref<SelectArgs>::type...>
-  operator()(SelectArgs&&... args) {
-    return Match_select<typename flat::remove_cvref<SelectArgs>::type...>(*this, std::forward<typename flat::remove_cvref<SelectArgs>::type>(args)...);
-  }
-};
-
-template<typename T>
-struct Objects : Typed_collection<flat::pool_ptr<T>> {
-  friend class DB;
-  using Typed_collection<flat::pool_ptr<T>>::Typed_collection;
-
-  using value_type = T;
-
-  void print(std::ostream& os) const override final
-  {
-    os << "{";
-    for (auto const& row : this->all)
-      os << "\n  " << this->name << "(" << *row << ")";
-    os <<"\n}";
-  }
-
-  template<typename... Args>
-  void insert(Args&&... args) {
-    this->all.insert(this->db.pool.template allocate<value_type>(std::forward<Args>(args)...));
-  }
-
-  void insert(flat::pool_ptr<T> p) {
-    this->all.insert(p);
-  }
-
-  struct Match_base {
-    Objects<value_type>& rel;
-    Var<value_type> that;
-
-    Match_base(Objects<value_type>& rel, Var<value_type>& that)
-      : rel(rel)
-      , that(std::move(that))
-    {}
-
-    void print_common(std::ostream& os) const
-    {
-      os << "<";
-      Var<value_type>::do_print(os, that);
-      os << ">";
-    }
-  };
-
-  struct Match_select : public Rule::susp_Body { // TODO: also Rule::Head
-    Match_base m;
-    Match_select(Objects<value_type>& rel, Var<value_type>& that)
-      : m(rel, that)
-    {}
-
-    Rule::elem_meta meta() const noexcept {
-      Rule::vars_t vars;
-      vars.set(m.that.get_id());
-      return { Rule::with_vars(vars, nullptr), &m.rel };
-    }
-    struct Body : public Match_base, Rule::Body {
-      bool bound = false;
-      Body(Match_base&& m): Match_base(std::move(m)), Rule::Body(eval_body) {}
-      void add_undo(Var_* v) override final
-      {
-        assert(!v || v->get_id() == Body::that.get_id());
-        bound = v;
-      }
-      void print(std::ostream& os) const override final { this->print_common(os); }
-      static void eval_body(Rule::Elem& self_)
-      {
-        // FIXME: if `bound` is set, just check `rel.contains(*that)`
-        Body& self = static_cast<Body&>(self_);
-        for (auto const& urow : self.rel.all) {
-          if (self.that.unify(*urow)) {
-            self.next();
-          }
-          self.that.zap();
-        }
-      }
-    };
-
-    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
-    {
-      return {meta(), flat::allocate<Body>(std::move(m))};
-    }
-  };
-
-  Match_select
-  operator()(Var<value_type>& that) {
-    return Match_select(*this, that);
+  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(args...))> {
+    return susp<decltype(build_selector(args...))>(*this, build_selector(args...));
   }
 };

@@ -14,6 +14,28 @@ struct IPrint {
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
+class Collection_base : public IPrint {
+protected:
+  std::string name;
+public:
+  Collection_base(const Collection_base&) = delete;
+  Collection_base(const std::string& name)
+    : name(name)
+  {}
+  const std::string& get_name() const noexcept { return name; }
+  virtual size_t merge() = 0;
+};
+
+template<class type> constexpr std::string GetName()
+{
+  const char* start = __PRETTY_FUNCTION__;
+  while(*start != '=') ++start;
+  start += 2;
+  size_t size = 0;
+  while(start[size] != ';') ++size;
+  return std::string(start, size);
+}
+
 template<class T, size_t MAX_SIZE>
 //using static_stack = std::vector<T>;
 class static_stack {
@@ -60,7 +82,6 @@ public:
   size_t size() const noexcept { return nitems; }
 };
 
-class Collection_base;
 class Var_;
 class Rule {
 public:
