@@ -3,6 +3,7 @@ set(TARGET_NAME datalol)
 add_library(${TARGET_NAME} STATIC
   # Please keep this list sorted
   memory.cpp
+  debug.cpp
   query.cpp
   syntax.cpp
   trace.cpp

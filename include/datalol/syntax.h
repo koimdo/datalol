@@ -12,7 +12,6 @@
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
-  virtual ~IPrint() {}
 };
 
 template<class T, size_t MAX_SIZE>
@@ -305,7 +304,7 @@ private:
   friend class Rule::cursor;
   static_stack<Var_, Rule::MAX_VARS> vars;
 
-  flat::guard with_query();
+  std::pair<flat::guard, flat::autorelease::scoped> with_query();
 
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
@@ -313,17 +312,26 @@ private:
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
 public:
-  template<typename F>
-  Query(debug_info *dbg, F&& build)
-    : pool("Query")
-    , dbg(dbg)
+  class Builder {
+    Query* q;
+    decltype(q->with_query()) current_query;
+    struct iter {
+      Query* q;
+      iter(Query *q): q(q) {}
+      bool operator!=(const iter& o) const { return q != o.q; }
+      std::false_type operator*() const { return std::false_type{}; }
+      void operator++();
+    };
+  public:
+    Builder(Query* q, debug_info *dbg);
+    iter begin() { return iter{q}; }
+    iter end() const { return iter{nullptr}; }
+  };
+
+  Query();
+  static void set_title(const std::string& title)
   {
-    flat::autorelease::scoped guard(pool);
-    flat::guard current_query = with_query();
-    build();
-    if (name.empty())
-      name = (format{} << dbg->file << ":" << dbg->line);
-    configure();
+    current->name = title;
   }
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::with_vars& vs);
@@ -333,7 +341,7 @@ public:
 template<class T>
 Var_ Var_::mkvar(const std::string& name)
 {
-  auto res = Query::current->pool.template allocate<Var_::with_buf<T>>();
+  auto res = flat::allocate<Var_::with_buf<T>>();
   Impl *impl = &(res->impl);
   impl->name = name;
   impl->id = Query::current->vars.size();
@@ -494,11 +502,18 @@ binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fu
   return binder_susp<Fun>(std::move(getter), v);
 }
 
+#define CONCAT_(a,b) a##b
+#define CONCAT(a,b) CONCAT_(a,b)
+#define UNIQ_(prefix) CONCAT(prefix,__LINE__)
+
 #define THUNK(expr,...)                                                 \
   make_susp(Rule::with_vars::capture([&]() {                            \
     return make_thunk(#expr, ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } )); \
   }))
 
-#define DATALOL(...) Query(DEBUG_INFO(), [&]() {                        \
-    __VA_ARGS__                                                         \
-  })
+#define DATALOL_Q(query, ...) for (auto UNIQ_(dummy) : ::Query::Builder(&query, DEBUG_INFO(), ##__VA_ARGS__))
+#define DATALOL(...) ({                                                 \
+      Query UNIQ_(query);                                               \
+      DATALOL_Q(UNIQ_(query)) { __VA_ARGS__ }                           \
+      std::move(UNIQ_(query));                                          \
+    })

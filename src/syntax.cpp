@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include <datalol/syntax.h>
+#include <datalol/debug.h>
 
 // RULE ::= HEAD << body (& body)*
 // (fact rules are not allowed)
@@ -80,12 +81,30 @@ void Query::end_rule(Rule *r)
   rules.back().last = elems.size();
 }
 
+Query::Builder::Builder(Query *q, debug_info *dbg)
+  : q(q)
+  , current_query(q->with_query())
+{
+  q->dbg = dbg;
+}
+
+void Query::Builder::iter::operator++()
+{
+  q->configure();
+  q = nullptr;
+}
+
+Query::Query()
+  : pool("Query")
+  , dbg(nullptr)
+{}
+
 Query::Query(Query&&) = default;
 
 void Query::print(std::ostream& os) const
 {
-  flat::guard guard = const_cast<Query*>(this)->with_query();
-  os << "{";
+  auto guard = const_cast<Query*>(this)->with_query();
+  os << "Query [" << name << (is_debug() ? "(dbg)":"") << "]: {";
   size_t i=0;
   for (auto const& r : rules) {
     if (i) os << "\n";
@@ -161,9 +180,9 @@ Rule::Elem::Elem(eval_t eval_)
 {
 }
 
-flat::guard Query::with_query()
+std::pair<flat::guard, flat::autorelease::scoped> Query::with_query()
 {
   flat::guard res;
   res.set(&current, this);
-  return res;
+  return std::make_pair(std::move(res), flat::autorelease::scoped(pool));
 }

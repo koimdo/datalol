@@ -98,7 +98,7 @@ void autorelease::finish_allocation_(void *p, void (*dtor)(void *))
   ++pg->nobjects;
 }
 
-void autorelease::clear()
+void autorelease::stats()
 {
   if (TRACE_POOL) {
     size_t nbytes = 0, nobjects = 0, ndtors = 0;
@@ -113,6 +113,11 @@ void autorelease::clear()
                << " dtors=" << ndtors
                <<"\n";
   }
+}
+
+void autorelease::clear()
+{
+  stats();
   pool.clear();
 }
 
