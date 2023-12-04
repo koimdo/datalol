@@ -498,3 +498,7 @@ binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fu
   make_susp(Rule::with_vars::capture([&]() {                            \
     return make_thunk(#expr, ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } )); \
   }))
+
+#define DATALOL(...) Query(DEBUG_INFO(), [&]() {                        \
+    __VA_ARGS__                                                         \
+  })

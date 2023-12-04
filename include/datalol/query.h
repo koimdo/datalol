@@ -153,10 +153,6 @@ namespace detail {
   };
 }
 
-#define DATALOL(...) Query(DEBUG_INFO(), [&]() {                        \
-    __VA_ARGS__                                                         \
-  })
-
 template<typename T, typename Compare = std::less<T>>
 struct Typed_collection : Collection_base {
   using Collection_base::Collection_base;
