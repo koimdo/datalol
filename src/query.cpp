@@ -105,6 +105,7 @@ void Query::run() {
       changed += c->merge();
     std::cerr << "Changed: " << changed << "\n";
   }
+  dbg->tripcount++;
 }
 
 

@@ -33,7 +33,7 @@ struct Stubs {
     int nstubs = 0;
     std::cout << "Available queries:\n";
     for (const debug_info *d = __start_info; d != __stop_info; ++d) {
-      std::cout << nstubs << "@" << d->file << ":" << d->line << "\n";
+      std::cout << nstubs << "@ [" << d->function << "] "  << d->file << ":" << d->line << "\n";
       nstubs++;
     }
     std::cout << "-----\n";

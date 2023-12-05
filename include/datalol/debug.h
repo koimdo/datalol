@@ -10,7 +10,9 @@
 
 struct alignas(INFO_ALIGNMENT) debug_info {
   const char *file;
+  const char *function;
   const int line;
+  unsigned flags;
   unsigned tripcount;
 };
 
@@ -18,7 +20,7 @@ struct alignas(INFO_ALIGNMENT) debug_info {
   ({                                                              \
     static struct debug_info here                                 \
       __attribute__((__used__, __section__("info")))              \
-      = { __FILE__, __LINE__ };                                   \
+      = { __FILE__, __PRETTY_FUNCTION__, __LINE__ };               \
     &here;                                                        \
   })
 
