@@ -8,9 +8,15 @@
 #include "flat/span"
 #include "flat/set"
 #include "debug.h"
+#include <json/json.h>
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
+  virtual Json::Value to_json() const {
+    std::ostringstream os;
+    print(os);
+    return Json::Value(os.str());
+  };
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
