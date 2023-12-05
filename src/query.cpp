@@ -92,7 +92,7 @@ void Query::run() {
     std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
       if (!r.seminaive_current) {
-        run_rule(r, -1);
+        run_rule(r, 0);
       } else {
         for (size_t i=r.head+1; i<r.last; ++i) {
           if (recursive.test(i))
