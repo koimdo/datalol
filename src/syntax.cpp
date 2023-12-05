@@ -9,7 +9,7 @@
 
 // Query ::= Rule+
 Query *Query::current = nullptr;
-Rule::vars_t *current_vars = nullptr;
+static Rule::vars_t *current_vars = nullptr;
 
 Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 {
@@ -61,6 +61,7 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
     os << "<" << impl.id << ">";
   else
     os << name;
+  os << "[" << impl.type << "]";
   return os;
 }
 

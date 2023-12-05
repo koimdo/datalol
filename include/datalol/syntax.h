@@ -218,6 +218,7 @@ protected:
   struct Impl {
     Impl();
     std::string name;
+    std::string type;
     int id;
     mutable cow_buf p;
   };
@@ -230,7 +231,7 @@ protected:
     alignas(T) unsigned char buf[sizeof(T)];
   };
 
-  Impl *impl = nullptr;
+  Impl *impl;
   friend class Query;
 
   friend
@@ -365,6 +366,7 @@ Var_ Var_::mkvar(const std::string& name)
   auto res = flat::allocate<Var_::with_buf<T>>();
   Impl *impl = &(res->impl);
   impl->name = name;
+  impl->type = GetName<T>();
   impl->id = Query::current->vars.size();
   Query::current->vars.emplace_back(Var_(impl));
   return impl;
