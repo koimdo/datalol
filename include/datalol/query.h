@@ -23,16 +23,17 @@ namespace detail {
     template<size_t>
     using element_type = T;
 
-    template<size_t>
+    template<size_t I>
     static
-    const T& get(const T& t) { return t; }
-    template<size_t>
-    static
-    T&& get(T&& t) { return std::move(t); }
+    const T& get(const T& t)
+    {
+      static_assert(I==0, "scalars are singleton tuples");
+      return t;
+    }
   };
 
   template<typename T>
-  struct tuple_lift<T, std::void_t< decltype(std::tuple_size<T>::value) >> {
+  struct tuple_lift<T, decltype(void(std::tuple_size<T>::value))> {
     static constexpr size_t size = std::tuple_size<T>::value;
 
     template<size_t I>
@@ -40,10 +41,7 @@ namespace detail {
 
     template<size_t I>
     static
-    const T& get(const T& t) { return std::get<I>(t); }
-    template<size_t I>
-    static
-    T&& get(T&& t) { return std::get<I>(std::move(t)); }
+    auto get(const T& t) -> decltype(std::get<I>(t)) { return std::get<I>(t); }
   };
 
   template<typename Sel, typename Row, size_t i, size_t size>
@@ -58,9 +56,25 @@ namespace detail {
   template<typename Sel, typename Row, size_t size>
   struct check_query_t<Sel, Row, size, size> : bool_constant<true> {};
 
-  struct unify1 {
-    template<class R> constexpr bool operator()(int, const R& s, const R& r) const { return s == r; }
-    template<class R> constexpr bool operator()(int, const Var<R>& s, const R& r) { return s.unify(r); }
+  template<typename Sel, typename Row, size_t i=0, size_t size=tuple_lift<Sel>::size>
+  struct unify {
+    using TS = tuple_lift<Sel>;
+    using TR = tuple_lift<Row>;
+    static bool run(const Sel& s, const Row& r)
+    {
+      unify u{};
+      return u(TS::template get<i>(s),
+               TR::template get<i>(r)) &&
+        unify<Sel, Row, i+1, size>::run(s, r);
+    }
+    // Elementwise cases
+    template<class R> constexpr bool operator()(const R& s, const R& r) const { return s == r; }
+    template<class R> constexpr bool operator()(const Var<R>& s, const R& r) { return s.unify(r); }
+  };
+
+  template<typename Sel, typename Row, size_t size>
+  struct unify<Sel, Row, size, size> : bool_constant<true> {
+    static bool run(const Sel&, const Row&) { return true; }
   };
 
   template<class T> struct get_var { static const Var_* get(const T&) { return nullptr; } };
@@ -158,8 +172,7 @@ struct Matcher_base : public Rule::Body, private detail::undo_helper {
   {
     Derived& self = static_cast<Derived&>(self_);
     for (auto const& row : self.get_coll()) {
-      // FIXME: lift
-      if (for_each_in_tuple(detail::unify1(), self.selector, row))
+      if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row))
         self.next();
       self.undo();
     }
