@@ -48,8 +48,8 @@ namespace detail {
 
   template<typename Sel, typename Row, size_t i, size_t size>
   struct check_query_t {
-    using SElem = typename tuple_lift<Sel>::element_type<i>;
-    using RElem = typename tuple_lift<Row>::element_type<i>;
+    using SElem = typename tuple_lift<Sel>::template element_type<i>;
+    using RElem = typename tuple_lift<Row>::template element_type<i>;
     static constexpr bool check1 = check_arg<SElem, RElem>::value;
     static_assert(check1, "Type mismatch");
     static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
@@ -194,10 +194,13 @@ build_selector(Sel&&... sel)
 }
 
 template<typename Coll>
-class external : public Collection_base {
+class external_ : public Collection_base {
   // FIXME: use cow_buf
   const Coll *coll;
 public:
+  template<typename... Args>
+  static external_& make(Args&&... args) { return Collection_base::make<external_>(std::forward<Args>(args)...); }
+
   using value_type = typename Coll::value_type;
 
   void print(std::ostream& os) const override final
@@ -205,19 +208,19 @@ public:
     os << name << " = external<" << GetName<value_type>() << ">, size=" << coll->size();
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); }
-  external(const char *name, const Coll& coll_)
+  external_(const std::string& name, const Coll& coll_)
     : Collection_base(name)
     , coll(&coll_) {}
-  external(const char *name, Coll&& coll_)
-    : external(name, *flat::allocate<Coll>(std::move(coll_)))
-  {}
+  // external_(const char *name, Coll&& coll_)
+  //   : external_(name, *flat::allocate<Coll>(std::move(coll_)))
+  // {}
 
   template<typename Sel>
-  struct susp : public Matcher_susp_base<Sel, external>, public Rule::susp_Body {
-    using super_t = Matcher_susp_base<Sel, external>;
+  struct susp : public Matcher_susp_base<Sel, external_>, public Rule::susp_Body {
+    using super_t = Matcher_susp_base<Sel, external_>;
     using super_t::Matcher_susp_base;
-    struct Body : Matcher_base<Body, Sel, external> {
-      using Matcher_base<Body, Sel, external>::Matcher_base;
+    struct Body : Matcher_base<Body, Sel, external_> {
+      using Matcher_base<Body, Sel, external_>::Matcher_base;
       const Coll& get_coll() const noexcept { return *this->origin.coll; }
     };
 
@@ -235,10 +238,15 @@ public:
   }
 };
 
-// TODO: despecialize relations?
+template<typename Coll>
+external_<Coll>& external(const char *name, const Coll& coll) { return external_<Coll>::make(name, coll); }
+
 template<typename... Args>
-struct table : Collection_base {
+struct table_ : Collection_base {
   using Collection_base::Collection_base;
+
+  template<typename... MArgs>
+  static table_& make(MArgs&&... args) { return Collection_base::make<table_>(std::forward<MArgs>(args)...); }
 
   static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
   using value_type = std::tuple<Args...>;
@@ -271,7 +279,7 @@ struct table : Collection_base {
     next_delta.clear();
     return delta.size();
   }
-  
+
   template<size_t N>
   static
   bool index_cmp(const value_type& l, const value_type& r)
@@ -315,14 +323,14 @@ struct table : Collection_base {
   }
 
   template<typename Sel>
-  struct susp : public Matcher_susp_base<Sel, table>, public Rule::susp_Head, public Rule::susp_Body {
-    using super_t = Matcher_susp_base<Sel, table>;
+  struct susp : public Matcher_susp_base<Sel, table_>, public Rule::susp_Head, public Rule::susp_Body {
+    using super_t = Matcher_susp_base<Sel, table_>;
     using super_t::Matcher_susp_base;
 
     struct Head : Rule::Head {
       Sel selector;
-      table& rel;
-      Head(Sel&& selector, table& rel)
+      table_& rel;
+      Head(Sel&& selector, table_& rel)
         : Rule::Head(eval)
         , selector(std::move(selector))
         , rel(rel)
@@ -339,8 +347,8 @@ struct table : Collection_base {
       }
     };
 
-    struct Body : Matcher_base<Body, Sel, table> {
-      using Matcher_base<Body, Sel, table>::Matcher_base;
+    struct Body : Matcher_base<Body, Sel, table_> {
+      using Matcher_base<Body, Sel, table_>::Matcher_base;
       const flat::set<value_type>& get_coll() noexcept
       {
         return this->rule().use_delta() ? this->origin.delta : this->origin.all;
@@ -361,9 +369,19 @@ struct table : Collection_base {
       return std::make_pair(meta, p);
     }
   };
-  
+};
+
+template<typename... Args>
+class table {
+  using Impl = table_<Args...>;
+  Impl& impl;
+public:
+  table(const char *name)
+    : impl(Impl::make(name))
+  {}
+
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(args...))> {
-    return susp<decltype(build_selector(args...))>(*this, build_selector(args...));
+  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(args...))> {
+    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(args...));
   }
 };

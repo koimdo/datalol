@@ -17,6 +17,10 @@ struct IPrint {
 class Collection_base : public IPrint {
 protected:
   std::string name;
+
+  template<typename T, typename... Args>
+  static
+  T& make(const std::string& name, Args&&... args);
 public:
   Collection_base(const Collection_base&) = delete;
   Collection_base(const std::string& name)
@@ -324,19 +328,25 @@ private:
 
   friend class Var_;
   friend class Rule::cursor;
+  friend class Collection_base;
   static_stack<Var_, Rule::MAX_VARS> vars;
 
-  std::pair<flat::guard, flat::autorelease::scoped> with_query();
+  using guard_t = std::pair<flat::guard, flat::autorelease::scoped>;
+  guard_t with_query();
 
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
   };
+
+  // TODO: can be replaced by a vector, collections appear by declaration order
+  // TODO: add typeid for verification
+  flat::map<std::string, flat::pool_ptr<Collection_base>> db;
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
 public:
   class Builder {
     Query* q;
-    decltype(q->with_query()) current_query;
+    guard_t current_query;
     struct iter {
       Query* q;
       iter(Query *q): q(q) {}
@@ -370,6 +380,18 @@ Var_ Var_::mkvar(const std::string& name)
   impl->id = Query::current->vars.size();
   Query::current->vars.emplace_back(Var_(impl));
   return impl;
+}
+
+template<class T, typename... Args>
+T& Collection_base::make(const std::string& name, Args&&... args)
+{
+  auto& db = Query::current->db;
+  auto it = db.find(name);
+  if (db.end() != it)
+    return static_cast<T&>(*(it->second));
+  auto res = flat::allocate<T>(name, std::forward<Args>(args)...);
+
+  return *res;
 }
 
 template<typename Fun>
