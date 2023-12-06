@@ -1,20 +1,23 @@
-set(TARGET_NAME datalol)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-final-types -Wsuggest-final-methods")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=suggest-override -Wshadow=local")
 
-add_library(${TARGET_NAME} STATIC
+add_library(${DATALOL_LIB} STATIC
   # Please keep this list sorted
-  memory.cpp
   debug.cpp
+  memory.cpp
   query.cpp
   syntax.cpp
   trace.cpp
 )
 
-install( TARGETS ${TARGET_NAME}
-    ARCHIVE DESTINATION lib PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-    LIBRARY DESTINATION bin PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+add_dependencies(${DATALOL_LIB} jsoncpp)
+target_link_libraries(${DATALOL_LIB} "-ljsoncpp")
+
+install( TARGETS ${DATALOL_LIB}
+  ARCHIVE DESTINATION lib PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
 )
 
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/include/"
-    DESTINATION include
-    PATTERN "bits" EXCLUDE
+  DESTINATION include
+  PATTERN "bits" EXCLUDE
 )

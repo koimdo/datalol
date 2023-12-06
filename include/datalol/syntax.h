@@ -316,6 +316,7 @@ private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
 
+  std::string name;
   debug_info *dbg;
   static_stack<std::pair<Rule::elem_meta, Rule::uelem>, MAX_ELEMS> elems;
   static_stack<Rule, MAX_ELEMS> rules;
