@@ -33,7 +33,7 @@ TEST(Trivial, test0) {
 
   Query qo;
   DATALOL_Q (qo) {
-    auto& As = external("AS", ASs);
+    auto As = external("AS", ASs);
     Var<A> a("a");
     Var<int> i("i"), k("k");
     // FIXME: remove the `,true` part once we get the proper typing suppoer for head-only thunks

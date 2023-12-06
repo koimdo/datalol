@@ -207,12 +207,12 @@ build_selector(Sel&&... sel)
 }
 
 template<typename Coll>
-class external_ : public Collection_base {
+class external_impl : public Collection_base {
   // FIXME: use cow_buf
   const Coll *coll;
 public:
   template<typename... Args>
-  static external_& make(Args&&... args) { return Collection_base::make<external_>(std::forward<Args>(args)...); }
+  static external_impl& make(Args&&... args) { return Collection_base::make<external_impl>(std::forward<Args>(args)...); }
 
   using value_type = typename Coll::value_type;
 
@@ -221,19 +221,19 @@ public:
     os << name << " = external<" << GetName<value_type>() << ">, size=" << coll->size();
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); }
-  external_(const std::string& name, const Coll& coll_)
+  external_impl(const std::string& name, const Coll& coll_)
     : Collection_base(name)
     , coll(&coll_) {}
-  // external_(const char *name, Coll&& coll_)
-  //   : external_(name, *flat::allocate<Coll>(std::move(coll_)))
+  // external_impl(const char *name, Coll&& coll_)
+  //   : external_impl(name, *flat::allocate<Coll>(std::move(coll_)))
   // {}
 
   template<typename Sel>
-  struct susp : public Matcher_susp_base<Sel, external_>, public Rule::susp_Body {
-    using super_t = Matcher_susp_base<Sel, external_>;
+  struct susp : public Matcher_susp_base<Sel, external_impl>, public Rule::susp_Body {
+    using super_t = Matcher_susp_base<Sel, external_impl>;
     using super_t::Matcher_susp_base;
-    struct Body : Matcher_base<Body, Sel, external_> {
-      using Matcher_base<Body, Sel, external_>::Matcher_base;
+    struct Body : Matcher_base<Body, Sel, external_impl> {
+      using Matcher_base<Body, Sel, external_impl>::Matcher_base;
       const Coll& get_coll() const noexcept { return *this->origin.coll; }
     };
 
@@ -244,15 +244,36 @@ public:
       return std::make_pair(meta, p);
     }
   };
+};
 
+template<typename Coll>
+class external_;
+template<typename Coll>
+external_<Coll> external(const char *name, const Coll& coll);
+
+template<typename Coll>
+class external_ {
+  using Impl = external_impl<Coll>;
+  Impl& impl;
+
+  friend
+  external_ external<Coll>(const char *name, const Coll& coll);
+
+  external_(Impl& impl)
+    : impl(impl)
+  {}
+public:
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(args...))> {
-    return susp<decltype(build_selector(args...))>(*this, build_selector(args...));
+  auto operator()(SelectArgs&&... args) -> typename Impl::susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
+    return typename Impl::susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
   }
 };
 
 template<typename Coll>
-external_<Coll>& external(const char *name, const Coll& coll) { return external_<Coll>::make(name, coll); }
+external_<Coll> external(const char *name, const Coll& coll)
+{
+  return external_<Coll>::Impl::make(name, coll);
+}
 
 template<typename... Args>
 struct table_ : Collection_base {
@@ -394,7 +415,7 @@ public:
   {}
 
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(args...))> {
-    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(args...));
+  auto operator()(SelectArgs&&... args) -> typename Impl::susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
+    return typename Impl::susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
   }
 };
