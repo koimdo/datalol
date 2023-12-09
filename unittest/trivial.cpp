@@ -33,7 +33,8 @@ TEST(Trivial, test0) {
 
   Query qo;
   DATALOL_Q (qo) {
-    auto As = external("AS", ASs);
+    auto As = external_ref("AS", ASs);
+    auto FAs = external_copy("FAS", ASs.filter([](const A&) { return true; }));
     Var<A> a("a");
     Var<int> i("i"), k("k");
     // FIXME: remove the `,true` part once we get the proper typing suppoer for head-only thunks

@@ -223,9 +223,6 @@ public:
   external_impl(const std::string& name, const Coll& coll_)
     : Collection_base(name)
     , coll(coll_) {}
-  // external_impl(const char *name, Coll&& coll_)
-  //   : external_impl(name, *flat::allocate<Coll>(std::move(coll_)))
-  // {}
 
   template<typename Sel>
   struct susp : public Matcher_susp_base<Sel, external_impl>, public Rule::susp_Body {
@@ -246,16 +243,27 @@ public:
 };
 
 template<typename Coll>
-class external_ {
+class external_;
 
-public:
-  // FIXME: proper friend declarations so everything up to operator() can stay private
+template<typename Coll>
+external_<const Coll&> external_ref(const char *name, Coll&& coll);
+
+template<typename Coll>
+external_<Coll> external_copy(const char *name, Coll&& coll);
+
+template<typename Coll>
+class external_ {
+  friend external_<const Coll&> external_ref<Coll>(const char *name, Coll&& coll);
+  friend external_<Coll> external_copy<Coll>(const char *name, Coll&& coll);
+
   using Impl = external_impl<Coll>;
   Impl& impl;
 
   external_(Impl& impl)
     : impl(impl)
   {}
+
+public:
   template<typename... SelectArgs>
   auto operator()(SelectArgs&&... args) -> typename Impl::susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
     return typename Impl::susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
@@ -263,13 +271,14 @@ public:
 };
 
 template<typename Coll>
-external_<const Coll&> external(const char *name, const Coll& coll)
+external_<const Coll&> external_ref(const char *name, Coll&& coll)
 {
+  static_assert(std::is_lvalue_reference<Coll>::value, "Not a reference");
   return external_<const Coll&>::Impl::make(name, coll);
 }
 
 template<typename Coll>
-external_<Coll> external(const char *name, Coll&& coll)
+external_<Coll> external_copy(const char *name, Coll&& coll)
 {
   return external_<Coll>::Impl::make(name, coll);
 }
