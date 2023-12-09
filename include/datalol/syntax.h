@@ -4,19 +4,17 @@
 #include <vector>
 #include <iostream>
 #include <bitset>
-#include "flat/memory"
-#include "flat/span"
-#include "flat/set"
-#include "debug.h"
+#include <string>
+#include <flat/memory>
+#include <flat/span>
+#include <flat/set>
+#include <flat/map>
 #include <json/json.h>
+#include "debug.h"
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
-  virtual Json::Value to_json() const {
-    std::ostringstream os;
-    print(os);
-    return Json::Value(os.str());
-  };
+  virtual Json::Value to_json() const;
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 

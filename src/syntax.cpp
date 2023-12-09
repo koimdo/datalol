@@ -11,6 +11,13 @@
 Query *Query::current = nullptr;
 static Rule::vars_t *current_vars = nullptr;
 
+Json::Value IPrint::to_json() const
+{
+  std::ostringstream os;
+  print(os);
+  return Json::Value(os.str());
+};
+
 Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 {
   auto hh = h.apply_Head();
