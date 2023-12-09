@@ -322,30 +322,10 @@ struct table_ : Collection_base {
     return delta.size();
   }
 
-  template<size_t N>
-  static
-  bool index_cmp(const value_type& l, const value_type& r)
-  {
-    return
-      (std::get<N>(l) < std::get<N>(r)) ||
-      (!(std::get<N>(r) < std::get<N>(l)) && l < r);
-  }
-
-  typedef flat::set<value_type, bool (*)(const value_type& l, const value_type& r)> index_t;
-  template<size_t... Is>
-  static constexpr std::array<index_t, arity> make_indices(std::index_sequence<Is...>)
-  {
-    return { index_t(&index_cmp<Is>)... };
-  }
-  std::array<index_t, arity> indices = make_indices(std::make_index_sequence<arity>());
-
   void print(std::ostream& os) const override final
   {
     print_(os, this->all);
-    for (int i=0; i<arity; i++) {
-      os << "\nIndex " << i << ": ";
-      print_(os, indices[i]);
-    }
+    // TODO: indices?
   }
 
   template<class S>
@@ -360,8 +340,6 @@ struct table_ : Collection_base {
   void insert(Args&&... args) {
     value_type it(std::forward<Args>(args)...);
     this->all.insert(it);
-    for (int i=0; i<arity; i++)
-      indices[i].insert(it);
   }
 
   template<typename Sel>
