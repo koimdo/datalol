@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <poll.h>
+#include <fcntl.h>
 #include <sstream>
 #include <json/json.h>
 #include <cassert>
@@ -27,18 +29,29 @@ int get_debug_fd()
   if (*endptr)                  // some non-number content
     return -1;
   struct stat dummy;
-  if (fstat(resfd, &dummy))
+  if (::fstat(resfd, &dummy))
     return -1;
+
+  ::fcntl(resfd, F_SETFL, O_NONBLOCK);
   return resfd;
 }
 
 struct JsonPipe {
-  int rfd = -1, wfd = -1;
+  int fd = -1;
 
-  void set(int readfd, int writefd)
+  void set(int fd)
   {
-    rfd = readfd;
-    wfd = writefd;
+    this->fd = fd;
+  }
+
+  void wait(short events)
+  {
+    struct pollfd pollme;
+    pollme.fd = fd;
+    pollme.events = events;
+    pollme.revents = 0;
+    while (!(pollme.revents & events))
+      poll(&pollme, 1, -1);
   }
 
   // TODO: replace read() and write() with poll-based nonblocking
@@ -50,7 +63,9 @@ struct JsonPipe {
     std::string readbuf;
     for (;;) {
       char hexbuf[5] = {0};
-      int res = ::read(rfd, hexbuf, 4);
+      wait(POLLIN);
+      int res = ::read(fd, hexbuf, 4);
+      std::cout << "Read " << res << " bytes\n";
       if (res <= 0)
         return false;           // TODO: error handling?
       char *end;
@@ -62,7 +77,7 @@ struct JsonPipe {
       assert(len > 4);
       len -= 4;
       readbuf.append(len, '\0');
-      res = ::read(rfd, const_cast<char*>(readbuf.data() + pos), len);
+      res = ::read(fd, const_cast<char*>(readbuf.data() + pos), len);
       if (res < 0)
         return false;
     }
@@ -88,10 +103,10 @@ struct JsonPipe {
       snprintf(hexbuf, 5, "%04x", len+4);
       // TODO: error/signal handling
       struct iovec iovecs[] = { {hexbuf, 4}, {const_cast<char*>(pos), (size_t)len}};
-      ::writev(wfd, iovecs, 2);
+      ::writev(fd, iovecs, 2);
       pos += len;
     }
-    ::write(wfd, "0000", 4);     // flush packet
+    ::write(fd, "0000", 4);     // flush packet
   }
 };
 
@@ -155,14 +170,18 @@ struct Stubs {
   Stubs() {
     int fd = get_debug_fd();
     int nstubs = 0;
+    std::cout << "DEBUG fd: " << fd << "\n";
     if (fd < 0)
       return;
     
-    pipe.set(fd, fd);
+    pipe.set(fd);
 
     methods["help"] = &Stubs::listMethods;
     methods["loadQueries"] = &Stubs::loadQueries;
     methods["resume"] = &Stubs::resume;
+
+    //notify("Hello", JVal());
+    
     mainloop();
   }
 
@@ -182,6 +201,7 @@ struct Stubs {
       if (!pipe.read(v))
         break;
       assert(v.type() == Json::objectValue);
+      std::cout << "Got JSON: " << v <<  " of type " << v.type() << "\n";
       auto const& vmethod = v["method"];
       assert(vmethod.isString());
       std::string method = vmethod.asString();
@@ -201,6 +221,7 @@ struct Stubs {
       }
       pipe.write(response);
     }
+    std::cout << "Exit mainloop\n";
   }
 };
 
@@ -208,5 +229,5 @@ static Stubs stubs{};
 
 bool is_debug() noexcept
 {
-  return stubs.pipe.rfd >= 0;
+  return stubs.pipe.fd >= 0;
 }
