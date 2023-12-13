@@ -40,6 +40,7 @@ class Client:
 
         self.callid = 0
         self.in_progress = {}
+        self.notifications = {}
 
     def errorOccured(self):
         print("Error!")
@@ -55,7 +56,8 @@ class Client:
             response = json.loads(pkt)
             if 'id' not in response:
                 # a notification
-                self.notification(response['method'], response['params'])
+                handler = self.notifications[response['method']]
+                handler(response['params'])
             else:
                 handler = self.in_progress.pop(response['id'])
                 if 'result' in response:
@@ -67,10 +69,10 @@ class Client:
     def finished(self):
         print("Channel closed")
 
-    def notification(self, method, params):
-        print("Notify:", method, params)
+    def register_notification(self, method, handler):
+        self.notifications[method] = handler
 
-    def _call(self, method, *args, response, **kwargs):
+    def request(self, method, *args, response=None, **kwargs):
         assert(not(args and kwargs))
         
         d = {
@@ -121,24 +123,6 @@ class Client:
     def help(self):
         print(self._call('help'))
 
-    def loadQueries(self, **kwargs):
-        return self._call('loadQueries', **kwargs)
-
-    def getCurrent(self):
-        return self._call('getCurrent')
-
-    def setBreakpoint(self, qid, tripCount):
-        self._call('break', qid, tripCount)
-
-    def resume(self):
-        self._call('resume')
-
-    def describe(self):
-        return self._call('describe')
-
-    def readTable(self, table):
-        return self._call('readTable', table)
-
 class QueriesModel(QtCore.QAbstractListModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -165,7 +149,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LOLBert")
 
         self.listmodel = QueriesModel()
-        self.client.loadQueries(response=self.listmodel.populate)
+        self.client.request('loadQueries', response=self.listmodel.populate)
         self.itemview = QListView()
         self.itemview.doubleClicked.connect(self.show_query)
         self.itemview.setModel(self.listmodel)
@@ -193,7 +177,7 @@ class MainWindow(QMainWindow):
         resume = QAction(# QIcon.fromTheme('play'),
                          "Resume", self)
         resume.setStatusTip("Resume program")
-        resume.triggered.connect(self.do_resume)
+        resume.triggered.connect(lambda: self.client.request('resume'))
         toolbar.addAction(resume)
 
         menu = self.menuBar()
@@ -231,8 +215,6 @@ class MainWindow(QMainWindow):
         self.rhs.setTextCursor(cursor)
         cursor.select(QTextCursor.LineUnderCursor);
 
-    def do_resume(self):
-        self.client.resume()
     def quit_app(self):
         QApplication.exit(0)
 
@@ -245,11 +227,14 @@ class LolbertApp(QApplication):
         self.args = args
         QTimer.singleShot(0, self.start)
 
+    def hello(self, params):
+        print("Hello!", params)
     def _runprog(self):
         (mysocket, sub_fd) = socket.socketpair()
         sub_env = dict(os.environ)
         sub_env['LOLBERT_FD'] = str(sub_fd.fileno())
         self.client = Client(mysocket)
+        self.client.register_notification('Hello', self.hello)
         self.inferior = subprocess.Popen(self.args.args, env = sub_env, pass_fds=[sub_fd.fileno()])
 
     def start(self):

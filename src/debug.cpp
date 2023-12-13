@@ -209,17 +209,20 @@ struct Stubs {
       auto const& id = v["id"];
       JVal response;
       response["id"] = id;
+      bool isError = false;
       if (methods.end() == it) {
         JVal error;
         error["message"] = "Method not found: " + method;
         error["code"] = 42;
         response["error"] = std::move(error);
+        isError = true;
       } else {
         action_t act = it->second;
         // TODO: errors?
         response["result"] = (this->*act)(v["params"]);
       }
-      pipe.write(response);
+      if (isError || !id.isNull())
+        pipe.write(response);
     }
     std::cout << "Exit mainloop\n";
   }
