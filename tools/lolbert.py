@@ -7,7 +7,7 @@ import argparse
 import sys
 import os
 
-from PyQt5 import QtCore
+from PyQt5 import QtCore, uic
 from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow,
@@ -146,53 +146,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.client = client
 
-        self.setWindowTitle("LOLBert")
+        uic.loadUi("MainWindow.ui", self)
 
         self.listmodel = QueriesModel()
         self.client.request('loadQueries', response=self.listmodel.populate)
-        self.itemview = QListView()
         self.itemview.doubleClicked.connect(self.show_query)
         self.itemview.setModel(self.listmodel)
 
-        self.entry = QLineEdit()
-        self.enter = QPushButton("Enter")
-
-        layout1 = QVBoxLayout()
-        layout1.addWidget(self.entry)
-        layout1.addWidget(self.itemview)
-
-        lhs = QWidget()
-        lhs.setLayout(layout1)
-
-        self.rhs = QPlainTextEdit()
-        split = QSplitter()
-        split.addWidget(lhs)
-        split.addWidget(self.rhs)
-
-        toolbar = QToolBar("Main toolbar")
-        self.addToolBar(toolbar)
-        statusbar = QStatusBar(self)
-        self.setStatusBar(statusbar)
-
-        resume = QAction(# QIcon.fromTheme('play'),
-                         "Resume", self)
-        resume.setStatusTip("Resume program")
-        resume.triggered.connect(lambda: self.client.request('resume'))
-        toolbar.addAction(resume)
-
-        menu = self.menuBar()
-        file_menu = menu.addMenu("&File")
-
-        quit_action = QAction(# QIcon.fromTheme('quit'),
-                              "Quit", self)
-        quit_action.setStatusTip("Quit program")
-        quit_action.setShortcut(QKeySequence("Ctrl+q"))
-        quit_action.triggered.connect(self.quit_app)
-
-        file_menu.addSeparator()
-        file_menu.addAction(quit_action)
-
-        self.setCentralWidget(split)
+        self.actionResume.triggered.connect(lambda: self.client.request('resume'))
+        self.actionQuit.triggered.connect(self.quit_app)
 
     def selected_query(self, idx = None):
         if idx is None:
