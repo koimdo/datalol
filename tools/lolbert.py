@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-import subprocess
 import socket
 import json
 import argparse
@@ -20,7 +19,7 @@ from PyQt5.QtGui import (
     QIcon, QKeySequence, QTextCursor
 )
 
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment
 from PyQt5.QtNetwork import QLocalSocket
 
 import signal
@@ -191,13 +190,20 @@ class LolbertApp(QApplication):
 
     def hello(self, params):
         print("Hello!", params)
+
     def _runprog(self):
         (mysocket, sub_fd) = socket.socketpair()
-        sub_env = dict(os.environ)
-        sub_env['LOLBERT_FD'] = str(sub_fd.fileno())
+        sub_env = QProcessEnvironment.systemEnvironment()
+        sub_env.insert('LOLBERT_FD', str(sub_fd.fileno()))
+        sub_fd.set_inheritable(True)
         self.client = Client(mysocket)
         self.client.register_notification('Hello', self.hello)
-        self.inferior = subprocess.Popen(self.args.args, env = sub_env, pass_fds=[sub_fd.fileno()])
+        process = QProcess()
+        process.setInputChannelMode(QProcess.ForwardedInputChannel)
+        process.setProcessChannelMode(QProcess.ForwardedChannels)
+        process.setProcessEnvironment(sub_env)
+        process.start(self.args.progargs[0], self.args.progargs[1:])
+        self.process = process
 
     def start(self):
         self._runprog()
@@ -210,7 +216,7 @@ def main():
     parser.add_argument('--verbose', dest='verbose', action='store_const',
                         const=True, default=False,
                         help='debug output')
-    parser.add_argument('--args', nargs=argparse.REMAINDER, help="Program and arguments to run")
+    parser.add_argument('--args', dest='progargs', nargs=argparse.REMAINDER, help="Program and arguments to run")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, sigint_handler)
