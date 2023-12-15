@@ -39,7 +39,7 @@ class Client:
 
         self.callid = 0
         self.in_progress = {}
-        self.notifications = {}
+        self.methods = {}
 
     def errorOccured(self):
         print("Error!")
@@ -53,23 +53,30 @@ class Client:
             if pkt is None:
                 break
             response = json.loads(pkt)
-            if 'id' not in response:
-                # a notification
-                handler = self.notifications[response['method']]
-                handler(response['params'])
-            else:
-                handler = self.in_progress.pop(response['id'])
-                if 'result' in response:
-                    handler(response['result'])
+            if 'method' in response:
+                handler = self.methods[response['method']]
+                params = response['params']
+                reqid = response.get('id', None)
+                print("Running method {}({})".format(handler, params))
+                res = handler(params) # FIXME: unpack?
+                if reqid is None:
+                    # a notification
+                    assert(res is None)
                 else:
-                    err = response['error']
-                    raise Error(err['code'], err['message'], err.get('data', None))
+                    self._write({'id': reqid,
+                                 'result': res})
+            elif 'result' in response:
+                handler = self.in_progress.pop(response['id'])
+                handler(response['result'])
+            else:
+                err = response['error']
+                raise Error(err['code'], err['message'], err.get('data', None))
 
     def finished(self):
         print("Channel closed")
 
-    def register_notification(self, method, handler):
-        self.notifications[method] = handler
+    def register_method(self, method, handler):
+        self.methods[method] = handler
 
     def request(self, method, *args, response=None, **kwargs):
         assert(not(args and kwargs))
@@ -159,8 +166,6 @@ class MainWindow(QMainWindow):
 
         uic.loadUi("MainWindow.ui", self)
 
-        self.process.started.connect(lambda: self.actionResume.setEnabled(True))
-
         self.listmodel = QueriesModel()
         self.filtermodel = QSortFilterProxyModel()
         self.filtermodel.setSourceModel(self.listmodel)
@@ -239,7 +244,8 @@ class LolbertApp(QApplication):
         QTimer.singleShot(0, self.start)
 
     def hello(self, params):
-        print("Hello!", params)
+        self.window = MainWindow(self.client, self.process)
+        self.window.show()
 
     def _runprog(self):
         (mysocket, sub_fd) = socket.socketpair()
@@ -247,7 +253,6 @@ class LolbertApp(QApplication):
         sub_env.insert('LOLBERT_FD', str(sub_fd.fileno()))
         sub_fd.set_inheritable(True)
         self.client = Client(mysocket)
-        self.client.register_notification('Hello', self.hello)
         process = QProcess()
         process.setInputChannelMode(QProcess.ForwardedInputChannel)
         process.setProcessChannelMode(QProcess.ForwardedChannels)
@@ -257,8 +262,7 @@ class LolbertApp(QApplication):
 
     def start(self):
         self._runprog()
-        self.window = MainWindow(self.client, self.process)
-        self.window.show()
+        self.client.register_method('hello', self.hello)
 
 def main():
     parser = argparse.ArgumentParser(prog='interp test',

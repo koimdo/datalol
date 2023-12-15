@@ -30,6 +30,6 @@ struct alignas(INFO_ALIGNMENT) debug_info {
     &here;                                                        \
   })
 
-#define DEBUG_PROBE(dflags) if (this->dbg->flags & (dflags)) debug_break(this->dbg)
+#define DEBUG_PROBE(dflags) if (this->dbg->flags) debug_break(this->dbg, dflags)
 
-void debug_break(const debug_info *dbg);
+void debug_break(const debug_info *dbg, debug_flags pos);

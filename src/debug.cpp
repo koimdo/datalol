@@ -110,13 +110,13 @@ struct JsonPipe {
   }
 };
 
+using JVal = Json::Value;
+
 struct Stubs {
   JsonPipe pipe;
 
   using action_t = Json::Value (Stubs::*)(const Json::Value&);
   flat::map<std::string, action_t> methods;
-
-  using JVal = Json::Value;
 
   static
   JVal getQuery_(const debug_info& d)
@@ -183,8 +183,7 @@ struct Stubs {
     methods["resume"] = &Stubs::resume;
     methods["set_break"] = &Stubs::set_break;
 
-    //notify("Hello", JVal());
-    
+    notify("hello", JVal());
     mainloop();
   }
 
@@ -233,8 +232,11 @@ struct Stubs {
 
 static Stubs stubs{};
 
-void debug_break(const debug_info *dbg)
+void debug_break(const debug_info *dbg, debug_flags pos)
 {
-  stubs.notify("breakpoint", dbg-__start_info);
+  JVal brk;
+  brk["qid"] = dbg-__start_info;
+  brk["pos"] = pos;
+  stubs.notify("breakpoint", std::move(brk));
   stubs.mainloop();
 }
