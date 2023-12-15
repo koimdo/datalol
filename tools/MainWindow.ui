@@ -101,6 +101,12 @@
    </property>
   </action>
   <action name="actionBreakpoint">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
    <property name="text">
     <string>Set Breakpoint</string>
    </property>
@@ -114,6 +120,9 @@
    </property>
   </action>
   <action name="actionFinish">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
    <property name="text">
     <string>Finish</string>
    </property>
@@ -124,6 +133,9 @@
    </property>
   </action>
   <action name="actionSource">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
    <property name="text">
     <string>Go to source</string>
    </property>

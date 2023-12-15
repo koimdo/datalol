@@ -160,11 +160,13 @@ struct Stubs {
 
   JVal set_break(const JVal& v)
   {
-    int id = v["query"].asInt();
+    int id = v["qid"].asInt();
     int flags = v["flags"].asInt();
     // FIXME: span<T> is not const, while span<const T> is
     const_cast<debug_info&>(all_queries[id]).flags = flags;
-    return true;
+    JVal res(v);
+    res["flags"] = all_queries[id].flags;
+    return res;
   }
 
   Stubs() {
@@ -179,6 +181,7 @@ struct Stubs {
     methods["help"] = &Stubs::listMethods;
     methods["loadQueries"] = &Stubs::loadQueries;
     methods["resume"] = &Stubs::resume;
+    methods["set_break"] = &Stubs::set_break;
 
     //notify("Hello", JVal());
     
@@ -230,7 +233,8 @@ struct Stubs {
 
 static Stubs stubs{};
 
-bool is_debug() noexcept
+void debug_break(const debug_info *dbg)
 {
-  return stubs.pipe.fd >= 0;
+  stubs.notify("breakpoint", dbg-__start_info);
+  stubs.mainloop();
 }

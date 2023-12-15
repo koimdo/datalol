@@ -19,7 +19,7 @@ from PyQt5.QtGui import (
     QIcon, QKeySequence, QTextCursor
 )
 
-from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment
+from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment, QSortFilterProxyModel, pyqtSignal
 from PyQt5.QtNetwork import QLocalSocket
 
 import signal
@@ -73,7 +73,6 @@ class Client:
 
     def request(self, method, *args, response=None, **kwargs):
         assert(not(args and kwargs))
-        
         d = {
             'method': method,
             'params': args or kwargs or [],
@@ -122,59 +121,110 @@ class Client:
     def help(self):
         print(self._call('help'))
 
+class Query:
+    def __init__(self, file, id, function, line, flags, tripcount):
+        self.file = file
+        self.id = id
+        self.function = function
+        self.line = line
+        self.flags = flags
+        self.tripcount = tripcount
+
 class QueriesModel(QtCore.QAbstractListModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.items = []
+        self.pause_icon = QIcon.fromTheme('media-playback-pause')
 
     def populate(self, items):
-        self.items = items
+        self.items = [Query(**d) for d in items]
         self.layoutChanged.emit()
 
     def data(self, index, role):
+        item = self.items[index.row()]
         if role == Qt.DisplayRole:
-            item = self.items[index.row()]
-
-            return "{}:{}:{}".format(item['file'], item['function'], item['line'])
+            return "{0.file}:{0.line} {0.function}".format(item)
+        elif role == Qt.DecorationRole:
+            if item.flags:
+                return self.pause_icon
 
     def rowCount(self, index):
         return len(self.items)
 
 class MainWindow(QMainWindow):
-    def __init__(self, client):
+    def __init__(self, client, process):
         super().__init__()
         self.client = client
+        self.process = process
 
         uic.loadUi("MainWindow.ui", self)
 
+        self.process.started.connect(lambda: self.actionResume.setEnabled(True))
+
         self.listmodel = QueriesModel()
+        self.filtermodel = QSortFilterProxyModel()
+        self.filtermodel.setSourceModel(self.listmodel)
+        self.entry.textChanged.connect(self.filtermodel.setFilterFixedString)
         self.client.request('loadQueries', response=self.listmodel.populate)
         self.itemview.doubleClicked.connect(self.show_query)
-        self.itemview.setModel(self.listmodel)
+        self.itemview.setModel(self.filtermodel)
+        self.itemview.selectionModel().selectionChanged.connect(self.selectionChanged)
+
+        self.itemview.addAction(self.actionBreakpoint)
+        self.itemview.addAction(self.actionSource)
+        self.actionSource.triggered.connect(self.show_query)
+        self.actionBreakpoint.triggered.connect(self.set_breakpoint)
 
         self.actionResume.triggered.connect(lambda: self.client.request('resume'))
         self.actionQuit.triggered.connect(self.quit_app)
 
-    def selected_query(self, idx = None):
-        if idx is None:
-            selection = self.itemview.selectedIndexes()
-            if selection:
-                idx = selection[0]
-        if idx is None:
-            return None
-        else:
-            return self.listmodel.items[idx.row()]
+        self.queryChanged.connect(self.handleQChanged)
 
-    def show_query(self, idx):
-        query = self.selected_query(idx)
+        self.current_query = None
+
+    queryChanged = pyqtSignal()
+    def selectionChanged(self, new, old):
+        if not new:
+            next_query = None
+        else:
+            assert(len(new) == 1)
+            idx = new.indexes()[0]
+            idx = self.filtermodel.mapToSource(idx)
+            next_query = self.listmodel.items[idx.row()]
+
+        if self.current_query is not next_query:
+            self.current_query = next_query
+            self.queryChanged.emit()
+
+    def handleQChanged(self):
+        q = self.current_query
+        self.actionSource.setEnabled(q is not None)
+        self.actionBreakpoint.setEnabled(q is not None)
+        self.actionBreakpoint.setChecked(q is not None and q.flags)
+
+    def show_query(self, idx=None):
+        query = self.current_query
         text = None
-        with open(query['file'], 'r') as f:
+        with open(query.file, 'r') as f:
             text = f.read()
         assert(text is not None)
         self.rhs.setPlainText(text)
-        cursor = QTextCursor(self.rhs.document().findBlockByLineNumber(query['line']))
+        cursor = QTextCursor(self.rhs.document().findBlockByLineNumber(query.line))
         self.rhs.setTextCursor(cursor)
         cursor.select(QTextCursor.LineUnderCursor);
+
+    def set_breakpoint(self, break_here):
+        query = self.current_query
+        def flagsChanged(response):
+            qid = response['qid']
+            self.listmodel.layoutAboutToBeChanged.emit()
+            self.listmodel.items[qid].flags=response['flags']
+            self.listmodel.layoutChanged.emit()
+
+        self.client.request('set_break',
+                            response=flagsChanged,
+                            qid=query.id,
+                            flags=int(break_here))
 
     def quit_app(self):
         QApplication.exit(0)
@@ -207,7 +257,7 @@ class LolbertApp(QApplication):
 
     def start(self):
         self._runprog()
-        self.window = MainWindow(self.client)
+        self.window = MainWindow(self.client, self.process)
         self.window.show()
 
 def main():

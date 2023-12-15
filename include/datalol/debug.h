@@ -8,6 +8,12 @@
 #endif
 #endif
 
+enum debug_flags {
+  BREAK_CONFIGURE = 1<<0,
+  BREAK_FIXPOINT  = 1<<1,
+  BREAK_END       = 1<<2,
+};
+
 struct alignas(INFO_ALIGNMENT) debug_info {
   const char *file;
   const char *function;
@@ -24,4 +30,6 @@ struct alignas(INFO_ALIGNMENT) debug_info {
     &here;                                                        \
   })
 
-bool is_debug() noexcept;
+#define DEBUG_PROBE(dflags) if (this->dbg->flags & (dflags)) debug_break(this->dbg)
+
+void debug_break(const debug_info *dbg);
