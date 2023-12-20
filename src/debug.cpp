@@ -119,19 +119,26 @@ struct JsonPipe {
 using JVal = Json::Value;
 
 // Utility functions for JsonCpp arrays, in the spirit of Qt's QList:
-JVal& operator<<(JVal& arr, JVal&& item)
+Json::Value& operator<<(Json::Value& arr, Json::Value&& item)
 {
   arr.append(std::move(item));
   return arr;
 }
-JVal& operator<<(JVal& arr, const JVal& item) { return arr << JVal(item); }
+Json::Value& operator<<(Json::Value& arr, const Json::Value& item)
+{
+  return arr << Json::Value(item);
+}
 
-JVal operator<<(JVal&& arr, JVal&& item)
+Json::Value operator<<(Json::Value&& arr, Json::Value&& item)
 {
   arr.append(std::move(item));
-  return std::move(arr);
+  return arr;
 }
-JVal operator<<(JVal&& arr, const JVal& item) { return std::move(arr) << JVal(item); }
+
+Json::Value operator<<(Json::Value&& arr, const Json::Value& item)
+{
+  return std::move(arr) << Json::Value(item);
+}
 
 struct Stubs {
   JsonPipe pipe;
@@ -200,11 +207,8 @@ struct Stubs {
       JVal db(Json::objectValue);
       JVal data(Json::arrayValue);
       db["columns"] = JVal() << "name" << "internal" << "type";
-      for (auto const& kv: q->db) {
-        auto c = kv.second;
-        // FIXME: internal, type
-        data << (JVal() << c->get_name() << true << "some type of " + c->get_name());
-      }
+      for (auto const& kv: q->db)
+        data << kv.second->to_json();
       db["data"] = std::move(data);
       res["db"] = std::move(db);
     }

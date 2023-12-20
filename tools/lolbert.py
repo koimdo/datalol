@@ -5,6 +5,7 @@ import json
 import argparse
 import sys
 import os
+import pandas
 
 from PyQt5 import QtCore, uic
 from PyQt5.QtCore import QSize, Qt
@@ -19,7 +20,7 @@ from PyQt5.QtGui import (
     QIcon, QKeySequence, QTextCursor
 )
 
-from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment, QSortFilterProxyModel, pyqtSignal
+from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment, QSortFilterProxyModel, pyqtSignal, QModelIndex
 from PyQt5.QtNetwork import QLocalSocket
 
 import signal
@@ -158,21 +159,29 @@ class QueriesModel(QtCore.QAbstractListModel):
     def rowCount(self, index):
         return len(self.items)
 
+def setup_filterentry(entry, listview, model):
+    filtermodel = QSortFilterProxyModel()
+    filtermodel.setSourceModel(model)
+    entry.textChanged.connect(filtermodel.setFilterFixedString)
+    listview.setModel(filtermodel)
+    return filtermodel
+
+_BASEDIR = os.path.abspath(os.path.dirname(__file__))
+def loadUi(filename, parent):
+    uic.loadUi(os.path.join(_BASEDIR, filename), parent)
+
 class MainWindow(QMainWindow):
     def __init__(self, client, process):
         super().__init__()
         self.client = client
         self.process = process
 
-        uic.loadUi("MainWindow.ui", self)
+        loadUi("MainWindow.ui", self)
 
         self.listmodel = QueriesModel()
-        self.filtermodel = QSortFilterProxyModel()
-        self.filtermodel.setSourceModel(self.listmodel)
-        self.entry.textChanged.connect(self.filtermodel.setFilterFixedString)
+        self.filtermodel = setup_filterentry(self.entry, self.itemview, self.listmodel)
         self.client.request('loadQueries', response=self.listmodel.populate)
         self.itemview.doubleClicked.connect(self.show_query)
-        self.itemview.setModel(self.filtermodel)
         self.itemview.selectionModel().selectionChanged.connect(self.selectionChanged)
 
         self.itemview.addAction(self.actionBreakpoint)
@@ -234,6 +243,84 @@ class MainWindow(QMainWindow):
     def quit_app(self):
         QApplication.exit(0)
 
+# Taken from QT's example code in:
+# https://doc.qt.io/qtforpython-6/examples/example_external_pandas.html
+class PandasModel(QtCore.QAbstractTableModel):
+    """A model to interface a Qt view with pandas dataframe """
+
+    def __init__(self, dataframe: pandas.DataFrame, parent=None):
+        super().__init__(parent)
+        self._dataframe = dataframe
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        """ Override method from QAbstractTableModel
+
+        Return row count of the pandas DataFrame
+        """
+        if parent == QModelIndex():
+            return len(self._dataframe)
+
+        return 0
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        """Override method from QAbstractTableModel
+
+        Return column count of the pandas DataFrame
+        """
+        if parent == QModelIndex():
+            return len(self._dataframe.columns)
+        return 0
+
+    def data(self, index: QModelIndex, role=Qt.ItemDataRole):
+        """Override method from QAbstractTableModel
+
+        Return data cell from the pandas DataFrame
+        """
+        if not index.isValid():
+            return None
+
+        if role == Qt.DisplayRole:
+            return str(self._dataframe.iloc[index.row(), index.column()])
+
+        return None
+
+    def headerData(
+            self, section: int, orientation: Qt.Orientation, role: Qt.ItemDataRole
+    ):
+        """Override method from QAbstractTableModel
+
+        Return dataframe index as vertical header data and columns as horizontal header data.
+        """
+        if role == Qt.DisplayRole:
+            if orientation == Qt.Horizontal:
+                return str(self._dataframe.columns[section])
+
+            if orientation == Qt.Vertical:
+                return str(self._dataframe.index[section])
+
+        return None
+
+class BreakWindow(QMainWindow):
+    def __init__(self, client):
+        super().__init__()
+        self.client = client
+        loadUi("BreakWindow.ui", self)
+
+        self.client.request('show_query', response=self.set_query)
+
+    def set_query(self, q):
+        self.query = q          # TODO: graph model?
+        print("Break query:", self.query)
+
+        tables = pandas.DataFrame(**q['db'])
+        self.dbmodel = PandasModel(tables)
+        self.filtermodel = setup_filterentry(self.entry, self.itemview, self.dbmodel)
+        # for rel in sorted(tables['name']):
+        #     self.client.request('get_table', rel, response=self.add_table)
+
+    def add_table(self, response):
+        pass
+
 def sigint_handler(*args):
     QApplication.quit()
 
@@ -246,6 +333,10 @@ class LolbertApp(QApplication):
     def hello(self, params):
         self.window = MainWindow(self.client, self.process)
         self.window.show()
+
+    def breakpoint(self, params):
+        self.breakwindow = BreakWindow(self.client)
+        self.breakwindow.show()
 
     def _runprog(self):
         (mysocket, sub_fd) = socket.socketpair()
@@ -263,6 +354,7 @@ class LolbertApp(QApplication):
     def start(self):
         self._runprog()
         self.client.register_method('hello', self.hello)
+        self.client.register_method('breakpoint', self.breakpoint)
 
 def main():
     parser = argparse.ArgumentParser(prog='interp test',

@@ -11,13 +11,6 @@
 Query *Query::current = nullptr;
 static Rule::vars_t *current_vars = nullptr;
 
-Json::Value IPrint::to_json() const
-{
-  std::ostringstream os;
-  print(os);
-  return Json::Value(os.str());
-};
-
 Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 {
   auto hh = h.apply_Head();
@@ -57,7 +50,8 @@ static std::ostream& print_with_vars(std::ostream& os, const Rule::with_vars& va
   os << "[";
   Query::print_vars(os, vars);
   os << "]";
-  return os << e;
+  e.print(os);
+  return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
