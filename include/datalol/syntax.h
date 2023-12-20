@@ -431,56 +431,72 @@ auto make_thunk(const char *desc, F&& fun) -> thunk<F>
   return thunk<F>(desc, std::move(fun));
 }
 
+
+namespace detail {
+  template<class T, typename = void>
+  struct is_contextual_bool : std::false_type {};
+  template<class T>
+  struct is_contextual_bool<T, decltype(void(std::declval<T>() ? true : false))> : std::true_type {};
+}
+
 template<typename> class binder_susp;
 template<typename Fun>
-class thunk_susp : public Rule::susp_Head, public Rule::susp_Body {
+class thunk_susp : public Rule::susp_Head {
   using thunk_t = thunk<Fun>;
   std::pair<thunk_t, Rule::vars_t> tv;
 
-  struct elem_common {
+  struct head : Rule::Head {
     thunk_t fun;
-    elem_common(thunk_t&& th)
-      : fun(std::move(th))
-    {}
-    void print_(std::ostream& os) const { os << fun; }
-  };
-
-  struct head : elem_common, Rule::Head {
     head(thunk_t&& th)
-      : elem_common(std::move(th))
-      , Rule::Head(eval_head)
+      : Rule::Head(eval_head)
+      , fun(std::move(th))
     {}
     static void eval_head(Rule::Elem& self) { (void)static_cast<head&>(self).fun.apply(); }
-    void print(std::ostream& os) const override final { elem_common::print_(os); }
+    void print(std::ostream& os) const override final { os << fun; }
   };
 
-  struct guard : elem_common, Rule::Body {
-    guard(thunk_t&& fun)
-      : elem_common(std::move(fun))
-      , Rule::Body(eval_body)
+  struct guard : Rule::Body {
+    thunk_t fun;
+    guard(thunk_t&& th)
+      : Rule::Body(eval_body)
+      , fun(std::move(th))
     {}
     static void eval_body(Rule::Elem& self_)
     {
       guard& self = static_cast<guard&>(self_);
       if (self.fun.apply()) self.next();
     }
-    void print(std::ostream& os) const override final { elem_common::print_(os); }
+    void print(std::ostream& os) const override final { os << fun;; }
   };
 
-  Rule::elem_meta meta() const noexcept { return { Rule::with_vars(nullptr, tv.second), nullptr }; }
+  static
+  Rule::elem_meta meta(const Rule::vars_t& vars) noexcept { return { Rule::with_vars(nullptr, vars), nullptr }; }
 
   std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
   {
-    return std::make_pair(meta(), flat::allocate<head>(std::move(tv.first)));
+    return std::make_pair(meta(tv.second), flat::allocate<head>(std::move(tv.first)));
   }
 
-  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
-  {
-    return std::make_pair(meta(), flat::allocate<guard>(std::move(tv.first)));
-  }
+  struct apply_body_impl : public Rule::susp_Body {
+    std::pair<thunk_t, Rule::vars_t> tv;
+    apply_body_impl(std::pair<thunk_t, Rule::vars_t>&& tv)
+      : tv(std::move(tv))
+    {}
+    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+    {
+      return std::make_pair(meta(tv.second), flat::allocate<guard>(std::move(tv.first)));
+    }
+  };
 
   friend class binder_susp<Fun>;
 public:
+  operator apply_body_impl()
+  {
+    static_assert(detail::is_contextual_bool<typename thunk_t::result_t>::value,
+                  "not contextually convertible to bool!");
+    return apply_body_impl(std::move(tv));
+  }
+
   thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
     : tv(std::move(tt)) {}
 

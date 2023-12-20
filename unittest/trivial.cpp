@@ -38,7 +38,7 @@ TEST(Trivial, test0) {
     Var<A> a("a");
     Var<int> i("i"), k("k");
     // FIXME: remove the `,true` part once we get the proper typing suppoer for head-only thunks
-    THUNK((results.emplace_back(i, k), true), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
+    THUNK((results.emplace_back(i, k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
   }
   qo.run();
   ASSERT_EQ(results.size(), 4);
