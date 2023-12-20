@@ -112,7 +112,7 @@ Query::Query(Query&&) = default;
 void Query::print(std::ostream& os) const
 {
   auto guard = const_cast<Query*>(this)->with_query();
-  os << "Query [" << name << (is_debug() ? "(dbg)":"") << "]: {";
+  os << "Query [" << name << "]: {";
   size_t i=0;
   for (auto const& r : rules) {
     if (i) os << "\n";

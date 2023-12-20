@@ -182,6 +182,7 @@ public:
 
   bool use_delta() const noexcept { return seminaive_current == idx; }
 private:
+  friend class Stubs;
   unsigned head = 0, last = 0;
   size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
   size_t idx;
@@ -309,7 +310,7 @@ public:
   }
 };
 
-class Query : public IPrint {
+class Query {
 private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
@@ -327,13 +328,15 @@ private:
   Rule *start_rule();
   void end_rule(Rule *r);
   void run_rule(Rule& r, size_t current_delta);
-  void print(std::ostream& os) const override final;
+  void print(std::ostream& os) const;
+
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
 
   friend class Var_;
   friend class Rule::cursor;
   friend class Collection_base;
+  friend class Stubs;
   static_stack<Var_, Rule::MAX_VARS> vars;
 
   using guard_t = std::pair<flat::guard, flat::autorelease::scoped>;
@@ -395,6 +398,7 @@ T& Collection_base::make(const std::string& name, Args&&... args)
   if (db.end() != it)
     return static_cast<T&>(*(it->second));
   auto res = flat::allocate<T>(name, std::forward<Args>(args)...);
+  db.emplace(name, res);
 
   return *res;
 }

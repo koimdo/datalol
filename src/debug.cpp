@@ -12,10 +12,16 @@
 #include <flat/span>
 #include <flat/map>
 #include "datalol/debug.h"
+#include "datalol/syntax.h"
 
 extern struct debug_info  __start_info[];
 extern struct debug_info  __stop_info[];
 static const flat::span<debug_info> all_queries = {__start_info,  __stop_info};
+static
+int get_qid(const debug_info *dbg)
+{
+  return dbg - __start_info;
+}
 
 #define DEBUG_ENV_VAR "LOLBERT_FD"
 static
@@ -112,6 +118,21 @@ struct JsonPipe {
 
 using JVal = Json::Value;
 
+// Utility functions for JsonCpp arrays, in the spirit of Qt's QList:
+JVal& operator<<(JVal& arr, JVal&& item)
+{
+  arr.append(std::move(item));
+  return arr;
+}
+JVal& operator<<(JVal& arr, const JVal& item) { return arr << JVal(item); }
+
+JVal operator<<(JVal&& arr, JVal&& item)
+{
+  arr.append(std::move(item));
+  return std::move(arr);
+}
+JVal operator<<(JVal&& arr, const JVal& item) { return std::move(arr) << JVal(item); }
+
 struct Stubs {
   JsonPipe pipe;
 
@@ -135,7 +156,7 @@ struct Stubs {
   {
     Json::Value all;
     for (auto const& d : all_queries) {
-      all.append(getQuery_(d));
+      all << getQuery_(d);
     }
     return all;
   }
@@ -149,7 +170,7 @@ struct Stubs {
   {
     Json::Value all;
     for (auto const& kv : methods)
-      all.append(kv.first);
+      all << kv.first;
     return all;
   }
 
@@ -169,6 +190,39 @@ struct Stubs {
     return res;
   }
 
+  JVal show_query(const JVal&)
+  {
+    auto q = Query::current;
+    Json::Value res;
+    res["name"] = q->name;
+    res["qid"] = get_qid(q->dbg);
+    {
+      JVal db(Json::objectValue);
+      JVal data(Json::arrayValue);
+      db["columns"] = JVal() << "name" << "internal" << "type";
+      for (auto const& kv: q->db) {
+        auto c = kv.second;
+        // FIXME: internal, type
+        data << (JVal() << c->get_name() << true << "some type of " + c->get_name());
+      }
+      db["data"] = std::move(data);
+      res["db"] = std::move(db);
+    }
+    {
+      Json::Value rules(Json::arrayValue);
+      for (auto const& r: q->rules)
+        rules << (JVal() << r.head << r.last);
+      res["rules"] = std::move(rules);
+    }
+    {
+      Json::Value elements(Json::arrayValue);
+      for (auto const& e: q->elems)
+        elements << e.second->to_json();
+      res["elements"] = std::move(elements);
+    }
+    return res;
+  }
+
   Stubs() {
     int fd = get_debug_fd();
     int nstubs = 0;
@@ -182,6 +236,7 @@ struct Stubs {
     methods["loadQueries"] = &Stubs::loadQueries;
     methods["resume"] = &Stubs::resume;
     methods["set_break"] = &Stubs::set_break;
+    methods["show_query"] = &Stubs::show_query;
 
     notify("hello", JVal());
     mainloop();
@@ -235,7 +290,7 @@ static Stubs stubs{};
 void debug_break(const debug_info *dbg, debug_flags pos)
 {
   JVal brk;
-  brk["qid"] = dbg-__start_info;
+  brk["qid"] = get_qid(dbg);
   brk["pos"] = pos;
   stubs.notify("breakpoint", std::move(brk));
   stubs.mainloop();

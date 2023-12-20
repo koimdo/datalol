@@ -1,5 +1,6 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
+#include <datalol/debug.h>
 
 bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
@@ -75,6 +76,7 @@ void Query::configure()
       e->rule_ = &r;
     }
   }
+  DEBUG_PROBE(BREAK_CONFIGURE);
 }
 
 void Query::run_rule(Rule& r, size_t current_delta)
@@ -89,6 +91,7 @@ void Query::run() {
   auto guard = with_query();
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {
+    DEBUG_PROBE(BREAK_FIXPOINT);
     std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
       if (!r.seminaive_current) {
@@ -105,6 +108,7 @@ void Query::run() {
       changed += c->merge();
     std::cerr << "Changed: " << changed << "\n";
   }
+  DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;
 }
 
