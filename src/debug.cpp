@@ -227,6 +227,12 @@ struct Stubs {
     return res;
   }
 
+  JVal get_table(const JVal& v)
+  {
+    auto coll = Query::current->db.at(v[0].asString());
+    return coll->get_contents();
+  }
+
   Stubs() {
     int fd = get_debug_fd();
     int nstubs = 0;
@@ -241,6 +247,7 @@ struct Stubs {
     methods["resume"] = &Stubs::resume;
     methods["set_break"] = &Stubs::set_break;
     methods["show_query"] = &Stubs::show_query;
+    methods["get_table"] = &Stubs::get_table;
 
     notify("hello", JVal());
     mainloop();

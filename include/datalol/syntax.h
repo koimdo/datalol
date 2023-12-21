@@ -30,6 +30,7 @@ public:
   {}
   const std::string& get_name() const noexcept { return name; }
   virtual size_t merge() = 0;
+  virtual Json::Value get_contents() const = 0;
 };
 
 template<class type> constexpr std::string GetName()

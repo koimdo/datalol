@@ -87,7 +87,8 @@ void Query::run_rule(Rule& r, size_t current_delta)
   get_elem(start)->eval();
 }
 
-void Query::run() {
+void Query::run()
+{
   auto guard = with_query();
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {

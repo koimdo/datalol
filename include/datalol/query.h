@@ -147,6 +147,35 @@ namespace detail {
     }
   };
 
+#define BASIC_TYPE(typ) \
+  static Json::Value json_of(typ value) { return Json::Value(value); }
+  BASIC_TYPE(Json::Int)
+  BASIC_TYPE(Json::UInt)
+  BASIC_TYPE(Json::Int64)
+  BASIC_TYPE(Json::UInt64)
+  BASIC_TYPE(double)
+  BASIC_TYPE(const char *)
+  BASIC_TYPE(const Json::String&)
+  BASIC_TYPE(bool)
+#undef BASIC_TYPE
+
+  struct generic_json {
+    Json::Value& vec;
+    template<typename T>
+    bool operator () (int i, T const &v)
+    {
+      vec.append(json_of(v));
+      return true;
+    }
+  };
+
+  template<typename... Args>
+  Json::Value json_of(const std::tuple<Args...>& t)
+  {
+    Json::Value res;
+    for_each_in_tuple(generic_json{res}, t);
+    return res;
+  };
 }
 
 template<typename Derived, typename Sel, typename Origin>
@@ -207,6 +236,21 @@ build_selector(Sel&&... sel)
 }
 
 template<typename Coll>
+Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>& columns = {})
+{
+  Json::Value res;
+  Json::Value& values = (res["values"] = Json::arrayValue);
+  for (auto const& t : coll)
+    values << detail::json_of(t);
+  if (columns.size()) {
+    Json::Value& jcolumns = (res["columns"] = Json::arrayValue);
+    for (auto const& col : columns)
+      jcolumns << col;
+  }
+  return res;
+}
+
+template<typename Coll>
 class external_impl : public Collection_base {
   const Coll coll;
 public:
@@ -214,6 +258,13 @@ public:
   static external_impl& make(Args&&... args) { return Collection_base::make<external_impl>(std::forward<Args>(args)...); }
 
   using value_type = typename flat::remove_cvref<Coll>::type::value_type;
+
+  Json::Value to_json() const override final
+  {
+    return Json::Value() << name << false << GetName<Coll>();
+  }
+
+  Json::Value get_contents() const override final { return get_contents_common(coll /* TODO: columns */); }
 
   void print(std::ostream& os) const override final
   {
@@ -327,6 +378,13 @@ struct table_ : Collection_base {
     print_(os, this->all);
     // TODO: indices?
   }
+
+  Json::Value to_json() const override final
+  {
+    return Json::Value() << name << true << GetName<table_>();
+  }
+
+  Json::Value get_contents() const override final { return get_contents_common(this->all /* TODO: columns */); }
 
   template<class S>
   void print_(std::ostream& os, const S& s) const
