@@ -197,14 +197,20 @@ struct Matcher_base : public Rule::Body, private detail::undo_helper {
   }
 
   static
+  void run_row(Derived& self, const typename Origin::value_type& row)
+  {
+    if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row)) {
+      self.next();
+    }
+    self.undo();
+  }
+
+  static
   void run_full(Rule::Elem& self_)
   {
     Derived& self = static_cast<Derived&>(self_);
-    for (auto const& row : self.get_coll()) {
-      if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row))
-        self.next();
-      self.undo();
-    }
+    for (auto const& row : self.get_coll())
+      run_row(self, row);
   }
 };
 
