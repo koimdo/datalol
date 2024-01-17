@@ -257,18 +257,18 @@ public:
 
   Json::Value to_json() const override final
   {
-    return Json::Value() << name << false << GetName<Coll>();
+    return Json::Value() << id.get_name() << false << id.type_name();
   }
 
   Json::Value get_contents() const override final { return get_contents_common(coll /* TODO: columns */); }
 
   void print(std::ostream& os) const override final
   {
-    os << name << " = external<" << GetName<value_type>() << ">, size=" << coll.size();
+    os << id.get_name() << " = external<" << id.type_name() << ">, size=" << coll.size();
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); }
-  external_impl(const std::string& name, const Coll& coll_)
-    : Collection_base(name)
+  external_impl(const ident& id, const Coll& coll_)
+    : Collection_base(id)
     , coll(coll_) {}
 
   template<typename Sel>
@@ -377,7 +377,7 @@ struct table_ : Collection_base {
 
   Json::Value to_json() const override final
   {
-    return Json::Value() << name << true << GetName<table_>();
+    return Json::Value() << id.get_name() << true << id.type_name();
   }
 
   Json::Value get_contents() const override final { return get_contents_common(this->all /* TODO: columns */); }
@@ -385,9 +385,10 @@ struct table_ : Collection_base {
   template<class S>
   void print_(std::ostream& os, const S& s) const
   {
+    auto name = this->id.get_name();
     os << "{";
     for (auto const& row : s)
-      os << "\n  " << this->name << "(" << detail::print_tuple<value_type>(row) << ")";
+      os << "\n  " << name << "(" << detail::print_tuple<value_type>(row) << ")";
     os <<"\n}";
   }
 

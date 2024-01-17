@@ -201,14 +201,13 @@ struct Stubs {
   {
     auto q = Query::current;
     Json::Value res;
-    res["name"] = q->name;
     res["qid"] = get_qid(q->dbg);
     {
       JVal db(Json::objectValue);
       JVal data(Json::arrayValue);
       db["columns"] = JVal() << "name" << "internal" << "type";
-      for (auto const& kv: q->db)
-        data << kv.second->to_json();
+      for (auto const& coll: q->db)
+        data << coll->to_json();
       db["data"] = std::move(data);
       res["db"] = std::move(db);
     }
@@ -229,7 +228,7 @@ struct Stubs {
 
   JVal get_table(const JVal& v)
   {
-    auto coll = Query::current->db.at(v[0].asString());
+    auto coll = Query::current->db.at(v[0].asInt());
     return coll->get_contents();
   }
 

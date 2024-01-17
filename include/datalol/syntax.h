@@ -17,28 +17,37 @@ struct IPrint {
   virtual Json::Value to_json() const { return false; };
 };
 
+struct ident {
+  const char *name;             // May be null
+  const char *type;             // dumb raw form of some __PRETTY_F
+  int id;
+
+  template<class T>
+  static ident make(int id, const char *name = nullptr)
+  {
+    ident res;
+    res.id = id;
+    res.name = name;
+    res.type = __PRETTY_FUNCTION__;
+    return res;
+  }
+  std::string type_name() const noexcept;
+  std::string get_name() const;
+};
+std::ostream& operator<<(std::ostream& os, const ident& id);
+
 class Collection_base : public IPrint {
 protected:
-  std::string name;
+  ident id;
 public:
   Collection_base(const Collection_base&) = delete;
-  Collection_base(const std::string& name)
-    : name(name)
+  Collection_base(const ident& id)
+    : id(id)
   {}
-  const std::string& get_name() const noexcept { return name; }
+  std::string get_name() const noexcept { return id.get_name(); }
   virtual size_t merge() = 0;
   virtual Json::Value get_contents() const = 0;
 };
-
-template<class type> constexpr std::string GetName()
-{
-  const char* start = __PRETTY_FUNCTION__;
-  while(*start != '=') ++start;
-  start += 2;
-  size_t size = 0;
-  while(start[size] != ';') ++size;
-  return std::string(start, size);
-}
 
 class Var_;
 class Rule {
@@ -175,9 +184,7 @@ class Var_ {
 protected:
   struct Impl {
     Impl();
-    std::string name;
-    std::string type;
-    int id;
+    ident id;
     mutable cow_buf p;
   };
 
@@ -200,20 +207,18 @@ protected:
   void register_var(const Var_*);
 
   friend class Query;
-  const std::string& get_name() const noexcept { return impl->name; }
-
 public:
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
   void zap() const { impl->p.clear(); }
-  int get_id() const noexcept { return impl->id; }
+  int get_id() const noexcept { return impl->id.id; }
 };
 
 template<class T>
 class Var : public Var_ {
 public:
-  Var(const std::string& name = std::string());
+  Var(const char *name = nullptr);
   Var(const Var& v): Var_(v) { register_var(this); }
   Var(Var&&) = default;
 
@@ -261,7 +266,10 @@ private:
   debug_info *dbg;
   std::vector<std::pair<Rule::elem_meta, Rule::uelem>> elems;
   std::vector<Rule> rules;
+
+  // TODO: add typeid for verification on vars, db
   std::vector<Var_> vars;
+  std::vector<flat::pool_ptr<Collection_base>> db;
   std::bitset<MAX_ELEMS> recursive;
 
   Rule::elem_meta& get_meta(unsigned i);
@@ -282,9 +290,6 @@ private:
     bool operator()(Collection_base *l, Collection_base *r) const;
   };
 
-  // TODO: can be replaced by a vector, collections appear by declaration order
-  // TODO: add typeid for verification
-  flat::map<std::string, flat::pool_ptr<Collection_base>> db;
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
 public:
@@ -320,36 +325,32 @@ public:
   void end_rule(Rule *r);
 
   template<class T>
-  Var_ mkvar(const std::string& name)
+  Var_ mkvar(const char *name)
   {
     if (nvars < q->vars.size())
       return q->vars[nvars++];  // FIXME: check type!
     auto buf = flat::allocate<Var_::with_buf<T>>();
     Var_::Impl *impl = &(buf->impl);
-    impl->name = name;
-    impl->type = GetName<T>();
-    impl->id = nvars++;
+    impl->id = ident::make<T>(nvars++, name);
     q->vars.push_back(Var_(impl));
     return impl;
   }
 
   template<class T, typename... Args>
-  T& make_rel(const std::string& name, Args&&... args)
+  T& make_rel(const char *name, Args&&... args)
   {
-    std::cerr << "Collection_base::make<" << GetName<T>() << ">(" << name << "): " << sizeof(T) << "\n";
-    auto& db = q->db;
-    auto it = db.find(name);
-    if (db.end() != it)
-      return static_cast<T&>(*(it->second));
-    auto res = flat::allocate<T>(name, std::forward<Args>(args)...);
-    db.emplace(name, res);
+    std::cerr << "Collection_base::make<" << ident::make<T>(nrels, name).type_name() << ">(" << name << "): " << sizeof(T) << "\n";
+    if (nrels < q->db.size())
+      return static_cast<T&>(*q->db[nrels++]);
+    auto res = flat::allocate<T>(ident::make<T>(nrels++, name), std::forward<Args>(args)...);
+    q->db.push_back(res);
 
     return *res;
   }
 };
 
 template<class T>
-Var<T>::Var(const std::string& name)
+Var<T>::Var(const char *name)
   : Var_(Builder::current->mkvar<T>(name))
 {}
 

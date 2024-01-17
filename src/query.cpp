@@ -12,10 +12,7 @@ void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::with_vars&
 {
   auto neg = e.negative;
   neg &= ~bound;
-  if (neg.none())
-    return;
-  std::cerr << "Error in rule " << r << ": unbound vars" << "\n";
-  assert(false);
+  assert(neg.none());
 }
 
 Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i].first; }

@@ -1,12 +1,27 @@
 #include <cassert>
 #include <algorithm>
 
+#include <flat/pnr_utils.h>
 #include <datalol/syntax.h>
 #include <datalol/debug.h>
 
 Query *Query::current = nullptr;
 Builder *Builder::current = nullptr;
 static Rule::vars_t *current_vars = nullptr;
+
+std::string ident::type_name() const noexcept
+{
+  auto left = strchr(type, '=')+2;
+  auto right = strrchr(left, ']');
+  return std::string(left, right-left);
+}
+
+std::string ident::get_name() const
+{
+  if (name)
+    return name;
+  return format{} << "<" << id << ">";
+}
 
 Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 {
@@ -52,13 +67,7 @@ static std::ostream& print_with_vars(std::ostream& os, const Rule::with_vars& va
 
 std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
 {
-  os << "?";
-  auto const& name = impl.name;
-  if (name.empty())
-    os << "<" << impl.id << ">";
-  else
-    os << name;
-  os << "[" << impl.type << "]";
+  os << "?" << impl.id.get_name() << "[" << impl.id.type << "]";
   return os;
 }
 
@@ -134,7 +143,7 @@ void Query::print_vars(std::ostream& os, const Rule::with_vars& vs)
     i++;
     if (!is_pos && !is_neg)
       continue;
-    os << (out?", ":"") << (is_pos ? "+":"") << (is_neg ? "-":"") << v.get_name();
+    os << (out?", ":"") << (is_pos ? "+":"") << (is_neg ? "-":"") << v.impl->id.get_name();
     out++;
   }
 }
@@ -161,7 +170,7 @@ flat::guard Rule::with_vars::capture_helper(Rule::vars_t *dst)
 void Var_::register_var(const Var_* v)
 {
   assert(current_vars);
-  current_vars->set(v->impl->id);
+  current_vars->set(v->impl->id.id);
 }
 
 Rule::with_vars::with_vars(const Rule::vars_t& pos, nullptr_t) noexcept
