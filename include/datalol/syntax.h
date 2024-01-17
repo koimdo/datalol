@@ -5,6 +5,7 @@
 #include <iostream>
 #include <bitset>
 #include <string>
+#include <functional>
 #include <flat/memory>
 #include <flat/span>
 #include <flat/set>
@@ -362,16 +363,15 @@ public:
 };
 
 // TODO: perhaps just wrap std::function?
-template<typename Fun>
+template<typename Res>
 class thunk : public thunk_base {
-  using fun_t = Fun;
+  using fun_t = std::function<Res()>;
   fun_t fun;
 
 public:
-  using result_t = decltype(std::declval<Fun>()());
+  Res apply() const { return fun(); }
 
-  result_t apply() const { return fun(); }
-
+  template<class Fun>
   thunk(const char *desc, const Rule::vars_t vars, Fun&& fun)
     : thunk_base(desc, vars)
     , fun(std::forward<Fun>(fun))
@@ -387,9 +387,9 @@ namespace detail {
 }
 
 template<typename> class binder_susp;
-template<typename Fun>
+template<typename Res>
 class thunk_susp : public Rule::susp_Head {
-  using thunk_t = thunk<Fun>;
+  using thunk_t = thunk<Res>;
   thunk_t fun;
 
   struct head : Rule::Head {
@@ -435,31 +435,27 @@ class thunk_susp : public Rule::susp_Head {
     }
   };
 
-  friend class binder_susp<Fun>;
+  friend class binder_susp<Res>;
 public:
   operator apply_body_impl()
   {
-    static_assert(detail::is_contextual_bool<typename thunk_t::result_t>::value,
+    static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
     return apply_body_impl(std::move(fun));
   }
 
-  thunk_susp(const char *desc, std::pair<Fun, Rule::vars_t>&& tv)
+  template<class F>
+  thunk_susp(const char *desc, std::pair<F, Rule::vars_t>&& tv)
     : fun(desc, tv.second, std::move(tv.first))
   {}
 };
 
-template<class F>
-thunk_susp<F> make_susp(const char *desc, std::pair<F, Rule::vars_t>&& tv) {
-  return thunk_susp<F>(desc, std::move(tv));
-}
-
-template<typename Fun>
+template<typename T>
 class binder_susp : public Rule::susp_Body {
 public:
-  using thunk_t = thunk<Fun>;
-  using bound_t = Var<typename thunk_t::result_t>;
-  binder_susp(thunk_susp<Fun>&& ts, bound_t& bound)
+  using thunk_t = thunk<T>;
+  using bound_t = Var<T>;
+  binder_susp(thunk_susp<T>&& ts, bound_t& bound)
     : fun(std::move(ts.fun))
     , bound(bound) {}
 
@@ -522,7 +518,7 @@ binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fu
 #define UNIQ_(prefix) CONCAT(prefix,__LINE__)
 
 #define THUNK(expr,...)                                                 \
-  make_susp(#expr, Rule::with_vars::capture([&]() {                     \
+  thunk_susp<decltype(expr)>(#expr, Rule::with_vars::capture([&]() {    \
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   }))
 
