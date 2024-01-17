@@ -233,6 +233,10 @@ struct Stubs {
     return coll->get_contents();
   }
 
+  void add_method(const char * name, action_t act)
+  {
+    methods.emplace(name, std::move(act));
+  }
   Stubs() {
     int fd = get_debug_fd();
     int nstubs = 0;
@@ -242,12 +246,12 @@ struct Stubs {
     
     pipe.set(fd);
 
-    methods["help"] = &Stubs::listMethods;
-    methods["loadQueries"] = &Stubs::loadQueries;
-    methods["resume"] = &Stubs::resume;
-    methods["set_break"] = &Stubs::set_break;
-    methods["show_query"] = &Stubs::show_query;
-    methods["get_table"] = &Stubs::get_table;
+    add_method("help", &Stubs::listMethods);
+    add_method("loadQueries", &Stubs::loadQueries);
+    add_method("resume", &Stubs::resume);
+    add_method("set_break", &Stubs::set_break);
+    add_method("show_query", &Stubs::show_query);
+    add_method("get_table", &Stubs::get_table);
 
     notify("hello", JVal());
     mainloop();

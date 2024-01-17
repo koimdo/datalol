@@ -322,8 +322,8 @@ class external_ {
 
 public:
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> typename Impl::susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
-    return typename Impl::susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
+  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
+    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
   }
 };
 
@@ -465,7 +465,7 @@ public:
   {}
 
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> typename Impl::susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
-    return typename Impl::susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
+  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
+    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
   }
 };
