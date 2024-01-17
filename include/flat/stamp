@@ -1,8 +1,10 @@
 // -*- C++ -*-
 #pragma once
-
 #include <iterator>
 #include <cassert>
+#ifndef rdassert
+#define rdassert(cond, str) assert(cond && str)
+#endif
 
 namespace flat {
 
@@ -40,10 +42,11 @@ public:
     It it;
     test ch;
     void check() const {
-      assert(ch.valid());
+      rdassert(ch.valid(), "Iterator invalidated by data structure mutation");
     }
     static void check(const iterator& l, const iterator& r) {
-      assert(l.ch == r.ch && l.ch.valid());
+      rdassert(l.ch == r.ch, "Comparing iterators from different structures!");
+      l.check();
     }
     typedef std::iterator_traits<It> iter_traits_t;
 

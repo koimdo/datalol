@@ -50,7 +50,7 @@ void Query::configure()
 
       bool has_vars = pos.any();
       pos &= ~bound;
-      auto elem = get_elem(i).cast<Rule::Body>();
+      auto elem = get_elem(i).static_cast_<Rule::Body>();
       for (auto& v : this->vars)
         if (pos.test(v.get_id())) {
           elem->add_undo(&v);
@@ -69,7 +69,7 @@ void Query::configure()
     auto next = get_elem(r.head);
     next->rule_ = &r;
     for (size_t i=r.last-1; i!=r.head; i--) {
-      auto e = get_elem(i).cast<Rule::Body>();
+      auto e = get_elem(i).static_cast_<Rule::Body>();
       e->next_ = next.get(flat::unsafe_extract_pointer{});
       next = e;
       e->rule_ = &r;

@@ -2,6 +2,8 @@
 #pragma once
 
 #include "stamp"
+#include "debug.h"
+#include <algorithm>
 
 namespace flat {
 
@@ -12,30 +14,24 @@ class sorted_base : public stamp {
 
   template<typename Iter, typename K>
   static std::pair<Iter, bool> find_(Iter&& pos, Iter&& end, const K& p, const Compare& cmp) {
-    int n = end-pos;
-    if (!n)
-      return { end, false };
-    while (n > 1) {
-      int half = n/2;
-      auto mid = pos + half;
-      pos = cmp(*mid, p) ? mid : pos;
-      n -= half;
-    }
-    pos += cmp(*pos, p);
+    pos = std::lower_bound(pos, end, p, cmp);
     return { pos, end != pos && !cmp(p, *pos) };
   }
 
 protected:
-  std::tuple<Sequence, Compare> meta;
-  const Compare& compare() const noexcept { return std::get<1>(meta); }
-  Sequence& storage() noexcept { return std::get<0>(meta); }
-  const Sequence& storage() const noexcept { return std::get<0>(meta); };
+  Sequence storage_;
+  // TODO: use std::tuple/EBCO for eliminating storage of empty `Compare`
+  Compare compare_;
+
+  Sequence& storage() { return storage_; }
+  const Sequence& storage() const { return storage_; }
+
   typedef typename Sequence::const_iterator seq_iter;
 
   template<typename K>
-  std::pair<typename Sequence::const_iterator, bool> find_(const K& p) const { return find_(storage().begin(), storage().end(), p, compare()); }
+  std::pair<typename Sequence::const_iterator, bool> find_(const K& p) const { return find_(storage().begin(), storage().end(), p, key_comp()); }
   template<typename K>
-  std::pair<typename Sequence::iterator,       bool> find_(const K& p)       { return find_(storage().begin(), storage().end(), p, compare()); }
+  std::pair<typename Sequence::iterator,       bool> find_(const K& p)       { return find_(storage().begin(), storage().end(), p, key_comp()); }
 
   template<class Pred>
   void filter_(sorted_base& res, Pred&& pred) const {
@@ -57,13 +53,14 @@ public:
   typedef stamp::iterator<typename Sequence::const_reverse_iterator> const_reverse_iterator;
   typedef const_reverse_iterator reverse_iterator;
 
-  sorted_base(): sorted_base(Compare()) {}
+  const Compare& key_comp() const { return compare_; }
 
-  explicit sorted_base(const Compare& cmp): meta(Sequence(), cmp) {}
-  
-  sorted_base(const sorted_base& o): stamp(), meta(o.meta) {}
+  explicit sorted_base(const Compare& comp): compare_(comp) {}
 
-  sorted_base(std::initializer_list<value_type> init): sorted_base(init.begin(), init.end()) {}
+  sorted_base(const sorted_base& o): stamp(), compare_(o.compare_), storage_(o.storage_) {}
+
+  sorted_base(std::initializer_list<value_type> init, const Compare& cmp = Compare())
+    : sorted_base(init.begin(), init.end(), cmp) {}
 
   template<class It>
   sorted_base(It beg, It end, const Compare& cmp = Compare())
@@ -100,8 +97,13 @@ public:
     return { mkiter(std::move(itb.first)), !itb.second };
   }
 
-  bool operator==(const sorted_base& o) const { return &o == this || storage() == o.storage(); }
-  bool operator!=(const sorted_base& o) const { return &o != this && storage() != o.storage(); }
+  bool operator==(const sorted_base& o) const {
+    auto const& cmp = key_comp();
+    return &o == this || std::equal(storage().begin(), storage().end(),
+                                    o.storage().begin(), o.storage().end(),
+                                    [&cmp](const_reference l, const_reference r) { return !cmp(l, r) && !cmp(r, l); });
+  }
+  bool operator!=(const sorted_base& o) const { return &o != this && !(*this == o); }
 
   const_iterator erase(const_iterator pos) {
     invalidate();
@@ -124,6 +126,16 @@ public:
   }
 
   size_type size() const { return storage().size(); }
+
+  template<class Pred>
+  size_type count_if(Pred&& pred) const
+  {
+    size_type count = 0;
+    for (auto const& x : storage())
+      if (pred(x))
+        count++;
+    return count;
+  }
 
   bool empty() const { return storage().empty(); }
 

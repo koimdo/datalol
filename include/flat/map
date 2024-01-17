@@ -3,32 +3,43 @@
 #pragma once
 
 #include <functional>
+#include <algorithm>
 #include <vector>
 #include "sorted_base.h"
+#include "set"
 
 namespace flat {
 
 namespace detail {
 
 template<typename Key, typename T, class Cmp>
-struct entry_cmp {
+struct entry_cmp : public Cmp {
+  entry_cmp(const Cmp& cmp): Cmp(cmp) {}
   using entry_t = std::pair<Key, T>;
   // TODO: stateful comparators?
-  bool operator()(const entry_t& l, const entry_t& r) const { return Cmp{}(l.first, r.first); }
-  bool operator()(const entry_t& l, const Key& r    ) const { return Cmp{}(l.first, r      ); }
-  bool operator()(const Key&     l, const entry_t& r) const { return Cmp{}(l      , r.first); }
+  bool operator()(const entry_t& l, const entry_t& r) const { return Cmp::operator()(l.first, r.first); }
+  bool operator()(const entry_t& l, const Key& r    ) const { return Cmp::operator()(l.first, r      ); }
+  bool operator()(const Key&     l, const entry_t& r) const { return Cmp::operator()(l      , r.first); }
 };
 
 }
 // a fast small map. Use if small (<32 elements) or iteration speed is more important than
 // modification speed
 template <typename Key, typename T,
-          typename Compare = std::less<Key>,
-          typename Sequence = std::vector<std::pair<Key, T>>>
+          typename Compare = std::less<Key>>
 class map : public sorted_base<Key, std::pair<Key, T>, detail::entry_cmp<Key, T, Compare>> {
   using super_t =  sorted_base<Key, std::pair<Key, T>, detail::entry_cmp<Key, T, Compare>>;
 public:
-  using super_t::super_t;
+  using value_compare = detail::entry_cmp<Key, T, Compare>;
+  using value_type = typename super_t::value_type;
+  using mapped_type = T;
+
+  map(): map(Compare()) {}
+  explicit map(const Compare& cmp): super_t(value_compare(cmp)) {}
+  map(const map&) = default;
+  map(std::initializer_list<value_type> init, const Compare& cmp = Compare())
+    : super_t(init, value_compare(cmp))
+  {}
 
   int count(const Key& p) const { return super_t::find_(p).second; }
   bool contains(const Key& p) const { return super_t::find_(p).second; }
@@ -48,6 +59,20 @@ public:
   std::pair<typename super_t::iterator, bool> emplace(const Key& k, const T& v) {
     return super_t::insert({k, v});
   }
+
+  template<typename M>
+  std::pair<typename super_t::iterator, bool> insert_or_assign(const Key& k, M&& v) {
+    auto it = find(k);
+    if (end() == it) {
+      return super_t::insert({k, std::forward<M>(v)});
+    } else {
+      it->second = std::forward<M>(v);
+      return {it, false};
+    }
+  }
+
+  T& setdefault(const Key& k, T&& v) { return emplace(k, v).first->second; }
+  T& setdefault(const Key& k, const T& v) { return emplace(k, v).first->second; }
 
   T& at(const Key& key) {
     auto itb = super_t::find_(key);
@@ -82,6 +107,39 @@ public:
     return super_t::mkiter(itb.second ? itb.first : super_t::storage().end());
   }
 
+  typename super_t::iterator lower_bound(const Key& key) {
+    return std::lower_bound(begin(), end(), key, super_t::key_comp());
+  }
+
+  typename super_t::const_iterator lower_bound(const Key& key) const {
+    return std::lower_bound(begin(), end(), key, super_t::key_comp());
+  }
+
+  typename super_t::iterator upper_bound(const Key& key) {
+    return std::upper_bound(begin(), end(), key, super_t::key_comp());
+  }
+
+  typename super_t::const_iterator upper_bound(const Key& key) const {
+    return std::upper_bound(begin(), end(), key, super_t::key_comp());
+  }
+
+  set<Key, Compare> keys() const {
+    set<Key, Compare> res(this->key_comp());
+    res.storage().reserve(super_t::size());
+    for (auto const& kv : super_t::storage())
+      res.storage().push_back(kv.first);
+    return res;
+  }
+
+  map map_union(const map& o) const {
+    auto const& cmp = this->key_comp();
+    map res(cmp);
+    std::set_union(this->storage().begin(), this->storage().end(),
+                   o.storage().begin(), o.storage().end(),
+                   std::back_inserter(res.storage()),
+                   cmp);
+    return res;
+  }
 };
 
 }

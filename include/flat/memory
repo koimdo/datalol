@@ -1,7 +1,7 @@
 // -*- C++ -*-
 #pragma once
 
-#include <list>
+#include <vector>
 #include <string>
 #include <cstddef>
 #include <type_traits>
@@ -9,17 +9,20 @@
 
 namespace flat {
 
+// Backported from C++20
 template<typename T>
 struct remove_cvref {
   using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 
 class cache {
+  static size_t epoch;
   // TODO: multiple entries?
   mutable stamp::test owner;
+  mutable size_t origin = -1;
 
   static constexpr size_t MAX_SIZE = 16; // LOL why so small? we only need 1 or 2 pointer-equivalents
-  alignas(alignof(std::max_align_t)) mutable unsigned char buf[MAX_SIZE];
+  alignas(alignof(std::max_align_t)) mutable unsigned char buf[MAX_SIZE] = {0};
 
   template<typename Bind>
   struct res_t_ {
@@ -29,28 +32,36 @@ class cache {
 
     // required for typeless cache invalidation
     static_assert(std::is_trivially_destructible<type>::value, "Not a trivially-destructible type");
+    static_assert(std::is_trivially_copy_constructible<type>::value, "Not a trivially-copy-constructible type");
     static_assert(sizeof(type) <= MAX_SIZE, "Cached value too large");
   };
 
 public:
+  static
+  void invalidate_all() noexcept;
   void invalidate(const stamp& s) const noexcept;
 
   template<typename Bind>
   typename res_t_<Bind>::type get(const stamp& key, Bind&& bind) const noexcept(noexcept(bind()))
   {
     typedef typename res_t_<Bind>::type res_t;
-    if (owner.valid(key))
+    if (origin == epoch && owner.valid(key))
       // Fast path: cached value
       return *((const res_t*)buf);
     else {
       auto const& res = *(new (buf) res_t(bind()));
       owner.set(key);
+      origin = epoch;
       return res;
     }
   }
 };
 
-struct guard {
+class guard {
+  void *undo;
+  void **loc = nullptr;
+
+public:
   guard(const guard&) = delete;
   guard() = default;
   guard(guard&& o)
@@ -58,9 +69,6 @@ struct guard {
   {
     o.loc = nullptr;
   }
-
-  void *undo;
-  void **loc = nullptr;
 
   template<class T>
   void set(T **p, T *newval)
@@ -78,28 +86,24 @@ struct guard {
 
 template<class> class pool_ptr;
 class autorelease {
-  struct page;
+  struct entry {
+    void *p;
+    typedef void (*destructor_t)(void*);
+    destructor_t destroy;
+  };
   std::string name;
-  page *pg;
-  std::list<page> pool;
+  size_t total = 0;
+  std::vector<entry> pool;
 
-  static autorelease *current, *allocating;
-
-  static bool is_valid(void *p);
-  template<typename T>
-  friend class pool_ptr;
+  static autorelease *current;
 
   template<typename T, typename... Args>
   friend
   pool_ptr<T> allocate(Args&&... args);
 
-  void add_page();
-  void *allocate_(guard& undo, size_t size, size_t align);
-  void finish_allocation_(void *p, void (*dtor)(void *));
 public:
   ~autorelease();
   autorelease(const autorelease&) = delete;
-  autorelease& operator=(const autorelease&) = delete;
   autorelease(autorelease&&);
   autorelease& operator=(autorelease&&) = delete;
   autorelease(std::string&& name);
@@ -115,57 +119,75 @@ public:
 };
 
 struct unsafe_extract_pointer {}; // Explicit, verbose marker for unsafe pool_ptr ops
+class pool_ptr_base {
+  // Tag class for locating pool_ptrs later on
+protected:
+  pool_ptr_base() = default;
+  pool_ptr_base(void *p): p(p) {}
+  void *p = nullptr;
+};
 template<class T>
-class pool_ptr {
+class pool_ptr : public pool_ptr_base {
   friend class autorelease;
-  mutable T *p = nullptr;
 
-  pool_ptr(T *p, std::true_type): p(p) {}
+  pool_ptr(T *p): pool_ptr_base((void*)p) {}
 
-  T *get() noexcept { return autorelease::is_valid(p) ? p : (p = 0); }
-  const T *get() const noexcept { return autorelease::is_valid(p) ? p : (p = 0); }
+  T *get() noexcept { return static_cast<T*>(p); }
+  const T *get() const noexcept { return static_cast<const T*>(p); }
 
-  template<typename S> friend class pool_ptr;
 public:
+  using element_type = T;
   T *get(unsafe_extract_pointer) noexcept { return get(); }
   const T *get(unsafe_extract_pointer) const noexcept { return get(); }
   pool_ptr(std::nullptr_t): pool_ptr() {}
   pool_ptr() = default;
   pool_ptr(const pool_ptr&) = default;
 
+  // This goofy friend declarations makes all pool_ptr instantiations friends of each other
+  // Necessary for various casting operations defined below
+  template<class P>
+  friend class pool_ptr;
+
   template<class S>
-  pool_ptr(pool_ptr<S> s): p(s.p) {}
+  pool_ptr(pool_ptr<S> o): pool_ptr(o.get()) {}
+
+  template<class S>
+  pool_ptr<S> dynamic_cast_() {
+    return pool_ptr<S>(dynamic_cast<S*>(get()));
+  };
+
+  template<class S>
+  pool_ptr<S> static_cast_() {
+    return pool_ptr<S>(static_cast<S*>(get()));
+  };
 
   T *operator->() noexcept { return get(); }
   const T *operator->() const noexcept { return get(); }
 
-  T &operator*() noexcept { return *get(); }
-  const T &operator*() const noexcept { return *get(); }
+  typename std::add_lvalue_reference<T>::type
+  operator*() noexcept { return *get(); }
 
-  bool operator==(const pool_ptr& o) const noexcept { return get() == o.get(); }
+  typename std::add_lvalue_reference<const T>::type
+  operator*() const noexcept { return *get(); }
 
   explicit operator bool() const noexcept { return get(); }
 };
 
-template<class L, class R>
-bool operator<(pool_ptr<L> l, pool_ptr<R> r)  { return *l < *r; }
-
 template<typename T, typename... Args>
 pool_ptr<T> autorelease::allocate(Args&&... args) {
-  guard undo; // Can go away if we ever -fno-exceptions
-  void *p = allocate_(undo, sizeof(T), alignof(T));
-  if (!p)
-    throw std::bad_alloc();
-  T *t = ::new (p) T(std::forward<Args>(args)...);
-  undo.unset();            // success!
+  T *t = ::new T(std::forward<Args>(args)...);
+  entry::destructor_t destroy;
   if (std::is_trivially_destructible<T>::value)
-    finish_allocation_(p, nullptr);
+    destroy = nullptr;
   else
-    finish_allocation_(p, [](void *q) { static_cast<T*>(q)->~T(); });
-  return pool_ptr<T>(t, std::true_type{});
+    destroy = [](void *p) { static_cast<T*>(p)->~T(); };
+  pool.emplace_back(entry{t, destroy});
+  total += sizeof(T);
+  return pool_ptr<T>(t);
 }
 
 template<typename T, typename... Args>
+static
 pool_ptr<T> allocate(Args&&... args) { return autorelease::current->allocate<T>(std::forward<Args>(args)...); }
 
 }

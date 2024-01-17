@@ -14,8 +14,10 @@ namespace flat {
 template <typename T, typename Compare = std::less<T>>
 class set : public sorted_base<T, T, Compare> {
   using super_t = sorted_base<T, T, Compare>;
+  template<typename, typename, typename> friend class map;
 public:
   using super_t::super_t;
+  set(): super_t(Compare{}) {}
 
   int count(const T& p) const { return super_t::find_(p).second; }
   bool contains(const T& p) const { return super_t::find_(p).second; }
@@ -42,29 +44,32 @@ public:
   }
 
   set set_union(const set& o) const {
-    set res;
+    auto const& cmp = this->key_comp();
+    set res(cmp);
     std::set_union(this->storage().begin(), this->storage().end(),
                    o.storage().begin(), o.storage().end(),
                    std::back_inserter(res.storage()),
-                   super_t::compare());
+                   cmp);
     return res;
   }
 
   set intersect(const set& o) const {
-    set res;
+    auto const& cmp = this->key_comp();
+    set res(cmp);
     std::set_intersection(this->storage().begin(), this->storage().end(),
                           o.storage().begin(), o.storage().end(),
                           std::back_inserter(res.storage()),
-                          super_t::compare());
+                          cmp);
     return res;
   }
 
   set diff(const set& o) const {
-    set res;
+    auto const& cmp = this->key_comp();
+    set res(cmp);
     std::set_difference(this->storage().begin(), this->storage().end(),
                         o.storage().begin(), o.storage().end(),
                         std::back_inserter(res.storage()),
-                        super_t::compare());
+                        cmp);
     return res;
   }
 };
