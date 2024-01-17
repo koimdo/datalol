@@ -43,52 +43,6 @@ template<class type> constexpr std::string GetName()
   return std::string(start, size);
 }
 
-template<class T, size_t MAX_SIZE>
-//using static_stack = std::vector<T>;
-class static_stack {
-  static_assert(std::is_trivially_destructible<T>::value, "Must be trivially destructible");
-  static_assert(std::is_trivially_move_constructible<T>::value, "Must be trivially movable");
-
-  alignas(T) unsigned char buf[MAX_SIZE*sizeof(T)];
-  size_t nitems = 0;
-public:
-  template<typename... Args>
-  T& emplace_back(Args&&... args) {
-    assert(nitems != MAX_SIZE);
-    void *p = end();
-    new (p) T(std::forward<Args>(args)...);
-    nitems++;
-    return *static_cast<T*>(p);
-  }
-
-  T& back() noexcept {
-    assert(nitems);
-    return *(begin() + nitems - 1);
-  }
-
-  const T& back() const noexcept {
-    assert(nitems);
-    return *(begin() + nitems - 1);
-  }
-
-  T& operator[](size_t n) {
-    assert(n < nitems);
-    return *(begin()+n);
-  }
-
-  const T& operator[](size_t n) const {
-    assert(n < nitems);
-    return *(begin()+n);
-  }
-
-  T *begin() noexcept { return reinterpret_cast<T*>(buf); }
-  T *end()  noexcept { return begin() + nitems; }
-  const T *begin() const noexcept { return reinterpret_cast<const T*>(buf); }
-  const T *end() const noexcept { return begin() + nitems; }
-
-  size_t size() const noexcept { return nitems; }
-};
-
 class Var_;
 class Rule {
 public:
@@ -314,10 +268,10 @@ private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
 
-  std::string name;
   debug_info *dbg;
-  static_stack<std::pair<Rule::elem_meta, Rule::uelem>, MAX_ELEMS> elems;
-  static_stack<Rule, MAX_ELEMS> rules;
+  std::vector<std::pair<Rule::elem_meta, Rule::uelem>> elems;
+  std::vector<Rule> rules;
+  std::vector<Var_> vars;
   std::bitset<MAX_ELEMS> recursive;
 
   Rule::elem_meta& get_meta(unsigned i);
@@ -336,7 +290,6 @@ private:
   friend class Rule::cursor;
   friend class Collection_base;
   friend class Stubs;
-  static_stack<Var_, Rule::MAX_VARS> vars;
 
   using guard_t = std::pair<flat::guard, flat::autorelease::scoped>;
   guard_t with_query();
@@ -362,16 +315,12 @@ public:
       void operator++();
     };
   public:
-    Builder(Query* q, debug_info *dbg);
+    Builder(Query* q, debug_info *dbg, const char *name = nullptr);
     iter begin() { return iter{q}; }
     iter end() const { return iter{nullptr}; }
   };
 
   Query();
-  static void set_title(const std::string& title)
-  {
-    current->name = title;
-  }
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::with_vars& vs);
   void run();

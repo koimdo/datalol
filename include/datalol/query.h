@@ -98,17 +98,6 @@ namespace detail {
     return mv.res;
   }
 
-  struct undo_helper {
-    static_stack<Var_, Rule::MAX_VARS> st;
-    void add_undo_(Var_* v) {
-      if (v) st.emplace_back(*v);
-    }
-    void undo() {
-      for (auto v : st)
-        v.zap();
-    }
-  };
-
   struct get_value {
     template<typename T>
     const T& operator()(const Var<T>& v) const { return *v.get(); }
@@ -179,9 +168,10 @@ namespace detail {
 }
 
 template<typename Derived, typename Sel, typename Origin>
-struct Matcher_base : public Rule::Body, private detail::undo_helper {
+struct Matcher_base : public Rule::Body {
   Sel selector;
   Origin& origin;
+  std::vector<Var_> undo_vars;  // FIXME: use inline buffer, size up to that of `Sel`
 
   Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(run_full)
@@ -189,7 +179,12 @@ struct Matcher_base : public Rule::Body, private detail::undo_helper {
     , origin(origin)
   {}
 
-  void add_undo(Var_* v) override final { this->add_undo_(v); }
+  void add_undo(Var_* v) override final { if (v) undo_vars.push_back(std::move(*v)); }
+  void undo()
+  {
+    for (auto v : undo_vars)
+      v.zap();
+  }
 
   void print(std::ostream& os) const override final
   {
@@ -197,20 +192,15 @@ struct Matcher_base : public Rule::Body, private detail::undo_helper {
   }
 
   static
-  void run_row(Derived& self, const typename Origin::value_type& row)
-  {
-    if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row)) {
-      self.next();
-    }
-    self.undo();
-  }
-
-  static
   void run_full(Rule::Elem& self_)
   {
     Derived& self = static_cast<Derived&>(self_);
-    for (auto const& row : self.get_coll())
-      run_row(self, row);
+    for (auto const& row : self.get_coll()) {
+      if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row)) {
+        self.next();
+      }
+      self.undo();
+    }
   }
 };
 

@@ -83,7 +83,7 @@ void Query::end_rule(Rule *r)
   rules.back().last = elems.size();
 }
 
-Query::Builder::Builder(Query *q, debug_info *dbg)
+Query::Builder::Builder(Query *q, debug_info *dbg, const char *)
   : q(q)
   , current_query(q->with_query())
 {
@@ -106,7 +106,7 @@ Query::Query(Query&&) = default;
 void Query::print(std::ostream& os) const
 {
   auto guard = const_cast<Query*>(this)->with_query();
-  os << "Query [" << name << "]: {";
+  os << "Query: {";
   size_t i=0;
   for (auto const& r : rules) {
     if (i) os << "\n";
