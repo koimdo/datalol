@@ -251,7 +251,7 @@ class external_impl : public Collection_base {
   const Coll coll;
 public:
   template<typename... Args>
-  static external_impl& make(Args&&... args) { return Collection_base::make<external_impl>(std::forward<Args>(args)...); }
+  static external_impl& make(Args&&... args) { return Builder::current->make_rel<external_impl>(std::forward<Args>(args)...); }
 
   using value_type = typename flat::remove_cvref<Coll>::type::value_type;
 
@@ -335,7 +335,7 @@ struct table_ : Collection_base {
   using Collection_base::Collection_base;
 
   template<typename... MArgs>
-  static table_& make(MArgs&&... args) { return Collection_base::make<table_>(std::forward<MArgs>(args)...); }
+  static table_& make(MArgs&&... args) { return Builder::current->make_rel<table_>(std::forward<MArgs>(args)...); }
 
   static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
   using value_type = std::tuple<Args...>;

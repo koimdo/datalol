@@ -20,10 +20,6 @@ struct IPrint {
 class Collection_base : public IPrint {
 protected:
   std::string name;
-
-  template<typename T, typename... Args>
-  static
-  T& make(const std::string& name, Args&&... args);
 public:
   Collection_base(const Collection_base&) = delete;
   Collection_base(const std::string& name)
@@ -119,9 +115,6 @@ public:
     virtual std::pair<elem_meta, uhead> apply_Head() = 0;
   };
 
-  friend class Query;
-
-
   class cursor {
     friend cursor operator<<(susp_Head&& h, susp_Body&& b);
     friend cursor&& operator&(cursor&& r, susp_Body&& b);
@@ -136,6 +129,8 @@ public:
 
   bool use_delta() const noexcept { return seminaive_current == idx; }
 private:
+  friend class Query;
+  friend class Builder;
   friend class Stubs;
   unsigned head = 0, last = 0;
   size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
@@ -195,19 +190,16 @@ protected:
   };
 
   Impl *impl;
-  friend class Query;
+  friend class Builder;
 
   friend
   std::ostream& operator<<(std::ostream& os, const Impl&);
   Var_(Impl *impl): impl(impl) {}
 
-  template<class T>
-  static
-  Var_ mkvar(const std::string& name);
-
   static
   void register_var(const Var_*);
 
+  friend class Query;
   const std::string& get_name() const noexcept { return impl->name; }
 
 public:
@@ -221,10 +213,7 @@ public:
 template<class T>
 class Var : public Var_ {
 public:
-  Var(const std::string& name = std::string())
-    : Var_(Var_::mkvar<T>(name))
-  {}
-
+  Var(const std::string& name = std::string());
   Var(const Var& v): Var_(v) { register_var(this); }
   Var(Var&&) = default;
 
@@ -278,18 +267,12 @@ private:
   Rule::elem_meta& get_meta(unsigned i);
   Rule::uelem get_elem(unsigned i);
 
-  void add_elem(const Rule::elem_meta& meta, const Rule::uelem& e);
-  Rule *start_rule();
-  void end_rule(Rule *r);
   void run_rule(Rule& r, size_t current_delta);
   void print(std::ostream& os) const;
 
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
 
-  friend class Var_;
-  friend class Rule::cursor;
-  friend class Collection_base;
   friend class Stubs;
 
   using guard_t = std::pair<flat::guard, flat::autorelease::scoped>;
@@ -305,52 +288,70 @@ private:
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
 public:
-  class Builder {
-    Query* q;
-    guard_t current_query;
-    struct iter {
-      Query* q;
-      iter(Query *q): q(q) {}
-      bool operator!=(const iter& o) const { return q != o.q; }
-      std::false_type operator*() const { return std::false_type{}; }
-      void operator++();
-    };
-  public:
-    Builder(Query* q, debug_info *dbg, const char *name = nullptr);
-    iter begin() { return iter{q}; }
-    iter end() const { return iter{nullptr}; }
-  };
-
+  friend class Builder;
   Query();
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::with_vars& vs);
   void run();
 };
 
+class Builder {
+  Query* q;
+  Query::guard_t current_query;
+  flat::guard current_builder;
+  struct iter {
+    Query* q;
+    iter(Query *q): q(q) {}
+    bool operator!=(const iter& o) const { return q != o.q; }
+    std::false_type operator*() const { return std::false_type{}; }
+    void operator++();
+  };
+
+  int nvars = 0, nrels = 0;
+public:
+  Builder(Query* q, debug_info *dbg, const char *name = nullptr);
+  iter begin() { return iter{q}; }
+  iter end() const { return iter{nullptr}; }
+
+  static Builder *current;
+
+  void add_elem(const Rule::elem_meta& meta, const Rule::uelem& e);
+  Rule *start_rule();
+  void end_rule(Rule *r);
+
+  template<class T>
+  Var_ mkvar(const std::string& name)
+  {
+    if (nvars < q->vars.size())
+      return q->vars[nvars++];  // FIXME: check type!
+    auto buf = flat::allocate<Var_::with_buf<T>>();
+    Var_::Impl *impl = &(buf->impl);
+    impl->name = name;
+    impl->type = GetName<T>();
+    impl->id = nvars++;
+    q->vars.push_back(Var_(impl));
+    return impl;
+  }
+
+  template<class T, typename... Args>
+  T& make_rel(const std::string& name, Args&&... args)
+  {
+    std::cerr << "Collection_base::make<" << GetName<T>() << ">(" << name << "): " << sizeof(T) << "\n";
+    auto& db = q->db;
+    auto it = db.find(name);
+    if (db.end() != it)
+      return static_cast<T&>(*(it->second));
+    auto res = flat::allocate<T>(name, std::forward<Args>(args)...);
+    db.emplace(name, res);
+
+    return *res;
+  }
+};
+
 template<class T>
-Var_ Var_::mkvar(const std::string& name)
-{
-  auto res = flat::allocate<Var_::with_buf<T>>();
-  Impl *impl = &(res->impl);
-  impl->name = name;
-  impl->type = GetName<T>();
-  impl->id = Query::current->vars.size();
-  Query::current->vars.emplace_back(Var_(impl));
-  return impl;
-}
-
-template<class T, typename... Args>
-T& Collection_base::make(const std::string& name, Args&&... args)
-{
-  auto& db = Query::current->db;
-  auto it = db.find(name);
-  if (db.end() != it)
-    return static_cast<T&>(*(it->second));
-  auto res = flat::allocate<T>(name, std::forward<Args>(args)...);
-  db.emplace(name, res);
-
-  return *res;
-}
+Var<T>::Var(const std::string& name)
+  : Var_(Builder::current->mkvar<T>(name))
+{}
 
 class thunk_base {
   Rule::vars_t vars;
@@ -522,7 +523,7 @@ binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fu
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   }))
 
-#define DATALOL_Q(query, ...) for (auto UNIQ_(dummy) : ::Query::Builder(&query, DEBUG_INFO(), ##__VA_ARGS__))
+#define DATALOL_Q(query, ...) for (auto UNIQ_(dummy) : ::Builder(&query, DEBUG_INFO(), ##__VA_ARGS__))
 #define DATALOL(...) ({                                                 \
       Query UNIQ_(query);                                               \
       DATALOL_Q(UNIQ_(query)) { __VA_ARGS__ }                           \

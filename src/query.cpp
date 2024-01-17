@@ -21,6 +21,8 @@ void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::with_vars&
 Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i].first; }
 Rule::uelem Query::get_elem(unsigned i) { return elems[i].second; }
 
+
+// FIXME: move to builder?
 void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side

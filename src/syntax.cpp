@@ -4,21 +4,17 @@
 #include <datalol/syntax.h>
 #include <datalol/debug.h>
 
-// RULE ::= HEAD << body (& body)*
-// (fact rules are not allowed)
-
-// Query ::= Rule+
 Query *Query::current = nullptr;
+Builder *Builder::current = nullptr;
 static Rule::vars_t *current_vars = nullptr;
 
 Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 {
   auto hh = h.apply_Head();
   auto bb = b.apply_Body();
-  auto q = Query::current;
+  auto q = Builder::current;
 
   r = q->start_rule();
-  r->head = q->elems.size();
   q->add_elem(hh.first, hh.second);
   append(std::move(b));
 }
@@ -26,12 +22,12 @@ Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
 void Rule::cursor::append(susp_Body&& b)
 {
   auto bb = b.apply_Body();
-  Query::current->add_elem(bb.first, bb.second);
+  Builder::current->add_elem(bb.first, bb.second);
 }
 
 Rule::cursor::~cursor()
 {
-  Query::current->end_rule(r);
+  Builder::current->end_rule(r);
 }
 
 Rule::cursor operator<<(Rule::susp_Head&& h, Rule::susp_Body&& b)
@@ -66,31 +62,34 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
   return os;
 }
 
-void Query::add_elem(const Rule::elem_meta& meta, const Rule::uelem& e)
+void Builder::add_elem(const Rule::elem_meta& meta, const Rule::uelem& e)
 {
-  elems.emplace_back(meta, e);
+  q->elems.emplace_back(meta, e);
 }
 
-Rule *Query::start_rule()
+Rule *Builder::start_rule()
 {
-  rules.emplace_back();
-  return &rules.back();
+  Rule r;
+  r.head = q->elems.size();
+  q->rules.push_back(r);
+  return &q->rules.back();
 }
 
-void Query::end_rule(Rule *r)
+void Builder::end_rule(Rule *r)
 {
-  assert(&rules.back() == r);
-  rules.back().last = elems.size();
+  assert(&q->rules.back() == r && !r->last);
+  q->rules.back().last = q->elems.size();
 }
 
-Query::Builder::Builder(Query *q, debug_info *dbg, const char *)
+Builder::Builder(Query *q, debug_info *dbg, const char *)
   : q(q)
   , current_query(q->with_query())
 {
   q->dbg = dbg;
+  current_builder.set(&current, this);
 }
 
-void Query::Builder::iter::operator++()
+void Builder::iter::operator++()
 {
   q->configure();
   q = nullptr;
