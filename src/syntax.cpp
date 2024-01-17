@@ -188,3 +188,14 @@ std::pair<flat::guard, flat::autorelease::scoped> Query::with_query()
   res.set(&current, this);
   return std::make_pair(std::move(res), flat::autorelease::scoped(pool));
 }
+
+thunk_base::thunk_base(const char *desc, const Rule::vars_t& vars)
+  : desc(desc)
+  , vars(vars)
+{}
+const Rule::vars_t& thunk_base::captured() const noexcept { return vars; }
+
+std::ostream& operator<<(std::ostream& os, const thunk_base& t)
+{
+  return os << "THUNK(" << t.desc << ")";
+}

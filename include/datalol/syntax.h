@@ -351,36 +351,33 @@ T& Collection_base::make(const std::string& name, Args&&... args)
   return *res;
 }
 
+class thunk_base {
+  Rule::vars_t vars;
+  const char *desc;
+
+public:
+  thunk_base(const char *desc, const Rule::vars_t& vars);
+  const Rule::vars_t& captured() const noexcept;
+  friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
+};
+
+// TODO: perhaps just wrap std::function?
 template<typename Fun>
-class thunk {
+class thunk : public thunk_base {
   using fun_t = Fun;
   fun_t fun;
-  const char *desc;
 
 public:
   using result_t = decltype(std::declval<Fun>()());
 
   result_t apply() const { return fun(); }
 
-  thunk(const char *desc, Fun&& fun)
-    : desc(desc)
-    , fun(std::move(fun))
+  thunk(const char *desc, const Rule::vars_t vars, Fun&& fun)
+    : thunk_base(desc, vars)
+    , fun(std::forward<Fun>(fun))
   {
-  }
-  friend
-  std::ostream& operator<<(std::ostream& os, const thunk& t)
-  {
-    return os << "THUNK(" << t.desc << ")";
   }
 };
-
-template<class F>
-auto make_thunk(const char *desc, F&& fun) -> thunk<F>
-{
-  //std::cerr << "sizeof(Thunk [" << desc << "]): " << sizeof(thunk<Res, F>) << "\n";
-  return thunk<F>(desc, std::move(fun));
-}
-
 
 namespace detail {
   template<class T, typename = void>
@@ -393,7 +390,7 @@ template<typename> class binder_susp;
 template<typename Fun>
 class thunk_susp : public Rule::susp_Head {
   using thunk_t = thunk<Fun>;
-  std::pair<thunk_t, Rule::vars_t> tv;
+  thunk_t fun;
 
   struct head : Rule::Head {
     thunk_t fun;
@@ -424,17 +421,17 @@ class thunk_susp : public Rule::susp_Head {
 
   std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
   {
-    return std::make_pair(meta(tv.second), flat::allocate<head>(std::move(tv.first)));
+    return std::make_pair(meta(fun.captured()), flat::allocate<head>(std::move(fun)));
   }
 
   struct apply_body_impl : public Rule::susp_Body {
-    std::pair<thunk_t, Rule::vars_t> tv;
-    apply_body_impl(std::pair<thunk_t, Rule::vars_t>&& tv)
-      : tv(std::move(tv))
+    thunk_t fun;
+    apply_body_impl(thunk_t&& fun_)
+      : fun(std::move(fun_))
     {}
     std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
     {
-      return std::make_pair(meta(tv.second), flat::allocate<guard>(std::move(tv.first)));
+      return std::make_pair(meta(fun.captured()), flat::allocate<guard>(std::move(fun)));
     }
   };
 
@@ -444,17 +441,17 @@ public:
   {
     static_assert(detail::is_contextual_bool<typename thunk_t::result_t>::value,
                   "not contextually convertible to bool!");
-    return apply_body_impl(std::move(tv));
+    return apply_body_impl(std::move(fun));
   }
 
-  thunk_susp(std::pair<thunk_t, Rule::vars_t>&& tt)
-    : tv(std::move(tt)) {}
-
+  thunk_susp(const char *desc, std::pair<Fun, Rule::vars_t>&& tv)
+    : fun(desc, tv.second, std::move(tv.first))
+  {}
 };
 
 template<class F>
-thunk_susp<F> make_susp(std::pair<thunk<F>, Rule::vars_t>&& tt) {
-  return thunk_susp<F>(std::move(tt));
+thunk_susp<F> make_susp(const char *desc, std::pair<F, Rule::vars_t>&& tv) {
+  return thunk_susp<F>(desc, std::move(tv));
 }
 
 template<typename Fun>
@@ -463,11 +460,11 @@ public:
   using thunk_t = thunk<Fun>;
   using bound_t = Var<typename thunk_t::result_t>;
   binder_susp(thunk_susp<Fun>&& ts, bound_t& bound)
-    : tv(std::move(ts.tv))
+    : fun(std::move(ts.fun))
     , bound(bound) {}
 
 private:
-  std::pair<thunk_t, Rule::vars_t> tv;
+  thunk_t fun;
   bound_t& bound;
 
   struct Binder : Rule::Body {
@@ -499,11 +496,11 @@ private:
   };
   std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
   {
-    Rule::vars_t positive;
+    Rule::vars_t positive, negative = fun.captured();
     positive.set(bound.get_id());
-    positive &= ~tv.second;     // In `i == $_(i->lol)`, we don't actually bind `i`
-    Rule::elem_meta meta = { Rule::with_vars(positive, tv.second), nullptr };
-    auto p = flat::allocate<Binder>(std::move(tv.first), bound);
+    positive &= ~negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    Rule::elem_meta meta = { Rule::with_vars(positive, negative), nullptr };
+    auto p = flat::allocate<Binder>(std::move(fun), bound);
     return std::make_pair(meta, p);
   }
 };
@@ -525,8 +522,8 @@ binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fu
 #define UNIQ_(prefix) CONCAT(prefix,__LINE__)
 
 #define THUNK(expr,...)                                                 \
-  make_susp(Rule::with_vars::capture([&]() {                            \
-    return make_thunk(#expr, ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } )); \
+  make_susp(#expr, Rule::with_vars::capture([&]() {                     \
+    return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   }))
 
 #define DATALOL_Q(query, ...) for (auto UNIQ_(dummy) : ::Query::Builder(&query, DEBUG_INFO(), ##__VA_ARGS__))
