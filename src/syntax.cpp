@@ -67,7 +67,7 @@ static std::ostream& print_with_vars(std::ostream& os, const Rule::with_vars& va
 
 std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
 {
-  os << "?" << impl.id.get_name() << "[" << impl.id.type << "]";
+  os << "?" << impl.id.get_name() << "[" << impl.id.type_name() << "]";
   return os;
 }
 

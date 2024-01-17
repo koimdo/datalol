@@ -33,13 +33,16 @@ TEST(Trivial, test0) {
 
   Query qo;
   DATALOL_Q (qo) {
-    auto As = external_ref("AS", ASs);
-    auto FAs = external_copy("FAS", ASs.filter([](const A&) { return true; }));
+    // TODO: update external collections on Query::
+    auto As = external_ref(ASs);
+    auto FAs = external_copy(ASs.filter([](const A&) { return true; }));
     Var<A> a("a");
     Var<int> i("i"), k("k");
+    Var<int> param;
     // FIXME: remove the `,true` part once we get the proper typing suppoer for head-only thunks
     THUNK((results.emplace_back(i, k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
   }
+  //std::cout << qo.to_json();
   qo.run();
   ASSERT_EQ(results.size(), 4);
 }

@@ -293,15 +293,15 @@ template<typename Coll>
 class external_;
 
 template<typename Coll>
-external_<const Coll&> external_ref(const char *name, Coll&& coll);
+external_<const Coll&> external_ref(Coll&& coll, const char *name = nullptr);
 
 template<typename Coll>
-external_<Coll> external_copy(const char *name, Coll&& coll);
+external_<Coll> external_copy(Coll&& coll, const char *name = nullptr);
 
 template<typename Coll>
 class external_ {
-  friend external_<const Coll&> external_ref<Coll>(const char *name, Coll&& coll);
-  friend external_<Coll> external_copy<Coll>(const char *name, Coll&& coll);
+  friend external_<const Coll&> external_ref<Coll>(Coll&& coll, const char *name);
+  friend external_<Coll> external_copy<Coll>(Coll&& coll, const char *name);
 
   using Impl = external_impl<Coll>;
   Impl& impl;
@@ -318,14 +318,14 @@ public:
 };
 
 template<typename Coll>
-external_<const Coll&> external_ref(const char *name, Coll&& coll)
+external_<const Coll&> external_ref(Coll&& coll, const char *name)
 {
   static_assert(std::is_lvalue_reference<Coll>::value, "Not a reference");
   return external_<const Coll&>::Impl::make(name, coll);
 }
 
 template<typename Coll>
-external_<Coll> external_copy(const char *name, Coll&& coll)
+external_<Coll> external_copy(Coll&& coll, const char *name)
 {
   return external_<Coll>::Impl::make(name, coll);
 }
@@ -451,7 +451,7 @@ class table {
   using Impl = table_<Args...>;
   Impl& impl;
 public:
-  table(const char *name)
+  table(const char *name = nullptr)
     : impl(Impl::make(name))
   {}
 
