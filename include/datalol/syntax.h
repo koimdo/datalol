@@ -266,17 +266,16 @@ private:
   debug_info *dbg;
   std::vector<std::pair<Rule::elem_meta, Rule::uelem>> elems;
   std::vector<Rule> rules;
+  std::bitset<MAX_ELEMS> recursive;
 
   // TODO: add typeid for verification on vars, db
   std::vector<Var_> vars;
   std::vector<flat::pool_ptr<Collection_base>> db;
-  std::bitset<MAX_ELEMS> recursive;
 
   Rule::elem_meta& get_meta(unsigned i);
   Rule::uelem get_elem(unsigned i);
 
   void run_rule(Rule& r, size_t current_delta);
-  void print(std::ostream& os) const;
 
   flat::autorelease pool;
   friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
@@ -292,12 +291,14 @@ private:
 
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
+  void explain(const std::string& coll, const void *target);
 public:
   friend class Builder;
   Query();
   Query(Query&&);
   static void print_vars(std::ostream& os, const Rule::with_vars& vs);
   void run();
+  void print(std::ostream& os) const;
 };
 
 class Builder {

@@ -148,6 +148,19 @@ namespace detail {
   BASIC_TYPE(bool)
 #undef BASIC_TYPE
 
+  template<class T, typename = void>
+  struct is_printable : std::false_type {};
+  template<class T>
+  struct is_printable<T, decltype(void(std::declval<std::ostream>() << std::declval<T>()))> : std::true_type {};
+
+  template<class T>
+  typename std::enable_if<is_printable<T>::value, Json::Value>::type
+  json_of(const T& t) {
+    std::ostringstream s;
+    s << t;
+    return Json::Value(s.str());
+  }
+
   struct generic_json {
     Json::Value& vec;
     template<typename T>
@@ -353,10 +366,6 @@ struct table_ : Collection_base {
 
   size_t merge() override final
   {
-    // std::cerr << "Next delta " << name << " : " << next_delta.size() << "\n";
-    // std::cerr << "Merging " << name << " delta: ";
-    // //print_(std::cerr, delta);
-    // std::cerr <<"\n";
     if (all.empty()) {
       std::swap(all, delta);
     } else if (!delta.empty()) {
