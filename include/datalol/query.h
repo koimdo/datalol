@@ -291,16 +291,17 @@ external_<Coll> external(Coll&& coll, const char *name)
   return external_<Coll>(std::forward<Coll>(coll), ident::make<Coll>(name));
 }
 
-template<typename... Args>
-struct table : public Collection_base {
+template<typename...>
+struct table;
+
+template<typename T>
+struct table<T> : public Collection_base {
   table(const char *name)
     : Collection_base(ident::make<table>(name))
   {}
 
-  static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
-  using value_type = std::tuple<Args...>;
-  static constexpr int arity = sizeof...(Args);
-
+  static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
+  using value_type = T;
 
   flat::set<value_type> all;
   flat::set<value_type> delta, next_delta;
@@ -348,6 +349,7 @@ struct table : public Collection_base {
     os <<"\n}";
   }
 
+  template<typename... Args>
   void insert(Args&&... args) {
     value_type it(std::forward<Args>(args)...);
     this->all.insert(it);
@@ -412,4 +414,12 @@ struct table : public Collection_base {
   auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
     return susp<decltype(build_selector(args...))>{*this, build_selector(std::forward<SelectArgs>(args)...)};
   }
+};
+
+template<typename T0, typename T1, typename... Rest>
+struct table<T0, T1, Rest...> : public table<std::tuple<T0, T1, Rest...>> {
+  using table<std::tuple<T0, T1, Rest...>>::table;
+  static_assert(!std::is_base_of<Var_, T0>::value, "Cannot have var type!");
+  static_assert(!std::is_base_of<Var_, T1>::value, "Cannot have var type!");
+  static_assert(!detail::any<std::is_base_of<Var_, Rest>::value...>::value, "Cannot have var type");
 };
