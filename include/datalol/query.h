@@ -186,6 +186,10 @@ struct Matcher_base : public Rule::Body {
   Origin& origin;
   std::vector<Var_> undo_vars;  // FIXME: use inline buffer, size up to that of `Sel`
 
+  using value_type = typename Origin::value_type;
+  static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
+  static_assert(detail::check_query_t<Sel, value_type, 0, std::tuple_size<Sel>::value>::value, "Type mismatch");
+
   Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(run_full)
     , selector(std::forward<Sel>(sel))
@@ -197,6 +201,11 @@ struct Matcher_base : public Rule::Body {
   {
     for (auto v : undo_vars)
       v.zap();
+  }
+
+  Rule::vars_t get_vars() const
+  {
+    return detail::mark_vars(selector);
   }
 
   void print(std::ostream& os) const override final
@@ -214,25 +223,6 @@ struct Matcher_base : public Rule::Body {
       }
       self.undo();
     }
-  }
-};
-
-template<typename Sel, typename Origin>
-struct Matcher_susp_base {
-  using value_type = typename Origin::value_type;
-  static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
-  static_assert(detail::check_query_t<Sel, value_type, 0, std::tuple_size<Sel>::value>::value, "Type mismatch");
-
-  Sel selector;
-  Origin& origin;
-  Matcher_susp_base(Origin& origin, Sel&& sel)
-    : selector(std::move(sel))
-    , origin(origin)
-  {}
-
-  Rule::vars_t get_vars() const
-  {
-    return detail::mark_vars(selector);
   }
 };
 
@@ -260,12 +250,9 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
 }
 
 template<typename Coll>
-class external_impl : public Collection_base {
-  const Coll coll;
+class external_ : public Collection_base {
+  Coll coll;
 public:
-  template<typename... Args>
-  static external_impl& make(Args&&... args) { return Builder::current->make_rel<external_impl>(std::forward<Args>(args)...); }
-
   using value_type = typename flat::remove_cvref<Coll>::type::value_type;
 
   Json::Value to_json() const override final
@@ -280,75 +267,35 @@ public:
     os << id.get_name() << " = external<" << id.type_name() << ">, size=" << coll.size();
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); }
-  external_impl(const ident& id, const Coll& coll_)
+  external_(const Coll& coll_, const ident& id)
     : Collection_base(id)
     , coll(coll_) {}
 
-  template<typename Sel>
-  struct susp : public Matcher_susp_base<Sel, external_impl>, public Rule::susp_Body {
-    using super_t = Matcher_susp_base<Sel, external_impl>;
-    using super_t::Matcher_susp_base;
-    struct Body : Matcher_base<Body, Sel, external_impl> {
-      using Matcher_base<Body, Sel, external_impl>::Matcher_base;
+  template<typename... SelectArgs>
+  Rule::with_meta<Rule::Body> operator()(SelectArgs&&... args) {
+    using selector_t = decltype(build_selector(std::forward<SelectArgs>(args)...));
+    struct Body : Matcher_base<Body, selector_t, external_> {
+      using Matcher_base<Body, selector_t, external_>::Matcher_base;
       const Coll& get_coll() const noexcept { return this->origin.coll; }
     };
 
-    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
-    {
-      Rule::elem_meta meta = { Rule::with_vars(super_t::get_vars(), nullptr), &this->origin };
-      auto p = flat::allocate<Body>(std::move(super_t::selector), super_t::origin);
-      return std::make_pair(meta, p);
-    }
-  };
-};
-
-template<typename Coll>
-class external_;
-
-template<typename Coll>
-external_<const Coll&> external_ref(Coll&& coll, const char *name = nullptr);
-
-template<typename Coll>
-external_<Coll> external_copy(Coll&& coll, const char *name = nullptr);
-
-template<typename Coll>
-class external_ {
-  friend external_<const Coll&> external_ref<Coll>(Coll&& coll, const char *name);
-  friend external_<Coll> external_copy<Coll>(Coll&& coll, const char *name);
-
-  using Impl = external_impl<Coll>;
-  Impl& impl;
-
-  external_(Impl& impl)
-    : impl(impl)
-  {}
-
-public:
-  template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
-    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
+    auto p = Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
+    Rule::elem_meta meta = { Rule::with_vars(p->get_vars(), nullptr), this };
+    return std::make_pair(meta, p);
   }
 };
 
 template<typename Coll>
-external_<const Coll&> external_ref(Coll&& coll, const char *name)
+external_<Coll> external(Coll&& coll, const char *name)
 {
-  static_assert(std::is_lvalue_reference<Coll>::value, "Not a reference");
-  return external_<const Coll&>::Impl::make(name, coll);
-}
-
-template<typename Coll>
-external_<Coll> external_copy(Coll&& coll, const char *name)
-{
-  return external_<Coll>::Impl::make(name, coll);
+  return external_<Coll>(std::forward<Coll>(coll), ident::make<Coll>(name));
 }
 
 template<typename... Args>
-struct table_ : Collection_base {
-  using Collection_base::Collection_base;
-
-  template<typename... MArgs>
-  static table_& make(MArgs&&... args) { return Builder::current->make_rel<table_>(std::forward<MArgs>(args)...); }
+struct table : public Collection_base {
+  table(const char *name)
+    : Collection_base(ident::make<table>(name))
+  {}
 
   static_assert(!detail::any<std::is_base_of<Var_, Args>::value...>::value, "Cannot have var type");
   using value_type = std::tuple<Args...>;
@@ -406,15 +353,17 @@ struct table_ : Collection_base {
     this->all.insert(it);
   }
 
+  // This class is required, since when we create T(v1, v2, ...), we don't know wheather
+  // its in head or body position
   template<typename Sel>
-  struct susp : public Matcher_susp_base<Sel, table_>, public Rule::susp_Head, public Rule::susp_Body {
-    using super_t = Matcher_susp_base<Sel, table_>;
-    using super_t::Matcher_susp_base;
+  struct susp {
+    table& rel;
+    Sel selector;
 
     struct Head : Rule::Head {
       Sel selector;
-      table_& rel;
-      Head(Sel&& selector, table_& rel)
+      table& rel;
+      Head(Sel&& selector, table& rel)
         : Rule::Head(eval)
         , selector(std::move(selector))
         , rel(rel)
@@ -431,41 +380,36 @@ struct table_ : Collection_base {
       }
     };
 
-    struct Body : Matcher_base<Body, Sel, table_> {
-      using Matcher_base<Body, Sel, table_>::Matcher_base;
+    struct Body : Matcher_base<Body, Sel, table> {
+      using Matcher_base<Body, Sel, table>::Matcher_base;
       const flat::set<value_type>& get_coll() noexcept
       {
         return this->rule().use_delta() ? this->origin.delta : this->origin.all;
       }
     };
 
-    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+    Rule::vars_t get_vars() const
     {
-      Rule::elem_meta meta = { Rule::with_vars(super_t::get_vars(), nullptr), &this->origin };
-      auto p = flat::allocate<Body>(std::move(super_t::selector), super_t::origin);
+      return detail::mark_vars(selector);
+    }
+
+    operator Rule::with_meta<Rule::Body>()
+    {
+      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), &rel };
+      auto p = Query::allocate<Body>(std::move(selector), rel);
       return std::make_pair(meta, p);
     }
 
-    std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
+    operator Rule::with_meta<Rule::Head>()
     {
-      Rule::elem_meta meta = { Rule::with_vars(nullptr, super_t::get_vars()), &this->origin };
-      auto p = flat::allocate<Head>(std::move(super_t::selector), super_t::origin);
+      Rule::elem_meta meta = { Rule::with_vars(nullptr, get_vars()), &rel };
+      auto p = Query::allocate<Head>(std::move(selector), rel);
       return std::make_pair(meta, p);
     }
   };
-};
-
-template<typename... Args>
-class table {
-  using Impl = table_<Args...>;
-  Impl& impl;
-public:
-  table(const char *name = nullptr)
-    : impl(Impl::make(name))
-  {}
 
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> typename Impl::template susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
-    return typename Impl::template susp<decltype(build_selector(args...))>(impl, build_selector(std::forward<SelectArgs>(args)...));
+  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
+    return susp<decltype(build_selector(args...))>{*this, build_selector(std::forward<SelectArgs>(args)...)};
   }
 };

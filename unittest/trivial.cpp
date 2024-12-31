@@ -31,18 +31,33 @@ TEST(Trivial, test0) {
 
   std::vector<std::tuple<int, int>> results;
 
-  Query qo;
-  DATALOL_Q (qo) {
-    // TODO: update external collections on Query::
-    auto As = external_ref(ASs);
-    auto FAs = external_copy(ASs.filter([](const A&) { return true; }));
+  DATALOL (qo) {
+    auto As = external(ASs, "ref");
+    auto FAs = external(ASs.filter([](const A&) { return true; }), "value");
+
+    std::cout << "As: " << As << "\n";
+    std::cout << "FAs: " << FAs << "\n";
     Var<A> a("a");
     Var<int> i("i"), k("k");
     Var<int> param;
-    // FIXME: remove the `,true` part once we get the proper typing suppoer for head-only thunks
     THUNK((results.emplace_back(i, k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
   }
   //std::cout << qo.to_json();
-  qo.run();
   ASSERT_EQ(results.size(), 4);
+}
+
+TEST(Trivial, reachable) {
+  std::set<std::tuple<int, int>> edges;
+  edges.emplace(1, 2);
+  edges.emplace(2, 3);
+  edges.emplace(3, 3);
+  edges.emplace(3, 4);
+  DATALOL(reachability) {
+    auto E = external(edges, "edges");
+    table<int, int> Reachable("Reachable");
+    Var<int> u("u"), v("v"), w("w");
+    Reachable(u, v) << E(u, v);
+    Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
+    THUNK(std::cout << *u << " reaches " << *v << "\n") << Reachable(u, v);
+  }
 }

@@ -94,7 +94,6 @@ void Query::explain(const std::string& coll, const void *target)
 
 void Query::run()
 {
-  auto guard = with_query();
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {
     DEBUG_PROBE(BREAK_FIXPOINT);

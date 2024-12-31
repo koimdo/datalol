@@ -11,22 +11,22 @@
 #include <flat/set>
 #include <flat/map>
 #include "debug.h"
+#include <json/json.h>
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
-  virtual Json::Value to_json() const { return false; };
+  virtual Json::Value to_json() const; // Return string representation
+  friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
 struct ident {
   const char *name;             // May be null
   const char *type;             // dumb raw form of some __PRETTY_F
-  int id;
 
   template<class T>
-  static ident make(int id, const char *name = nullptr)
+  static ident make(const char *name = nullptr)
   {
     ident res;
-    res.id = id;
     res.name = name;
     res.type = __PRETTY_FUNCTION__;
     return res;
@@ -39,14 +39,15 @@ std::ostream& operator<<(std::ostream& os, const ident& id);
 class Collection_base : public IPrint {
 protected:
   ident id;
+  Collection_base(Collection_base&&) = default;
 public:
   Collection_base(const Collection_base&) = delete;
-  Collection_base(const ident& id)
+  explicit Collection_base(const ident& id)
     : id(id)
   {}
   std::string get_name() const noexcept { return id.get_name(); }
   virtual size_t merge() = 0;
-  virtual Json::Value get_contents() const = 0;
+  virtual Json::Value get_contents() const = 0; // FIXME: just use IPrint::to_json()?
 };
 
 class Var_;
@@ -116,38 +117,30 @@ public:
   using uhead = flat::pool_ptr<Head>;
   using ubody = flat::pool_ptr<Body>;
 
-  struct susp_Body {
-    virtual std::pair<elem_meta, ubody> apply_Body() = 0;
-  };
-
-  struct susp_Head {
-    virtual std::pair<elem_meta, uhead> apply_Head() = 0;
-  };
+  template<class T>
+  using with_meta = std::pair<elem_meta, flat::pool_ptr<T>>;
 
   class cursor {
-    friend cursor operator<<(susp_Head&& h, susp_Body&& b);
-    friend cursor&& operator&(cursor&& r, susp_Body&& b);
-    cursor(susp_Head&& h, susp_Body&& b);
-    void append(susp_Body&& b);
+    friend cursor operator<<(with_meta<Head>&& h, with_meta<Body>&& b);
+    cursor(with_meta<Head>&& h, with_meta<Body>&& b);
+    void append(with_meta<Body>&& b);
 
     Rule *r;
   public:
-
+    cursor& operator&(with_meta<Body>&& b);
     ~cursor();
   };
 
   bool use_delta() const noexcept { return seminaive_current == idx; }
 private:
   friend class Query;
-  friend class Builder;
   friend class Stubs;
   unsigned head = 0, last = 0;
-  size_t seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
-  size_t idx;
+  unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
+  unsigned idx;
 };
 
-Rule::cursor operator<<(Rule::susp_Head&& h, Rule::susp_Body&& b);
-Rule::cursor&& operator&(Rule::cursor&& r, Rule::susp_Body&& b);
+Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b);
 
 class cow_buf {
   const void *p = nullptr;
@@ -185,19 +178,13 @@ protected:
   struct Impl {
     Impl();
     ident id;
+    int nvar;
     mutable cow_buf p;
   };
 
   static_assert(std::is_standard_layout<Impl>::value, "Must be standard layout!");
 
-  template<class T>
-  struct with_buf {
-    Impl impl;
-    alignas(T) unsigned char buf[sizeof(T)];
-  };
-
   Impl *impl;
-  friend class Builder;
 
   friend
   std::ostream& operator<<(std::ostream& os, const Impl&);
@@ -212,7 +199,7 @@ public:
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
   void zap() const { impl->p.clear(); }
-  int get_id() const noexcept { return impl->id.id; }
+  int get_id() const noexcept { return impl->nvar; }
 };
 
 template<class T>
@@ -221,6 +208,10 @@ public:
   Var(const char *name = nullptr);
   Var(const Var& v): Var_(v) { register_var(this); }
   Var(Var&&) = default;
+
+  struct Impl : public Var_::Impl {
+    alignas(T) unsigned char buf[sizeof(T)];
+  };
 
   bool unify(const T& t) const
   {
@@ -234,7 +225,7 @@ public:
   {
     if (impl->p)
       return *get() == t;
-    impl->p.assign(static_cast<void*>(((with_buf<T>*)impl)->buf), std::move(t));
+    impl->p.assign(static_cast<Impl*>(impl)->buf, std::move(t));
     return true;
   }
 
@@ -264,7 +255,7 @@ private:
   static Query *current;
 
   debug_info *dbg;
-  std::vector<std::pair<Rule::elem_meta, Rule::uelem>> elems;
+  std::vector<Rule::with_meta<Rule::Elem>> elems;
   std::vector<Rule> rules;
   std::bitset<MAX_ELEMS> recursive;
 
@@ -278,12 +269,12 @@ private:
   void run_rule(Rule& r, size_t current_delta);
 
   flat::autorelease pool;
-  friend Rule& operator<<(Rule::uhead head, Rule::ubody b);
+  flat::guard current_query;
 
   friend class Stubs;
-
-  using guard_t = std::pair<flat::guard, flat::autorelease::scoped>;
-  guard_t with_query();
+  friend class Rule::cursor;
+  template<class T>
+  friend class Var;
 
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
@@ -292,34 +283,21 @@ private:
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
   void configure();
   void explain(const std::string& coll, const void *target);
-public:
-  friend class Builder;
-  Query();
-  Query(Query&&);
-  static void print_vars(std::ostream& os, const Rule::with_vars& vs);
+
+  Query(const Query&) = delete;
+  Query(Query&&) = delete;
+  void print_vars(std::ostream& os, const Rule::with_vars& vs) const;
   void run();
   void print(std::ostream& os) const;
-};
 
-class Builder {
-  Query* q;
-  Query::guard_t current_query;
-  flat::guard current_builder;
-  struct iter {
+  class iter {
     Query* q;
+  public:
     iter(Query *q): q(q) {}
     bool operator!=(const iter& o) const { return q != o.q; }
     std::false_type operator*() const { return std::false_type{}; }
     void operator++();
   };
-
-  int nvars = 0, nrels = 0;
-public:
-  Builder(Query* q, debug_info *dbg, const char *name = nullptr);
-  iter begin() { return iter{q}; }
-  iter end() const { return iter{nullptr}; }
-
-  static Builder *current;
 
   void add_elem(const Rule::elem_meta& meta, const Rule::uelem& e);
   Rule *start_rule();
@@ -328,31 +306,26 @@ public:
   template<class T>
   Var_ mkvar(const char *name)
   {
-    if (nvars < q->vars.size())
-      return q->vars[nvars++];  // FIXME: check type!
-    auto buf = flat::allocate<Var_::with_buf<T>>();
-    Var_::Impl *impl = &(buf->impl);
-    impl->id = ident::make<T>(nvars++, name);
-    q->vars.push_back(Var_(impl));
+    auto buf = pool.allocate<typename Var<T>::Impl>();
+    Var_::Impl *impl = buf.get(flat::unsafe_extract_pointer{});
+    impl->id = ident::make<T>(name);
+    impl->nvar = vars.size();
+    vars.push_back(Var_(impl));
     return impl;
   }
+public:
+  template<typename T, typename... Args>
+  static
+  flat::pool_ptr<T> allocate(Args&&... args) { return current->pool.allocate<T>(std::forward<Args>(args)...); }
 
-  template<class T, typename... Args>
-  T& make_rel(const char *name, Args&&... args)
-  {
-    std::cerr << "Collection_base::make<" << ident::make<T>(nrels, name).type_name() << ">(" << name << "): " << sizeof(T) << "\n";
-    if (nrels < q->db.size())
-      return static_cast<T&>(*q->db[nrels++]);
-    auto res = flat::allocate<T>(ident::make<T>(nrels++, name), std::forward<Args>(args)...);
-    q->db.push_back(res);
-
-    return *res;
-  }
+  Query(debug_info *dbg, const char *name);
+  iter begin() { return iter{this}; }
+  iter end() const { return iter{nullptr}; }
 };
 
 template<class T>
 Var<T>::Var(const char *name)
-  : Var_(Builder::current->mkvar<T>(name))
+  : Var_(Query::current->mkvar<T>(name))
 {}
 
 class thunk_base {
@@ -365,23 +338,6 @@ public:
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
 };
 
-// TODO: perhaps just wrap std::function?
-template<typename Res>
-class thunk : public thunk_base {
-  using fun_t = std::function<Res()>;
-  fun_t fun;
-
-public:
-  Res apply() const { return fun(); }
-
-  template<class Fun>
-  thunk(const char *desc, const Rule::vars_t vars, Fun&& fun)
-    : thunk_base(desc, vars)
-    , fun(std::forward<Fun>(fun))
-  {
-  }
-};
-
 namespace detail {
   template<class T, typename = void>
   struct is_contextual_bool : std::false_type {};
@@ -389,15 +345,15 @@ namespace detail {
   struct is_contextual_bool<T, decltype(void(std::declval<T>() ? true : false))> : std::true_type {};
 }
 
-template<typename> class binder_susp;
+// TODO: perhaps just wrap std::function?
 template<typename Res>
-class thunk_susp : public Rule::susp_Head {
-  using thunk_t = thunk<Res>;
-  thunk_t fun;
+class thunk : public thunk_base {
+  using fun_t = std::function<Res()>;
+  fun_t fun;
 
   struct head : Rule::Head {
-    thunk_t fun;
-    head(thunk_t&& th)
+    thunk fun;
+    head(thunk&& th)
       : Rule::Head(eval_head)
       , fun(std::move(th))
     {}
@@ -406,8 +362,8 @@ class thunk_susp : public Rule::susp_Head {
   };
 
   struct guard : Rule::Body {
-    thunk_t fun;
-    guard(thunk_t&& th)
+    thunk fun;
+    guard(thunk&& th)
       : Rule::Body(eval_body)
       , fun(std::move(th))
     {}
@@ -419,64 +375,18 @@ class thunk_susp : public Rule::susp_Head {
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
-  static
-  Rule::elem_meta meta(const Rule::vars_t& vars) noexcept { return { Rule::with_vars(nullptr, vars), nullptr }; }
-
-  std::pair<Rule::elem_meta, Rule::uhead> apply_Head() override final
-  {
-    return std::make_pair(meta(fun.captured()), flat::allocate<head>(std::move(fun)));
-  }
-
-  struct apply_body_impl : public Rule::susp_Body {
-    thunk_t fun;
-    apply_body_impl(thunk_t&& fun_)
-      : fun(std::move(fun_))
-    {}
-    std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
-    {
-      return std::make_pair(meta(fun.captured()), flat::allocate<guard>(std::move(fun)));
-    }
-  };
-
-  friend class binder_susp<Res>;
-public:
-  operator apply_body_impl()
-  {
-    static_assert(detail::is_contextual_bool<Res>::value,
-                  "not contextually convertible to bool!");
-    return apply_body_impl(std::move(fun));
-  }
-
-  template<class F>
-  thunk_susp(const char *desc, std::pair<F, Rule::vars_t>&& tv)
-    : fun(desc, tv.second, std::move(tv.first))
-  {}
-};
-
-template<typename T>
-class binder_susp : public Rule::susp_Body {
-public:
-  using thunk_t = thunk<T>;
-  using bound_t = Var<T>;
-  binder_susp(thunk_susp<T>&& ts, bound_t& bound)
-    : fun(std::move(ts.fun))
-    , bound(bound) {}
-
-private:
-  thunk_t fun;
-  bound_t& bound;
-
-  struct Binder : Rule::Body {
-    thunk_t fun;
+  struct binder : Rule::Body {
+    thunk fun;
+    using bound_t = Var<Res>;
     bound_t var;
     bool bound = false;
-    Binder(thunk_t&& fun, bound_t& var)
+    binder(thunk&& fun, bound_t& var)
       : Rule::Body(eval)
       , fun(std::move(fun))
       , var(std::move(var)) {}
     static void eval(Rule::Elem& self_)
     {
-      Binder& self = static_cast<Binder&>(self_);
+      binder& self = static_cast<binder&>(self_);
       if (self.var.unify(self.fun.apply()))
         self.next();
       if (self.bound)
@@ -493,41 +403,59 @@ private:
       bound_t::do_print(os, var) << " == " << fun;
     }
   };
-  std::pair<Rule::elem_meta, Rule::ubody> apply_Body() override final
+
+  static
+  Rule::elem_meta meta(const Rule::vars_t& vars) noexcept { return { Rule::with_vars(nullptr, vars), nullptr }; }
+
+  template<class Fun>
+  thunk(const char *desc, const Rule::vars_t& vars, Fun&& fun)
+    : thunk_base(desc, vars)
+    , fun(std::forward<Fun>(fun))
   {
-    Rule::vars_t positive, negative = fun.captured();
-    positive.set(bound.get_id());
+  }
+
+public:
+  Res apply() const { return fun(); }
+
+  template<class Fun>
+  thunk(const char *desc, std::pair<Fun, Rule::vars_t>&& fvars)
+    : thunk_base(desc, fvars.second)
+    , fun(std::forward<Fun>(fvars.first))
+  {
+  }
+
+  operator Rule::with_meta<Rule::Head>()
+  {
+    return std::make_pair(meta(captured()), Query::allocate<head>(std::move(*this)));
+  }
+
+  operator Rule::with_meta<Rule::Body>()
+  {
+    static_assert(detail::is_contextual_bool<Res>::value,
+                  "not contextually convertible to bool!");
+    return std::make_pair(meta(captured()), Query::allocate<head>(std::move(*this)));
+  }
+
+  Rule::with_meta<Rule::Body> operator==(Var<Res>& var)
+  {
+    Rule::vars_t positive, negative = captured();
+    positive.set(var.get_id());
     positive &= ~negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
     Rule::elem_meta meta = { Rule::with_vars(positive, negative), nullptr };
-    auto p = flat::allocate<Binder>(std::move(fun), bound);
+    auto p = Query::allocate<binder>(std::move(*this), var);
     return std::make_pair(meta, p);
   }
 };
 
-template<typename Fun>
-binder_susp<Fun> operator==(thunk_susp<Fun>&& getter, typename binder_susp<Fun>::bound_t& v)
+template<typename T>
+Rule::with_meta<Rule::Body> operator==(Var<T>& v, thunk<T>&& getter)
 {
-  return binder_susp<Fun>(std::move(getter), v);
+  return getter == v;
 }
-
-template<typename Fun>
-binder_susp<Fun> operator==(typename binder_susp<Fun>::bound_t& v, thunk_susp<Fun>&& getter)
-{
-  return binder_susp<Fun>(std::move(getter), v);
-}
-
-#define CONCAT_(a,b) a##b
-#define CONCAT(a,b) CONCAT_(a,b)
-#define UNIQ_(prefix) CONCAT(prefix,__LINE__)
 
 #define THUNK(expr,...)                                                 \
-  thunk_susp<decltype(expr)>(#expr, Rule::with_vars::capture([&]() {    \
+  thunk<decltype(expr)>(#expr, Rule::with_vars::capture([&]() {    \
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   }))
 
-#define DATALOL_Q(query, ...) for (auto UNIQ_(dummy) : ::Builder(&query, DEBUG_INFO(), ##__VA_ARGS__))
-#define DATALOL(...) ({                                                 \
-      Query UNIQ_(query);                                               \
-      DATALOL_Q(UNIQ_(query)) { __VA_ARGS__ }                           \
-      std::move(UNIQ_(query));                                          \
-    })
+#define DATALOL(query, ...) for (auto query : ::Query(DEBUG_INFO(), #query, ##__VA_ARGS__))

@@ -6,8 +6,13 @@
 #include <datalol/debug.h>
 
 Query *Query::current = nullptr;
-Builder *Builder::current = nullptr;
 static Rule::vars_t *current_vars = nullptr;
+
+Json::Value IPrint::to_json() const {
+  std::ostringstream os;
+  print(os);
+  return Json::Value(os.str());
+}
 
 std::string ident::type_name() const noexcept
 {
@@ -23,46 +28,34 @@ std::string ident::get_name() const
   return format{} << "<" << id << ">";
 }
 
-Rule::cursor::cursor(susp_Head&& h, susp_Body&& b)
+Rule::cursor::cursor(with_meta<Head>&& hh, with_meta<Body>&& bb)
 {
-  auto hh = h.apply_Head();
-  auto bb = b.apply_Body();
-  auto q = Builder::current;
+  auto q = Query::current;
 
   r = q->start_rule();
   q->add_elem(hh.first, hh.second);
-  append(std::move(b));
+  append(std::move(bb));
 }
 
-void Rule::cursor::append(susp_Body&& b)
+void Rule::cursor::append(with_meta<Body>&& bb)
 {
-  auto bb = b.apply_Body();
-  Builder::current->add_elem(bb.first, bb.second);
+  Query::current->add_elem(bb.first, bb.second);
 }
 
 Rule::cursor::~cursor()
 {
-  Builder::current->end_rule(r);
+  Query::current->end_rule(r);
 }
 
-Rule::cursor operator<<(Rule::susp_Head&& h, Rule::susp_Body&& b)
+Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b)
 {
   return Rule::cursor(std::move(h), std::move(b));
 }
 
-Rule::cursor&& operator&(Rule::cursor&& r, Rule::susp_Body&& b)
+Rule::cursor& Rule::cursor::operator&(Rule::with_meta<Body>&& b)
 {
-  r.append(std::move(b));
-  return std::move(r);
-}
-
-static std::ostream& print_with_vars(std::ostream& os, const Rule::with_vars& vars, const Rule::Elem& e)
-{
-  os << "[";
-  Query::print_vars(os, vars);
-  os << "]";
-  e.print(os);
-  return os;
+  append(std::move(b));
+  return *this;
 }
 
 std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
@@ -71,61 +64,59 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
   return os;
 }
 
-void Builder::add_elem(const Rule::elem_meta& meta, const Rule::uelem& e)
+void Query::add_elem(const Rule::elem_meta& meta, const Rule::uelem& e)
 {
-  q->elems.emplace_back(meta, e);
+  elems.push_back({meta, e});
 }
 
-Rule *Builder::start_rule()
+Rule *Query::start_rule()
 {
   Rule r;
-  r.head = q->elems.size();
-  q->rules.push_back(r);
-  return &q->rules.back();
+  r.head = elems.size();
+  rules.push_back(r);
+  return &rules.back();
 }
 
-void Builder::end_rule(Rule *r)
+void Query::end_rule(Rule *r)
 {
-  assert(&q->rules.back() == r && !r->last);
-  q->rules.back().last = q->elems.size();
+  assert(&rules.back() == r && !r->last);
+  r->last = elems.size();
 }
 
-Builder::Builder(Query *q, debug_info *dbg, const char *)
-  : q(q)
-  , current_query(q->with_query())
+Query::Query(debug_info *dbg, const char *name)
+  : pool(name)
+  , dbg(dbg)
 {
-  q->dbg = dbg;
-  current_builder.set(&current, this);
+  current_query.set(&current, this);
 }
 
-void Builder::iter::operator++()
+void Query::iter::operator++()
 {
   q->configure();
+  q->run();
   q = nullptr;
 }
 
-Query::Query()
-  : pool("Query")
-  , dbg(nullptr)
-{}
-
-Query::Query(Query&&) = default;
-
 void Query::print(std::ostream& os) const
 {
-  auto guard = const_cast<Query*>(this)->with_query();
+  auto print_with_vars = [this, &os](const Rule::with_vars& vars, const Rule::Elem& e) {
+    os << "[";
+    print_vars(os, vars);
+    os << "]";
+    e.print(os);
+  };
   os << "Query: {";
   size_t i=0;
   for (auto const& r : rules) {
     if (i) os << "\n";
     auto const& h = elems[r.head];
-    print_with_vars(os, h.first.vars, *h.second);
+    print_with_vars(h.first.vars, *h.second);
     os << " << ";
     int count = 0;
     for (int j = r.head+1; j < r.last; j++) {
       os << (count++ ? " & " : "") << (recursive.test(j) ? "^" : "");
       auto const& b = elems[j];
-      print_with_vars(os, b.first.vars, *b.second);
+      print_with_vars(b.first.vars, *b.second);
     }
     os << ";";
     i++;
@@ -133,11 +124,11 @@ void Query::print(std::ostream& os) const
   os <<"}";
 }
 
-void Query::print_vars(std::ostream& os, const Rule::with_vars& vs)
+void Query::print_vars(std::ostream& os, const Rule::with_vars& vs) const
 {
   int i=0;
   int out = 0;
-  for (auto const& v : current->vars) {
+  for (auto const& v : vars) {
     bool is_pos = vs.positive.test(i);
     bool is_neg = vs.negative.test(i);
     i++;
@@ -170,7 +161,7 @@ flat::guard Rule::with_vars::capture_helper(Rule::vars_t *dst)
 void Var_::register_var(const Var_* v)
 {
   assert(current_vars);
-  current_vars->set(v->impl->id.id);
+  current_vars->set(v->impl->nvar);
 }
 
 Rule::with_vars::with_vars(const Rule::vars_t& pos, nullptr_t) noexcept
@@ -188,13 +179,6 @@ Rule::with_vars::with_vars(const Rule::vars_t& pos, const Rule::vars_t& neg) noe
 Rule::Elem::Elem(eval_t eval_)
   : eval_(eval_)
 {
-}
-
-std::pair<flat::guard, flat::autorelease::scoped> Query::with_query()
-{
-  flat::guard res;
-  res.set(&current, this);
-  return std::make_pair(std::move(res), flat::autorelease::scoped(pool));
 }
 
 thunk_base::thunk_base(const char *desc, const Rule::vars_t& vars)
