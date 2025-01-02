@@ -50,98 +50,6 @@ public:
   virtual Json::Value get_contents() const = 0; // FIXME: just use IPrint::to_json()?
 };
 
-class Var_;
-class Rule {
-public:
-  static constexpr size_t MAX_VARS = 64;
-  typedef std::bitset<MAX_VARS> vars_t;
-  struct with_vars {
-    with_vars(const vars_t& positive, nullptr_t) noexcept;
-    with_vars(nullptr_t, const vars_t& negative) noexcept;
-    with_vars(const vars_t& positive, const vars_t& negative) noexcept;
-    vars_t positive, negative;
-
-    template<typename Make>
-    static
-    auto capture(Make&& make) -> std::pair<decltype(make()), Rule::vars_t>
-    {
-      Rule::vars_t vars;
-      flat::guard vars_guard = capture_helper(&vars);
-      auto m = make();
-      return {std::move(m), std::move(vars)};
-    }
-  private:
-    static
-    flat::guard capture_helper(Rule::vars_t *dst);
-  };
-
-  class Elem : public IPrint {
-    typedef void (*eval_t)(Elem&);
-    friend class Query;
-    eval_t eval_ = nullptr;
-    Rule *rule_;
-  protected:
-    Elem(eval_t eval_);
-    void set_eval(eval_t eval_);
-    Elem(const Elem&) = delete;
-    Rule& rule() noexcept { return *rule_; }
-  public:
-    void eval() { (*eval_)(*this); }
-  };
-
-  class Body : public Elem {
-    using Elem::Elem;
-    Elem *next_ = nullptr;
-    friend class Query;
-  protected:
-    void next() {
-      ++rule().idx;
-      next_->eval();
-    }
-  public:
-    virtual void add_undo(Var_*) { assert(false && "Must implement add_undo() if it has positive vars"); }
-  };
-
-  class Head : public Elem {
-    using Elem::Elem;
-  };
-
-  struct elem_meta {
-    with_vars vars;
-    Collection_base *collection;
-    elem_meta(const elem_meta&) = default;
-  };
-
-
-  using uelem = flat::pool_ptr<Elem>;
-  using uhead = flat::pool_ptr<Head>;
-  using ubody = flat::pool_ptr<Body>;
-
-  template<class T>
-  using with_meta = std::pair<elem_meta, flat::pool_ptr<T>>;
-
-  class cursor {
-    friend cursor operator<<(with_meta<Head>&& h, with_meta<Body>&& b);
-    cursor(with_meta<Head>&& h, with_meta<Body>&& b);
-    void append(with_meta<Body>&& b);
-
-    Rule *r;
-  public:
-    cursor& operator&(with_meta<Body>&& b);
-    ~cursor();
-  };
-
-  bool use_delta() const noexcept { return seminaive_current == idx; }
-private:
-  friend class Query;
-  friend class Stubs;
-  unsigned head = 0, last = 0;
-  unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
-  unsigned idx;
-};
-
-Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b);
-
 class cow_buf {
   const void *p = nullptr;
   void (*destroy)(const void *) = nullptr; // Not NULL if both owning and non-trivial dtor
@@ -201,6 +109,96 @@ public:
   void zap() const { impl->p.clear(); }
   int get_id() const noexcept { return impl->nvar; }
 };
+
+class Rule {
+public:
+  static constexpr size_t MAX_VARS = 64;
+  typedef std::bitset<MAX_VARS> vars_t;
+  struct with_vars {
+    with_vars(const vars_t& positive, nullptr_t) noexcept;
+    with_vars(nullptr_t, const vars_t& negative) noexcept;
+    with_vars(const vars_t& positive, const vars_t& negative) noexcept;
+    vars_t positive, negative;
+
+    template<typename Make>
+    static
+    auto capture(Make&& make) -> std::pair<decltype(make()), Rule::vars_t>
+    {
+      Rule::vars_t vars;
+      flat::guard vars_guard = capture_helper(&vars);
+      auto m = make();
+      return {std::move(m), std::move(vars)};
+    }
+  private:
+    static
+    flat::guard capture_helper(Rule::vars_t *dst);
+  };
+
+  class Elem : public IPrint {
+    typedef void (*eval_t)(Elem&);
+    friend class Query;
+    eval_t eval_ = nullptr;
+    Rule *rule_;
+  protected:
+    Elem(eval_t eval_);
+    void set_eval(eval_t eval_);
+    Elem(const Elem&) = delete;
+    Rule& rule() noexcept { return *rule_; }
+  public:
+    void eval() { (*eval_)(*this); }
+  };
+
+  class Body : public Elem {
+    using Elem::Elem;
+    Elem *next_ = nullptr;
+    Var_ *undo_vars;
+    unsigned undo_count;
+    friend class Query;
+  protected:
+    void next(bool doit) {
+      if (doit) {
+        ++rule().idx;
+        next_->eval();
+      }
+      for (unsigned i=0; i<undo_count; ++i)
+        undo_vars[i].zap();
+    }
+  };
+
+  class Head : public Elem {
+    using Elem::Elem;
+  };
+
+  struct elem_meta {
+    with_vars vars;
+    Collection_base *collection;
+    elem_meta(const elem_meta&) = default;
+  };
+
+  template<class T>
+  using with_meta = std::pair<elem_meta, flat::pool_ptr<T>>;
+
+  class cursor {
+    friend cursor operator<<(with_meta<Head>&& h, with_meta<Body>&& b);
+    cursor(with_meta<Head>&& h, with_meta<Body>&& b);
+
+    Rule *r;
+  public:
+    cursor& operator&(with_meta<Body>&& b);
+    ~cursor();
+  };
+
+  bool use_delta() const noexcept { return seminaive_current == idx; }
+private:
+  friend class Query;
+  friend class Stubs;
+  unsigned head = 0, last = 0;
+  unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
+  unsigned idx;
+  std::vector<Var_> undo_stack;
+};
+
+Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b);
 
 template<class T>
 class Var : public Var_ {
@@ -264,7 +262,7 @@ private:
   std::vector<flat::pool_ptr<Collection_base>> db;
 
   Rule::elem_meta& get_meta(unsigned i);
-  Rule::uelem get_elem(unsigned i);
+  Rule::Elem& get_elem(unsigned i);
 
   void run_rule(Rule& r, size_t current_delta);
 
@@ -299,7 +297,7 @@ private:
     void operator++();
   };
 
-  void add_elem(const Rule::elem_meta& meta, const Rule::uelem& e);
+  void add_elem(const Rule::with_meta<Rule::Elem>& e);
   Rule *start_rule();
   void end_rule(Rule *r);
 
@@ -370,7 +368,7 @@ class thunk : public thunk_base {
     static void eval_body(Rule::Elem& self_)
     {
       guard& self = static_cast<guard&>(self_);
-      if (self.fun.apply()) self.next();
+      self.next(self.fun.apply() && true);
     }
     void print(std::ostream& os) const override final { os << fun;; }
   };
@@ -379,7 +377,6 @@ class thunk : public thunk_base {
     thunk fun;
     using bound_t = Var<Res>;
     bound_t var;
-    bool bound = false;
     binder(thunk&& fun, bound_t& var)
       : Rule::Body(eval)
       , fun(std::move(fun))
@@ -387,16 +384,7 @@ class thunk : public thunk_base {
     static void eval(Rule::Elem& self_)
     {
       binder& self = static_cast<binder&>(self_);
-      if (self.var.unify(self.fun.apply()))
-        self.next();
-      if (self.bound)
-        self.var.zap();
-    }
-    void add_undo(Var_ *v) override final
-    {
-      assert(!v || v->get_id() == var.get_id());
-      if (v)
-        bound = true;
+      self.next(self.var.unify(self.fun.apply()));
     }
     void print(std::ostream& os) const override final
     {

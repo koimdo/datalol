@@ -33,13 +33,8 @@ Rule::cursor::cursor(with_meta<Head>&& hh, with_meta<Body>&& bb)
   auto q = Query::current;
 
   r = q->start_rule();
-  q->add_elem(hh.first, hh.second);
-  append(std::move(bb));
-}
-
-void Rule::cursor::append(with_meta<Body>&& bb)
-{
-  Query::current->add_elem(bb.first, bb.second);
+  q->add_elem(hh);
+  q->add_elem(bb);
 }
 
 Rule::cursor::~cursor()
@@ -54,7 +49,7 @@ Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::B
 
 Rule::cursor& Rule::cursor::operator&(Rule::with_meta<Body>&& b)
 {
-  append(std::move(b));
+  Query::current->add_elem(b);
   return *this;
 }
 
@@ -64,9 +59,9 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
   return os;
 }
 
-void Query::add_elem(const Rule::elem_meta& meta, const Rule::uelem& e)
+void Query::add_elem(const Rule::with_meta<Rule::Elem>& me)
 {
-  elems.push_back({meta, e});
+  elems.push_back(me);
 }
 
 Rule *Query::start_rule()

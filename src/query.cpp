@@ -16,7 +16,7 @@ void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::with_vars&
 }
 
 Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i].first; }
-Rule::uelem Query::get_elem(unsigned i) { return elems[i].second; }
+Rule::Elem& Query::get_elem(unsigned i) { return *elems[i].second; }
 
 
 // FIXME: move to builder?
@@ -43,20 +43,22 @@ void Query::configure()
   // Step 3: set undo variables
   for (auto& r : rules) {
     Rule::vars_t bound;
+    std::vector<Var_>& stack = r.undo_stack;
+    stack.reserve(vars.size());
     for (size_t i=r.head+1; i<r.last; ++i) {
       auto vars = get_meta(i).vars;
       auto pos = vars.positive;
       verify_neg(bound, r, vars);
 
-      bool has_vars = pos.any();
       pos &= ~bound;
-      auto elem = get_elem(i).static_cast_<Rule::Body>();
-      for (auto& v : this->vars)
-        if (pos.test(v.get_id())) {
-          elem->add_undo(&v);
-        }
-      if (has_vars)
-        elem->add_undo(nullptr);
+      if (pos.any()) {
+        auto& elem = static_cast<Rule::Body&>(get_elem(i));
+        elem.undo_vars = stack.data() + stack.size();
+        for (auto v : this->vars)
+          if (pos.test(v.get_id()))
+            stack.push_back(v);
+        elem.undo_count = (stack.data() + stack.size()) - elem.undo_vars;
+      }
 
       bound |= pos;
     }
@@ -66,13 +68,13 @@ void Query::configure()
 
   // Final step: chain rule body (and head) for execution
   for (auto& r : rules) {
-    auto next = get_elem(r.head);
+    auto next = &get_elem(r.head);
     next->rule_ = &r;
     for (size_t i=r.last-1; i!=r.head; i--) {
-      auto e = get_elem(i).static_cast_<Rule::Body>();
-      e->next_ = next.get(flat::unsafe_extract_pointer{});
-      next = e;
-      e->rule_ = &r;
+      auto& e = static_cast<Rule::Body&>(get_elem(i));
+      e.next_ = next;
+      next = &e;
+      e.rule_ = &r;
     }
   }
   DEBUG_PROBE(BREAK_CONFIGURE);
@@ -83,7 +85,7 @@ void Query::run_rule(Rule& r, size_t current_delta)
   r.seminaive_current = current_delta;
   auto start = r.head+1;
   r.idx = start;
-  get_elem(start)->eval();
+  get_elem(start).eval();
 }
 
 

@@ -184,7 +184,6 @@ template<typename Derived, typename Sel, typename Origin>
 struct Matcher_base : public Rule::Body {
   Sel selector;
   Origin& origin;
-  std::vector<Var_> undo_vars;  // FIXME: use inline buffer, size up to that of `Sel`
 
   using value_type = typename Origin::value_type;
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
@@ -195,13 +194,6 @@ struct Matcher_base : public Rule::Body {
     , selector(std::forward<Sel>(sel))
     , origin(origin)
   {}
-
-  void add_undo(Var_* v) override final { if (v) undo_vars.push_back(std::move(*v)); }
-  void undo()
-  {
-    for (auto v : undo_vars)
-      v.zap();
-  }
 
   Rule::vars_t get_vars() const
   {
@@ -218,10 +210,7 @@ struct Matcher_base : public Rule::Body {
   {
     Derived& self = static_cast<Derived&>(self_);
     for (auto const& row : self.get_coll()) {
-      if (detail::unify<Sel, typename Origin::value_type>::run(self.selector, row)) {
-        self.next();
-      }
-      self.undo();
+      self.next(detail::unify<Sel, typename Origin::value_type>::run(self.selector, row));
     }
   }
 };
