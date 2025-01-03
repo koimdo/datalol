@@ -50,44 +50,19 @@ public:
   virtual Json::Value get_contents() const = 0; // FIXME: just use IPrint::to_json()?
 };
 
-class cow_buf {
-  const void *p = nullptr;
-  void (*destroy)(const void *) = nullptr; // Not NULL if both owning and non-trivial dtor
-
-public:
-  constexpr explicit operator bool() const noexcept { return p; }
-
-  ~cow_buf();
-  void clear();
-
-  template<class T>
-  void assign(const T& t)
-  {
-    clear();
-    p = &t;
-  }
-
-  template<class T>
-  void assign(void *buf, T&& t)
-  {
-    clear();
-    ::new (buf) T(std::forward<T>(t));
-    p = buf;
-
-    if (!std::is_trivially_destructible<T>::value)
-      destroy = [](const void *p) { static_cast<const T*>(p)->~T(); };
-  }
-
-  constexpr const void *get() const noexcept { return p; }
-};
-
 class Var_ {
+public:
+  static constexpr size_t MAX_VARS = 64;
+  typedef std::bitset<MAX_VARS> vars_t;
 protected:
   struct Impl {
     Impl();
+    ~Impl();
+    void clear();
+    const void *p = nullptr;
+    mutable void (*destroy)(const void *) = nullptr;
     ident id;
     int nvar;
-    mutable cow_buf p;
   };
 
   static_assert(std::is_standard_layout<Impl>::value, "Must be standard layout!");
@@ -98,6 +73,9 @@ protected:
   std::ostream& operator<<(std::ostream& os, const Impl&);
   Var_(Impl *impl): impl(impl) {}
 
+  friend class thunk_base;
+  static vars_t *current_vars;
+
   static
   void register_var(const Var_*);
 
@@ -106,34 +84,13 @@ public:
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
-  void zap() const { impl->p.clear(); }
+  void zap() const { impl->clear(); }
   int get_id() const noexcept { return impl->nvar; }
 };
 
 class Rule {
 public:
-  static constexpr size_t MAX_VARS = 64;
-  typedef std::bitset<MAX_VARS> vars_t;
-  struct with_vars {
-    with_vars(const vars_t& positive, nullptr_t) noexcept;
-    with_vars(nullptr_t, const vars_t& negative) noexcept;
-    with_vars(const vars_t& positive, const vars_t& negative) noexcept;
-    vars_t positive, negative;
-
-    template<typename Make>
-    static
-    auto capture(Make&& make) -> std::pair<decltype(make()), Rule::vars_t>
-    {
-      Rule::vars_t vars;
-      flat::guard vars_guard = capture_helper(&vars);
-      auto m = make();
-      return {std::move(m), std::move(vars)};
-    }
-  private:
-    static
-    flat::guard capture_helper(Rule::vars_t *dst);
-  };
-
+  using vars_t = Var_::vars_t;
   class Elem : public IPrint {
     typedef void (*eval_t)(Elem&);
     friend class Query;
@@ -170,7 +127,7 @@ public:
   };
 
   struct elem_meta {
-    with_vars vars;
+    vars_t positive, negative;
     Collection_base *collection;
     elem_meta(const elem_meta&) = default;
   };
@@ -215,7 +172,8 @@ public:
   {
     if (impl->p)
       return *get() == t;
-    impl->p.assign(t);
+    impl->clear();
+    impl->p = &t;
     return true;
   }
 
@@ -223,13 +181,17 @@ public:
   {
     if (impl->p)
       return *get() == t;
-    impl->p.assign(static_cast<Impl*>(impl)->buf, std::move(t));
+
+    impl->clear();
+    impl->p = ::new (static_cast<Impl*>(impl)->buf) T(std::forward<T>(t));
+    if (!std::is_trivially_destructible<T>::value)
+      impl->destroy = [](const void *p) { static_cast<const T*>(p)->~T(); };
     return true;
   }
 
   const T *get() const noexcept
   {
-    const T *res = static_cast<const T*>(impl->p.get());
+    const T *res = static_cast<const T*>(impl->p);
     assert(res && "Unbound var dereferenced");
     return res;
   }
@@ -284,7 +246,7 @@ private:
 
   Query(const Query&) = delete;
   Query(Query&&) = delete;
-  void print_vars(std::ostream& os, const Rule::with_vars& vs) const;
+  void print_vars(std::ostream& os, const Rule::elem_meta& vs) const;
   void run();
   void print(std::ostream& os) const;
 
@@ -326,14 +288,25 @@ Var<T>::Var(const char *name)
   : Var_(Query::current->mkvar<T>(name))
 {}
 
+template<typename Res>
+class thunk;
+
 class thunk_base {
   Rule::vars_t vars;
   const char *desc;
 
-public:
-  thunk_base(const char *desc, const Rule::vars_t& vars);
-  const Rule::vars_t& captured() const noexcept;
+protected:
+  Rule::elem_meta get_meta() const noexcept
+  {
+    return { {}, vars, nullptr };
+  }
+  explicit thunk_base(const char *desc);
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
+
+public:
+  template<typename Make>
+  static
+  auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
 };
 
 namespace detail {
@@ -392,12 +365,10 @@ class thunk : public thunk_base {
     }
   };
 
-  static
-  Rule::elem_meta meta(const Rule::vars_t& vars) noexcept { return { Rule::with_vars(nullptr, vars), nullptr }; }
-
+  friend class thunk_base;
   template<class Fun>
-  thunk(const char *desc, const Rule::vars_t& vars, Fun&& fun)
-    : thunk_base(desc, vars)
+  thunk(const char *desc, Fun&& fun)
+    : thunk_base(desc)
     , fun(std::forward<Fun>(fun))
   {
   }
@@ -405,35 +376,35 @@ class thunk : public thunk_base {
 public:
   Res apply() const { return fun(); }
 
-  template<class Fun>
-  thunk(const char *desc, std::pair<Fun, Rule::vars_t>&& fvars)
-    : thunk_base(desc, fvars.second)
-    , fun(std::forward<Fun>(fvars.first))
-  {
-  }
-
   operator Rule::with_meta<Rule::Head>()
   {
-    return std::make_pair(meta(captured()), Query::allocate<head>(std::move(*this)));
+    return std::make_pair(get_meta(), Query::allocate<head>(std::move(*this)));
   }
 
   operator Rule::with_meta<Rule::Body>()
   {
     static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
-    return std::make_pair(meta(captured()), Query::allocate<head>(std::move(*this)));
+    return std::make_pair(get_meta(), Query::allocate<head>(std::move(*this)));
   }
 
   Rule::with_meta<Rule::Body> operator==(Var<Res>& var)
   {
-    Rule::vars_t positive, negative = captured();
-    positive.set(var.get_id());
-    positive &= ~negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
-    Rule::elem_meta meta = { Rule::with_vars(positive, negative), nullptr };
-    auto p = Query::allocate<binder>(std::move(*this), var);
-    return std::make_pair(meta, p);
+    auto meta = get_meta();
+    meta.positive.set(var.get_id());
+    meta.positive &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    return std::make_pair(std::move(meta), Query::allocate<binder>(std::move(*this), var));
   }
 };
+
+template<typename Make>
+auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()())>
+{
+  Rule::vars_t vars;
+  assert(!Var_::current_vars);        // No nested lambdas
+  Var_::current_vars = &vars;
+  return { desc, make() };
+}
 
 template<typename T>
 Rule::with_meta<Rule::Body> operator==(Var<T>& v, thunk<T>&& getter)
@@ -442,8 +413,8 @@ Rule::with_meta<Rule::Body> operator==(Var<T>& v, thunk<T>&& getter)
 }
 
 #define THUNK(expr,...)                                                 \
-  thunk<decltype(expr)>(#expr, Rule::with_vars::capture([&]() {    \
+  thunk_base::capture(#expr, [&]() {                                    \
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
-  }))
+  })
 
 #define DATALOL(query, ...) for (auto query : ::Query(DEBUG_INFO(), #query, ##__VA_ARGS__))

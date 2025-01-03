@@ -269,7 +269,7 @@ public:
     };
 
     auto p = Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
-    Rule::elem_meta meta = { Rule::with_vars(p->get_vars(), nullptr), this };
+    Rule::elem_meta meta = { p->get_vars(), {}, this };
     return std::make_pair(meta, p);
   }
 };
@@ -386,14 +386,14 @@ struct table<T> : public Collection_base {
 
     operator Rule::with_meta<Rule::Body>()
     {
-      Rule::elem_meta meta = { Rule::with_vars(get_vars(), nullptr), &rel };
+      Rule::elem_meta meta = { get_vars(), {}, &rel };
       auto p = Query::allocate<Body>(std::move(selector), rel);
       return std::make_pair(meta, p);
     }
 
     operator Rule::with_meta<Rule::Head>()
     {
-      Rule::elem_meta meta = { Rule::with_vars(nullptr, get_vars()), &rel };
+      Rule::elem_meta meta = { {}, get_vars(), &rel };
       auto p = Query::allocate<Head>(std::move(selector), rel);
       return std::make_pair(meta, p);
     }

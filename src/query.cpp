@@ -8,7 +8,7 @@ bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
 }
 
 static
-void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::with_vars& e)
+void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::elem_meta& e)
 {
   auto neg = e.negative;
   neg &= ~bound;
@@ -46,7 +46,7 @@ void Query::configure()
     std::vector<Var_>& stack = r.undo_stack;
     stack.reserve(vars.size());
     for (size_t i=r.head+1; i<r.last; ++i) {
-      auto vars = get_meta(i).vars;
+      auto vars = get_meta(i);
       auto pos = vars.positive;
       verify_neg(bound, r, vars);
 
@@ -63,7 +63,7 @@ void Query::configure()
       bound |= pos;
     }
 
-    verify_neg(bound, r, get_meta(r.head).vars);
+    verify_neg(bound, r, get_meta(r.head));
   }
 
   // Final step: chain rule body (and head) for execution

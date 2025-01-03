@@ -6,7 +6,7 @@
 #include <datalol/debug.h>
 
 Query *Query::current = nullptr;
-static Rule::vars_t *current_vars = nullptr;
+Var_::vars_t *Var_::current_vars = nullptr;
 
 Json::Value IPrint::to_json() const {
   std::ostringstream os;
@@ -25,7 +25,7 @@ std::string ident::get_name() const
 {
   if (name)
     return name;
-  return format{} << "<" << id << ">";
+  return std::string();
 }
 
 Rule::cursor::cursor(with_meta<Head>&& hh, with_meta<Body>&& bb)
@@ -88,13 +88,14 @@ Query::Query(debug_info *dbg, const char *name)
 void Query::iter::operator++()
 {
   q->configure();
+  q->print(std::cout);          // TODO: remove printf
   q->run();
   q = nullptr;
 }
 
 void Query::print(std::ostream& os) const
 {
-  auto print_with_vars = [this, &os](const Rule::with_vars& vars, const Rule::Elem& e) {
+  auto print_with_vars = [this, &os](const Rule::elem_meta& vars, const Rule::Elem& e) {
     os << "[";
     print_vars(os, vars);
     os << "]";
@@ -105,13 +106,13 @@ void Query::print(std::ostream& os) const
   for (auto const& r : rules) {
     if (i) os << "\n";
     auto const& h = elems[r.head];
-    print_with_vars(h.first.vars, *h.second);
+    print_with_vars(h.first, *h.second);
     os << " << ";
     int count = 0;
     for (int j = r.head+1; j < r.last; j++) {
       os << (count++ ? " & " : "") << (recursive.test(j) ? "^" : "");
       auto const& b = elems[j];
-      print_with_vars(b.first.vars, *b.second);
+      print_with_vars(b.first, *b.second);
     }
     os << ";";
     i++;
@@ -119,7 +120,7 @@ void Query::print(std::ostream& os) const
   os <<"}";
 }
 
-void Query::print_vars(std::ostream& os, const Rule::with_vars& vs) const
+void Query::print_vars(std::ostream& os, const Rule::elem_meta& vs) const
 {
   int i=0;
   int out = 0;
@@ -134,8 +135,8 @@ void Query::print_vars(std::ostream& os, const Rule::with_vars& vs) const
   }
 }
 
-cow_buf::~cow_buf() { clear(); }
-void cow_buf::clear()
+Var_::Impl::~Impl() { clear(); }
+void Var_::Impl::clear()
 {
   if (destroy)
     (destroy)(p);
@@ -146,41 +147,23 @@ void cow_buf::clear()
 
 Var_::Impl::Impl() = default;
 
-flat::guard Rule::with_vars::capture_helper(Rule::vars_t *dst)
-{
-  flat::guard res;
-  res.set(&current_vars, dst);
-  return res;
-}
-
 void Var_::register_var(const Var_* v)
 {
   assert(current_vars);
   current_vars->set(v->impl->nvar);
 }
 
-Rule::with_vars::with_vars(const Rule::vars_t& pos, nullptr_t) noexcept
-  : positive(pos)
-{}
-Rule::with_vars::with_vars(nullptr_t, const Rule::vars_t& neg) noexcept
-  : negative(neg)
-{}
-Rule::with_vars::with_vars(const Rule::vars_t& pos, const Rule::vars_t& neg) noexcept
-  : positive(pos)
-  , negative(neg)
-{}
-
-
 Rule::Elem::Elem(eval_t eval_)
   : eval_(eval_)
 {
 }
 
-thunk_base::thunk_base(const char *desc, const Rule::vars_t& vars)
+thunk_base::thunk_base(const char *desc)
   : desc(desc)
-  , vars(vars)
-{}
-const Rule::vars_t& thunk_base::captured() const noexcept { return vars; }
+  , vars(*Var_::current_vars)
+{
+  Var_::current_vars = nullptr;
+}
 
 std::ostream& operator<<(std::ostream& os, const thunk_base& t)
 {
