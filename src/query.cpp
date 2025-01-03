@@ -99,7 +99,6 @@ void Query::run()
   size_t changed = 1;
   for (int iter = 0; changed; iter++) {
     DEBUG_PROBE(BREAK_FIXPOINT);
-    std::cerr << "Fixpoint iter " << iter << "\n";
     for (auto& r : rules) {
       if (!r.seminaive_current) {
         run_rule(r, 0);
@@ -113,7 +112,6 @@ void Query::run()
     changed = 0;
     for (auto c : to_merge)
       changed += c->merge();
-    std::cerr << "Changed: " << changed << "\n";
   }
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;

@@ -71,7 +71,6 @@ struct JsonPipe {
       char hexbuf[5] = {0};
       wait(POLLIN);
       int res = ::read(fd, hexbuf, 4);
-      std::cout << "Read " << res << " bytes\n";
       if (res <= 0)
         return false;           // TODO: error handling?
       char *end;
@@ -239,7 +238,6 @@ struct Stubs {
   Stubs() {
     int fd = get_debug_fd();
     int nstubs = 0;
-    std::cout << "DEBUG fd: " << fd << "\n";
     if (fd < 0)
       return;
     
@@ -272,7 +270,6 @@ struct Stubs {
       if (!pipe.read(v))
         break;
       assert(v.type() == Json::objectValue);
-      std::cout << "Got JSON: " << v <<  " of type " << v.type() << "\n";
       auto const& vmethod = v["method"];
       assert(vmethod.isString());
       std::string method = vmethod.asString();
@@ -295,7 +292,6 @@ struct Stubs {
       if (isError || !id.isNull())
         pipe.write(response);
     }
-    std::cout << "Exit mainloop\n";
   }
 };
 

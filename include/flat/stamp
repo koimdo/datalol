@@ -3,7 +3,7 @@
 #include <iterator>
 #include <cassert>
 #ifndef rdassert
-#define rdassert(cond, str) assert(cond && str)
+#define rdassert(cond, message) assert(cond && message)
 #endif
 
 namespace flat {
