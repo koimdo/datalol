@@ -12,89 +12,39 @@
 #include <type_traits>
 
 namespace detail {
-  template<class S, class R> struct check_arg   : bool_constant<false> {};
-  template<class R> struct check_arg<R,      R> : bool_constant<true> {};
-  template<class R> struct check_arg<Var<R>, R> : bool_constant<true> {};
-
-  template<typename T, typename = void>
-  struct tuple_lift {
-    static constexpr size_t size = 1;
-
-    template<size_t>
-    using element_type = T;
-
-    template<size_t I>
-    static
-    const T& get(const T& t)
-    {
-      static_assert(I==0, "scalars are singleton tuples");
-      return t;
-    }
-  };
-
-  template<typename T>
-  struct tuple_lift<T, decltype(void(std::tuple_size<T>::value))> {
-    static constexpr size_t size = std::tuple_size<T>::value;
-
-    template<size_t I>
-    using element_type = typename std::tuple_element<I, T>::type;
-
-    template<size_t I>
-    static
-    auto get(const T& t) -> decltype(std::get<I>(t)) { return std::get<I>(t); }
-  };
-
-  template<typename Sel, typename Row, size_t i, size_t size>
-  struct check_query_t {
-    using SElem = typename tuple_lift<Sel>::template element_type<i>;
-    using RElem = typename tuple_lift<Row>::template element_type<i>;
-    static constexpr bool check1 = check_arg<SElem, RElem>::value;
-    static_assert(check1, "Type mismatch");
-    static constexpr bool value = check1 && check_query_t<Sel, Row, i+1, size>::value;
-  };
-
-  template<typename Sel, typename Row, size_t size>
-  struct check_query_t<Sel, Row, size, size> : bool_constant<true> {};
-
-  template<typename Sel, typename Row, size_t i=0, size_t size=tuple_lift<Sel>::size>
-  struct unify {
-    using TS = tuple_lift<Sel>;
-    using TR = tuple_lift<Row>;
-    static bool run(const Sel& s, const Row& r)
-    {
-      unify u{};
-      return u(TS::template get<i>(s),
-               TR::template get<i>(r)) &&
-        unify<Sel, Row, i+1, size>::run(s, r);
-    }
+  struct unify_ {
     // Elementwise cases
-    template<class R> constexpr bool operator()(const R& s, const R& r) const { return s == r; }
-    template<class R> constexpr bool operator()(const Var<R>& s, const R& r) { return s.unify(r); }
-  };
+    template<class R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
+    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
 
-  template<typename Sel, typename Row, size_t size>
-  struct unify<Sel, Row, size, size> : bool_constant<true> {
-    static bool run(const Sel&, const Row&) { return true; }
+    template<typename S, typename R>
+    constexpr bool operator()(size_t, const S&, const R&) const
+    {
+      static_assert(false, "Type mismatch");
+      return false;             // Never reached
+    }
   };
-
-  template<class T> struct get_var { static const Var_* get(const T&) { return nullptr; } };
-  template<class T> struct get_var<Var<T>> { static const Var_* get(const Var<T>& v) { return &v; } };
+  template<typename Sel, typename Row>
+  bool unify(const Sel& sel, const Row& row)
+  {
+    return for_each_in_tuple(unify_{}, sel, row);
+  }
 
   struct mark_vars_ {
     Rule::vars_t res;
-    template<typename T>
-    bool operator()(int, const T& t)
+    template<class T> bool operator()(size_t, const T&) { return true; }
+    template<class T> bool operator()(size_t, const Var<T>& v)
     {
-      if (const Var_ *v = get_var<T>::get(t))
-        res.set(v->get_id());
+      res.set(v.get_id());
       return true;
     }
   };
-  template<typename... Selector>
-  Rule::vars_t mark_vars(const std::tuple<Selector...>& sels)
+
+  template<typename Sel>
+  Rule::vars_t mark_vars(const Sel& sel)
   {
     mark_vars_ mv;
-    for_each_in_tuple(mv, sels);
+    for_each_in_tuple(mv, sel);
     return mv.res;
   }
 
@@ -108,13 +58,13 @@ namespace detail {
   struct generic_print {
     std::ostream& os;
     template<typename T>
-    bool operator () (int i, T const &v)
+    bool operator () (size_t i, T const &v)
     {
       os << (i? ", " : "") << v;
       return true;
     }
     template<typename T>
-    bool operator () (int i, const Var<T>& v)
+    bool operator () (size_t i, const Var<T>& v)
     {
       os << (i? ", " : "");
       Var<T>::do_print(os, v);
@@ -187,7 +137,6 @@ struct Matcher_base : public Rule::Body {
 
   using value_type = typename Origin::value_type;
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
-  static_assert(detail::check_query_t<Sel, value_type, 0, std::tuple_size<Sel>::value>::value, "Type mismatch");
 
   Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(run_full)
@@ -210,7 +159,7 @@ struct Matcher_base : public Rule::Body {
   {
     Derived& self = static_cast<Derived&>(self_);
     for (auto const& row : self.get_coll()) {
-      self.next(detail::unify<Sel, typename Origin::value_type>::run(self.selector, row));
+      self.next(detail::unify(self.selector, row));
     }
   }
 };
