@@ -14,7 +14,7 @@ Json::Value IPrint::to_json() const {
   return Json::Value(os.str());
 }
 
-std::string ident::type_name() const noexcept
+std::string type_id_t::type_name() const
 {
   auto left = strchr(type, '=')+2;
   auto right = strrchr(left, ']');
@@ -145,7 +145,9 @@ void Var_::Impl::clear()
   destroy = nullptr;
 }
 
-Var_::Impl::Impl() = default;
+Var_::Impl::Impl(ident id)
+  : id(id)
+{}
 
 void Var_::register_var(const Var_* v)
 {

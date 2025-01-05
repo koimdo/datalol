@@ -19,19 +19,36 @@ struct IPrint {
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
 
-struct ident {
-  const char *name;             // May be null
-  const char *type;             // dumb raw form of some __PRETTY_F
+class type_id_t {
+  const char *type;
+  constexpr type_id_t(const char *type): type(type) {}
+public:
+  template<typename T>
+  static type_id_t of() { return type_id_t{__PRETTY_FUNCTION__}; }
+  bool operator==(type_id_t o) const { return !strcmp(type, o.type); }
+  bool operator!=(type_id_t o) const { return strcmp(type, o.type); }
+  bool operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
 
+  std::string type_name() const;
+
+  void assert_eq(type_id_t o) const
+  {
+    if (*this != o) {
+      std::cerr << "Type mismatch: " << type_name() << " and " << o.type_name() << "\n";
+      assert(false);
+    }
+  }
+};
+
+struct ident {
+  type_id_t type;
+  const char *name;             // May be null
   template<class T>
   static ident make(const char *name = nullptr)
   {
-    ident res;
-    res.name = name;
-    res.type = __PRETTY_FUNCTION__;
-    return res;
+    return ident{type_id_t::of<T>(), name};
   }
-  std::string type_name() const noexcept;
+  std::string type_name() const { return type.type_name(); }
   std::string get_name() const;
 };
 std::ostream& operator<<(std::ostream& os, const ident& id);
@@ -56,7 +73,7 @@ public:
   typedef std::bitset<MAX_VARS> vars_t;
 protected:
   struct Impl {
-    Impl();
+    Impl(ident id);
     ~Impl();
     void clear();
     const void *p = nullptr;
@@ -165,6 +182,7 @@ public:
   Var(Var&&) = default;
 
   struct Impl : public Var_::Impl {
+    using Var_::Impl::Impl;
     alignas(T) unsigned char buf[sizeof(T)];
   };
 
@@ -210,6 +228,16 @@ public:
 };
 
 class Query {
+public:
+  class control {
+    friend class Query;
+  protected:
+    Query* q;
+    control(Query *q): q(q) {}
+  public:
+    // TODO: public configuration methods for query
+  };
+
 private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
@@ -250,12 +278,10 @@ private:
   void run();
   void print(std::ostream& os) const;
 
-  class iter {
-    Query* q;
-  public:
-    iter(Query *q): q(q) {}
+  struct iter : public control {
+    using control::control;
     bool operator!=(const iter& o) const { return q != o.q; }
-    std::false_type operator*() const { return std::false_type{}; }
+    control operator*() { return *this; }
     void operator++();
   };
 
@@ -266,9 +292,8 @@ private:
   template<class T>
   Var_ mkvar(const char *name)
   {
-    auto buf = pool.allocate<typename Var<T>::Impl>();
+    auto buf = pool.allocate<typename Var<T>::Impl>(ident::make<T>(name));
     Var_::Impl *impl = buf.get(flat::unsafe_extract_pointer{});
-    impl->id = ident::make<T>(name);
     impl->nvar = vars.size();
     vars.push_back(Var_(impl));
     return impl;
