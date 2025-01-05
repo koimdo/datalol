@@ -14,8 +14,8 @@
 #include "datalol/debug.h"
 #include "datalol/syntax.h"
 
-extern struct debug_info  __start_info[];
-extern struct debug_info  __stop_info[];
+extern __attribute__((weak)) struct debug_info  __start_info[];
+extern __attribute__((weak)) struct debug_info  __stop_info[];
 static const flat::span<debug_info> all_queries = {__start_info,  __stop_info};
 static
 int get_qid(const debug_info *dbg)
@@ -149,7 +149,7 @@ struct Stubs {
   JVal getQuery_(const debug_info& d)
   {
     Json::Value query;
-    query["id"] = &d - all_queries.begin();
+    query["id"] = get_qid(&d);
     query["function"] = d.function;
     query["file"] = d.file;
     query["line"] = d.line;
