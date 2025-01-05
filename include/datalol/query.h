@@ -20,7 +20,7 @@ namespace detail {
     template<typename S, typename R>
     constexpr bool operator()(size_t, const S&, const R&) const
     {
-      static_assert(false, "Type mismatch");
+      static_assert(std::is_same<S, R>::value, "Type mismatch");
       return false;             // Never reached
     }
   };
