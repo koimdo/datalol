@@ -14,11 +14,6 @@ struct A {
   {
     return std::make_tuple(i, j, k) < std::make_tuple(o.i, o.j, o.k);
   }
-
-  bool operator==(const A& o) const
-  {
-    return i == o.i && j == o.j && k == o.k;
-  }
 };
 
 TEST(Trivial, test0) {

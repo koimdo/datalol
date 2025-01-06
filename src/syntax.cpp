@@ -135,16 +135,6 @@ void Query::print_vars(std::ostream& os, const Rule::elem_meta& vs) const
   }
 }
 
-Var_::Impl::~Impl() { clear(); }
-void Var_::Impl::clear()
-{
-  if (destroy)
-    (destroy)(p);
-
-  p = nullptr;
-  destroy = nullptr;
-}
-
 Var_::Impl::Impl(ident id)
   : id(id)
 {}

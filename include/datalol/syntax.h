@@ -74,10 +74,7 @@ public:
 protected:
   struct Impl {
     Impl(ident id);
-    ~Impl();
-    void clear();
     const void *p = nullptr;
-    mutable void (*destroy)(const void *) = nullptr;
     ident id;
     int nvar;
   };
@@ -97,11 +94,13 @@ protected:
   void register_var(const Var_*);
 
   friend class Query;
+  void set(const void *p) const { impl->p = p; }
 public:
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
-  void zap() const { impl->clear(); }
+  void zap() const { impl->p = nullptr; }
+  const void *get() const { return impl->p; }
   int get_id() const noexcept { return impl->nvar; }
 };
 
@@ -174,7 +173,7 @@ private:
 
 Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b);
 
-template<class T>
+template<typename T, typename Compare = std::less<T>>
 class Var : public Var_ {
 public:
   Var(const char *name = nullptr);
@@ -183,34 +182,24 @@ public:
 
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
-    alignas(T) unsigned char buf[sizeof(T)];
+    flat::set<T, Compare> candidates;
   };
 
-  bool unify(const T& t) const
+  bool test(const T& t) const
   {
-    if (impl->p)
-      return *get() == t;
-    impl->clear();
-    impl->p = &t;
-    return true;
+    Compare cmp;                // FIXME: in impl?
+    return get() && !cmp(*get(), t) && !cmp(t, *get());
   }
 
-  bool unify(T&& t) const
-  {
-    if (impl->p)
-      return *get() == t;
+  bool unify(const T& t) const
 
-    impl->clear();
-    impl->p = ::new (static_cast<Impl*>(impl)->buf) T(std::forward<T>(t));
-    if (!std::is_trivially_destructible<T>::value)
-      impl->destroy = [](const void *p) { static_cast<const T*>(p)->~T(); };
-    return true;
+  {
+    return get() ? test(t) : (set(&t), true);
   }
 
   const T *get() const noexcept
   {
-    const T *res = static_cast<const T*>(impl->p);
-    assert(res && "Unbound var dereferenced");
+    const T *res = static_cast<const T*>(Var_::get());
     return res;
   }
   const T *operator->() const noexcept { return get(); }
@@ -219,7 +208,7 @@ public:
   static std::ostream& do_print(std::ostream& os, const Var& v)
   {
     os << *v.impl;
-    if (v.impl->p) {
+    if (v.get()) {
       const T& t = *v.get();
       os << "=" << t;
     }
@@ -261,7 +250,7 @@ private:
 
   friend class Stubs;
   friend class Rule::cursor;
-  template<class T>
+  template<class T, class Cmp>
   friend class Var;
 
   struct cmp {
@@ -308,8 +297,8 @@ public:
   iter end() const { return iter{nullptr}; }
 };
 
-template<class T>
-Var<T>::Var(const char *name)
+template<class T, class Cmp>
+Var<T, Cmp>::Var(const char *name)
   : Var_(Query::current->mkvar<T>(name))
 {}
 
@@ -382,7 +371,8 @@ class thunk : public thunk_base {
     static void eval(Rule::Elem& self_)
     {
       binder& self = static_cast<binder&>(self_);
-      self.next(self.var.unify(self.fun.apply()));
+      auto res = self.fun.apply(); // `res` is now alive for the rest of the call chain
+      self.next(self.var.unify(res));
     }
     void print(std::ostream& os) const override final
     {
