@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cassert>
+#include <datalol/syntax.h>
 #include <memory> // for unique_ptr
 
 using val_t = std::pair<int, std::string>;
@@ -10,53 +11,77 @@ std::ostream& operator<<(std::ostream& os, const val_t& v)
   return os << "<" << v.first << ", " << v.second << ">";
 }
 
-
-class type_id_t {
-  typedef type_id_t (*ident_t)();
-
-  ident_t id;
-  const char *desc;
-  type_id_t(ident_t id, const char *desc): id(id), desc(desc) {}
+class wrapper {
+  const void *p;
+#ifndef NDEBUG
+  type_id_t type;
+#endif
 public:
-  bool operator==(type_id_t o) const { return id == o.id; }
-  bool operator!=(type_id_t o) const { return id != o.id; }
-
   template<typename T>
-  static
-  type_id_t of() { return type_id_t{&of<T>, __PRETTY_FUNCTION__}; }
+  operator T&() { return *get<T>(); }
 
-  void assert_eq(type_id_t o) const
-  {
-    if (*this != o) {
-      std::cerr << "Type mismatch: " << desc << " and " << o.desc << "\n";
-      assert(false);
-    }
+  template<class T>
+  T *get() {
+    assert(type_id_t::of<T>() == type);
+    return static_cast<T*>(const_cast<void*>(p));
   }
+
+  template<class T>
+  wrapper(T *p)
+    : p(p)
+#ifndef NDEBUG
+    , type(type_id_t::of<T>())
+#endif
+  {}
 };
 
 class index_base {
-protected:
-  index_base(type_id_t storage, type_id_t value, type_id_t key)
-    : storage_tp(storage)
-    , value_tp(value)
-    , key_tp(key)
-  {}
-
   // Avoid ambiguous overrides in comparators when column type is `int`
   struct nint {
     int i;
     constexpr operator int() const { return i; }
   };
   std::vector<nint> items;
+
+  template<typename Storage, typename Cmp, typename Proj>
+  struct cmp {
+    const Storage& storage;
+    const Cmp& compare;
+    const Proj& proj;
+
+    auto get(nint idx) const -> decltype(proj(storage[idx.i])) { return proj(storage[idx.i]); }
+    using Key = decltype(std::declval<cmp>().get(nint{0}));
+    bool operator()(nint idx, const Key& k) const { return compare(get(idx), k); }
+    bool operator()(const Key& k, nint idx) const { return compare(k, get(idx)); }
+  };
+protected:
   using iterator = std::vector<nint>::const_iterator;
+
+  template<class Storage, class Cmp, typename Proj, class Key>
+  std::pair<iterator, bool> insert_impl(const Storage& storage, const Cmp& compare, const Proj& proj,
+                                        const Key& key, bool unique) const
+  {
+    cmp<Storage, Cmp, Proj> cmp{storage, compare, proj};
+    // insert at the end of the equal range. For non-unique index, this minimizes the number of moves.
+    auto pos = std::upper_bound(items.begin(), items.end(), key, cmp);
+    return {pos, (items.begin() == pos || !unique || cmp(*(pos-1), key))};
+  }
+
+  template<class Storage, class Cmp, typename Proj>
+  std::pair<iterator, iterator> find_impl(const Storage& storage, const Cmp& compare, const Proj& proj,
+                                          const decltype(proj(storage[0]))& key) const
+  {
+    cmp<Storage, Cmp, Proj> cmp{storage, compare, proj};
+    auto lo = std::lower_bound(items.begin(), items.end(), key, cmp);
+    auto hi = std::upper_bound(lo           , items.end(), key, cmp);
+    return { lo, hi };
+  }
 
 public:
   virtual ~index_base() {}
   template<typename Storage, typename T>
   bool insert(const Storage& storage, const T&t, bool unique)
   {
-    storage_tp.assert_eq(type_id_t::of<Storage>());
-    value_tp.assert_eq(type_id_t::of<T>());
     auto itb = insert_(&storage, &t, unique);
     if (itb.second)
       items.insert(itb.first, nint{(int)storage.size()});
@@ -66,34 +91,24 @@ public:
   template<typename Storage, typename Key, typename F>
   void iterate(const Storage& storage, const Key& key, F&& f) const
   {
-    storage_tp.assert_eq(type_id_t::of<Storage>());
-    key_tp.assert_eq(type_id_t::of<Key>());
     auto lohi = find_(&storage, &key);
-    iterate(storage, lohi.first, lohi.second, std::forward<F>(f));
-  }
-
-
-  template<typename Storage, typename F>
-  void iterate(const Storage& storage, F&& f) const
-  {
-    storage_tp.assert_eq(type_id_t::of<Storage>());
-    iterate(storage, items.begin(), items.end(), std::forward<F>(f));
-  }
-private:
-  virtual std::pair<iterator, bool> insert_(const void* storage, const void* t, bool unique) const = 0;
-  virtual std::pair<iterator, iterator> find_(const void* storage, const void* t) const = 0;
-
-  type_id_t storage_tp, value_tp, key_tp; // TODO: debug build only
-
-  friend std::ostream& operator<<(std::ostream& os, const index_base& ind);
-
-  template<typename Storage, typename F>
-  void iterate(const Storage& storage, iterator lo, iterator hi, F&& f) const
-  {
+    auto lo = lohi.first;
+    auto hi = lohi.second;
     std::cerr << "lo=" << lo-items.begin() << ", hi=" << hi-items.begin() << "\n";
     for ( ; lo != hi; ++lo)
       f(storage[*lo]);
   }
+
+  struct identity {
+    template<class T>
+    T operator()(T t) const { return t; }
+  };
+
+private:
+  virtual std::pair<iterator, bool> insert_(wrapper storage, wrapper t, bool unique) const = 0;
+  virtual std::pair<iterator, iterator> find_(wrapper storage, wrapper t) const = 0;
+
+  friend std::ostream& operator<<(std::ostream& os, const index_base& ind);
 };
 
 std::ostream& operator<<(std::ostream& os, const index_base& ind)
@@ -103,51 +118,34 @@ std::ostream& operator<<(std::ostream& os, const index_base& ind)
   return os;
 }
 
-template<typename T, class Key, typename Cmp>
-class index : public index_base {
+template<typename T, typename Cmp, typename Proj>
+class table_index : public index_base {
 public:
   using storage_t = std::vector<T>;
   Cmp compare;                  // TODO: EBCO
+  Proj proj;
 
-  template<typename S>
-  struct my_cmp {
-    const storage_t& storage;
-    const Cmp& compare;
-    bool operator()(nint idx, const S& t) { return compare(storage[idx], t); }
-    bool operator()(const S& t, nint idx) { return compare(t, storage[idx]); }
-  };
-
-  std::pair<iterator, bool> insert_(const void *storage_, const void *t_, bool unique) const override
+  std::pair<iterator, bool> insert_(wrapper storage, wrapper t, bool unique) const override
   {
-    const storage_t& storage = *static_cast<const storage_t*>(storage_);
-    const T& t = *static_cast<const T*>(t_);
-    my_cmp<T> cmp{storage, compare};
-    // insert at the end of the equal range. For non-unique index, this minimizes the number of moves.
-    auto pos = std::upper_bound(items.begin(), items.end(), t, cmp);
-    return {pos, (items.begin() == pos || !unique || cmp(*(pos-1), t))};
+    return index_base::insert_impl<storage_t, Cmp, Proj>(storage, compare, proj, proj((const T&)t), unique);
   }
 
-
-  std::pair<iterator, iterator> find_(const void* storage_, const void* key_) const override
+  std::pair<iterator, iterator> find_(wrapper storage, wrapper key) const override
   {
-    const storage_t& storage = *static_cast<const storage_t*>(storage_);
-    const Key& key = *static_cast<const Key*>(key_);
-    my_cmp<Key> cmp{storage, compare};
-    auto lo = std::lower_bound(items.begin(), items.end(), key, cmp);
-    auto hi = std::upper_bound(lo           , items.end(), key, cmp);
-    return { lo, hi };
+    return index_base::find_impl<storage_t, Cmp, Proj>(storage, compare, proj, key);
   }
 
-  index(const Cmp& compare = {})
-    : index_base(type_id_t::of<storage_t>(), type_id_t::of<T>(), type_id_t::of<Key>())
-    , compare(compare) {}
+  table_index(const Cmp& compare = {}, const Proj& proj = {})
+    : index_base()
+    , compare(compare)
+    , proj(proj)
+  {}
 };
 
 
 template<typename T>
-struct table_base {
+class table_base {
   template<size_t idx,
-           //typename Cmp = std::less<typename std::tuple_element<idx, T>::type>,
            bool it = (idx < std::tuple_size<T>::value)>
   struct do_cmp;
 
@@ -156,17 +154,12 @@ struct table_base {
     using Key = typename std::tuple_element<idx, T>::type;
     using Compare = std::less<Key>; // TODO: user-definable
 
-    struct cmp {
-      static const Key& proj(const T& t) { return std::get<idx>(t); }
-
-
-      bool operator()(const T& l  , const T& r  ) const { return Compare{}(proj(l), proj(r)); }
-      bool operator()(const T& l  , const Key& r) const { return Compare{}(proj(l), r);       }
-      bool operator()(const Key& l, const T& r  ) const { return Compare{}(l      , proj(r)); }
+    struct proj {
+      auto operator()(const T& t) const -> decltype(std::get<idx>(t)) { return std::get<idx>(t); }
     };
     static std::unique_ptr<index_base> make()
     {
-      return std::make_unique<index<T, Key, cmp>>();
+      return std::make_unique<table_index<T, Compare, proj>>();
     }
   };
 
@@ -176,14 +169,16 @@ struct table_base {
     static std::unique_ptr<index_base> make() { return nullptr; }
   };
 
+protected:
   std::vector<T> storage;
   static constexpr size_t arity = std::tuple_size<T>::value;
   std::unique_ptr<index_base> indices[arity];
 
+public:
   void insert(const T& it)
   {
-    for (size_t i=0; i<arity; i++)
-      indices[i]->insert(storage, it, false);
+    for (auto& ind : indices)
+      ind->insert(storage, it, false);
     storage.push_back(it);
   }
 
@@ -214,7 +209,7 @@ struct table_base {
   void print_index(std::ostream& os, const index_base& ind)
   {
     os << ": " << ind;
-    ind.iterate(storage, [&os](const T& t) { os << "\n" << t; });
+    //ind.iterate(storage, [&os](const T& t) { os << "\n" << t; });
     os << "\n";
   }
   void print(std::ostream& os)
@@ -224,13 +219,11 @@ struct table_base {
       print_index(os, *indices[i]);
     }
   }
-
-
 };
 
 template<typename T, typename Cmp = std::less<T>>
 class table : table_base<T> {
-  index<T, T, Cmp> uniq;
+  table_index<T, Cmp, index_base::identity> uniq;
   using super_t = table_base<T>;
 public:
   using value_type = T;
@@ -240,6 +233,7 @@ public:
       table_base<T>::insert(it);
   }
 
+  using super_t::iterate;
   void print(std::ostream& os)
   {
     os << "ALL";
@@ -266,6 +260,8 @@ int main()
   table<val_t> mytbl;
   for (auto const& it : init)
     mytbl.insert(it);
+  mytbl.iterate(print_item);
+  cout << "\n";
   mytbl.print(cout);
 
   cout << "idx1(d):";

@@ -1,5 +1,6 @@
 #include <cassert>
 #include <algorithm>
+#include <cstring>
 
 #include <flat/pnr_utils.h>
 #include <datalol/syntax.h>
@@ -13,6 +14,11 @@ Json::Value IPrint::to_json() const {
   print(os);
   return Json::Value(os.str());
 }
+
+bool type_id_t::operator==(type_id_t o) const { return !strcmp(type, o.type); }
+bool type_id_t::operator!=(type_id_t o) const { return strcmp(type, o.type); }
+bool type_id_t::operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
+
 
 std::string type_id_t::type_name() const
 {

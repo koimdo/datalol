@@ -4,7 +4,6 @@
 #include <vector>
 #include <iostream>
 #include <bitset>
-#include <string>
 #include <functional>
 #include <flat/memory>
 #include <flat/span>
@@ -25,24 +24,18 @@ class type_id_t {
 public:
   template<typename T>
   static type_id_t of() { return type_id_t{__PRETTY_FUNCTION__}; }
-  bool operator==(type_id_t o) const { return !strcmp(type, o.type); }
-  bool operator!=(type_id_t o) const { return strcmp(type, o.type); }
-  bool operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
+  bool operator==(type_id_t o) const;
+  bool operator!=(type_id_t o) const;
+  bool operator<(type_id_t o) const;
 
   std::string type_name() const;
-
-  void assert_eq(type_id_t o) const
-  {
-    if (*this != o) {
-      std::cerr << "Type mismatch: " << type_name() << " and " << o.type_name() << "\n";
-      assert(false);
-    }
-  }
 };
 
-struct ident {
+class ident {
   type_id_t type;
   const char *name;             // May be null
+  constexpr ident(type_id_t type, const char *name): type(type), name(name) {}
+public:
   template<class T>
   static ident make(const char *name = nullptr)
   {

@@ -204,7 +204,7 @@ public:
   {
     os << id.get_name() << " = external<" << id.type_name() << ">, size=" << coll.size();
   }
-  size_t merge() override final { assert(false && "Cannot merge into external relations"); }
+  size_t merge() override final { assert(false && "Cannot merge into external relations"); return 0; }
   external_(const Coll& coll_, const ident& id)
     : Collection_base(id)
     , coll(coll_) {}
