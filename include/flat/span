@@ -48,6 +48,8 @@ public:
   constexpr pointer data() const { return beg_; }
   constexpr iterator begin() const { return beg_; }
   constexpr iterator end() const { return end_; }
+  constexpr reverse_iterator rbegin() const { return reverse_iterator(end_); }
+  constexpr reverse_iterator rend() const { return reverse_iterator(beg_); }
   constexpr iterator cbegin() const { return beg_; }
   constexpr iterator cend() const { return end_; }
 

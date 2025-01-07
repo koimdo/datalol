@@ -15,11 +15,47 @@ void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::elem_meta&
   assert(neg.none());
 }
 
-Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i].first; }
-Rule::Elem& Query::get_elem(unsigned i) { return *elems[i].second; }
+Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i]->meta; }
+Rule::Elem& Query::get_elem(unsigned i) { return *elems[i]; }
 
 
-// FIXME: move to builder?
+void Query::configure_rule(Rule& r, flat::span<int> order)
+{
+  // Step 3: set undo variables
+  Rule::vars_t bound;
+  std::vector<Var_>& stack = r.undo_stack;
+  stack.reserve(vars.size());
+  for (auto ofs : order) {
+    auto vars = get_meta(r.head+ofs);
+    auto pos = vars.positive;
+    verify_neg(bound, r, vars);
+
+    pos &= ~bound;
+    if (pos.any()) {
+      auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
+      elem.undo_vars = stack.data() + stack.size();
+      for (auto v : this->vars)
+        if (pos.test(v.get_id()))
+          stack.push_back(v);
+      elem.undo_count = (stack.data() + stack.size()) - elem.undo_vars;
+    }
+
+    bound |= pos;
+  }
+
+  verify_neg(bound, r, get_meta(r.head));
+
+  // Final step: chain rule body (and head) for execution
+  auto next = &get_elem(r.head);
+  next->rule_ = &r;
+  for (auto it = order.rbegin(), end = order.rend(); it != end; ++it) {
+    auto& e = static_cast<Rule::Body&>(get_elem(r.head+*it));
+    e.next_ = next;
+    next = &e;
+    e.rule_ = &r;
+  }
+}
+
 void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side
@@ -42,40 +78,11 @@ void Query::configure()
 
   // Step 3: set undo variables
   for (auto& r : rules) {
-    Rule::vars_t bound;
-    std::vector<Var_>& stack = r.undo_stack;
-    stack.reserve(vars.size());
-    for (size_t i=r.head+1; i<r.last; ++i) {
-      auto vars = get_meta(i);
-      auto pos = vars.positive;
-      verify_neg(bound, r, vars);
-
-      pos &= ~bound;
-      if (pos.any()) {
-        auto& elem = static_cast<Rule::Body&>(get_elem(i));
-        elem.undo_vars = stack.data() + stack.size();
-        for (auto v : this->vars)
-          if (pos.test(v.get_id()))
-            stack.push_back(v);
-        elem.undo_count = (stack.data() + stack.size()) - elem.undo_vars;
-      }
-
-      bound |= pos;
-    }
-
-    verify_neg(bound, r, get_meta(r.head));
-  }
-
-  // Final step: chain rule body (and head) for execution
-  for (auto& r : rules) {
-    auto next = &get_elem(r.head);
-    next->rule_ = &r;
-    for (size_t i=r.last-1; i!=r.head; i--) {
-      auto& e = static_cast<Rule::Body&>(get_elem(i));
-      e.next_ = next;
-      next = &e;
-      e.rule_ = &r;
-    }
+    std::vector<int> order;
+    // TODO: smarter ordering
+    for (int i=r.head+1; i<r.last; i++)
+      order.push_back(i-r.head);
+    configure_rule(r, order);
   }
   DEBUG_PROBE(BREAK_CONFIGURE);
 }

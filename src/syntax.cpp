@@ -34,7 +34,7 @@ std::string ident::get_name() const
   return std::string();
 }
 
-Rule::cursor::cursor(with_meta<Head>&& hh, with_meta<Body>&& bb)
+Rule::cursor::cursor(uhead&& hh, ubody&& bb)
 {
   auto q = Query::current;
 
@@ -48,12 +48,12 @@ Rule::cursor::~cursor()
   Query::current->end_rule(r);
 }
 
-Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b)
+Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b)
 {
   return Rule::cursor(std::move(h), std::move(b));
 }
 
-Rule::cursor& Rule::cursor::operator&(Rule::with_meta<Body>&& b)
+Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
 {
   Query::current->add_elem(b);
   return *this;
@@ -65,7 +65,7 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
   return os;
 }
 
-void Query::add_elem(const Rule::with_meta<Rule::Elem>& me)
+void Query::add_elem(Rule::uelem me)
 {
   elems.push_back(me);
 }
@@ -101,9 +101,9 @@ void Query::iter::operator++()
 
 void Query::print(std::ostream& os) const
 {
-  auto print_with_vars = [this, &os](const Rule::elem_meta& vars, const Rule::Elem& e) {
+  auto print_with_vars = [this, &os](const Rule::Elem& e) {
     os << "[";
-    print_vars(os, vars);
+    print_vars(os, e.meta);
     os << "]";
     e.print(os);
   };
@@ -112,13 +112,13 @@ void Query::print(std::ostream& os) const
   for (auto const& r : rules) {
     if (i) os << "\n";
     auto const& h = elems[r.head];
-    print_with_vars(h.first, *h.second);
+    print_with_vars(*h);
     os << " << ";
     int count = 0;
     for (int j = r.head+1; j < r.last; j++) {
       os << (count++ ? " & " : "") << (recursive.test(j) ? "^" : "");
       auto const& b = elems[j];
-      print_with_vars(b.first, *b.second);
+      print_with_vars(*b);
     }
     os << ";";
     i++;
@@ -151,8 +151,9 @@ void Var_::register_var(const Var_* v)
   current_vars->set(v->impl->nvar);
 }
 
-Rule::Elem::Elem(eval_t eval_)
+Rule::Elem::Elem(eval_t eval_, const elem_meta& m)
   : eval_(eval_)
+  , meta(m)
 {
 }
 

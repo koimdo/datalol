@@ -34,7 +34,6 @@ TEST(Trivial, test0) {
     std::cout << "FAs: " << FAs << "\n";
     Var<A> a("a");
     Var<int> i("i"), k("k");
-    Var<int> param;
     THUNK((results.emplace_back(i, k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
   }
   //std::cout << qo.to_json();

@@ -219,7 +219,7 @@ struct Stubs {
     {
       Json::Value elements(Json::arrayValue);
       for (auto const& e: q->elems)
-        elements << e.second->to_json();
+        elements << e->to_json();
       res["elements"] = std::move(elements);
     }
     return res;

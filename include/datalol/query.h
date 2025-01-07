@@ -139,15 +139,10 @@ struct Matcher_base : public Rule::Body {
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
 
   Matcher_base(Sel&& sel, Origin& origin)
-    : Rule::Body(run_full)
+    : Rule::Body(run_full, {detail::mark_vars(sel), {}, &origin})
     , selector(std::forward<Sel>(sel))
     , origin(origin)
   {}
-
-  Rule::vars_t get_vars() const
-  {
-    return detail::mark_vars(selector);
-  }
 
   void print(std::ostream& os) const override final
   {
@@ -210,16 +205,14 @@ public:
     , coll(coll_) {}
 
   template<typename... SelectArgs>
-  Rule::with_meta<Rule::Body> operator()(SelectArgs&&... args) {
+  Rule::ubody operator()(SelectArgs&&... args) {
     using selector_t = decltype(build_selector(std::forward<SelectArgs>(args)...));
     struct Body : Matcher_base<Body, selector_t, external_> {
       using Matcher_base<Body, selector_t, external_>::Matcher_base;
       const Coll& get_coll() const noexcept { return this->origin.coll; }
     };
 
-    auto p = Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
-    Rule::elem_meta meta = { p->get_vars(), {}, this };
-    return std::make_pair(meta, p);
+    return Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
   }
 };
 
@@ -304,7 +297,7 @@ struct table<T> : public Collection_base {
       Sel selector;
       table& rel;
       Head(Sel&& selector, table& rel)
-        : Rule::Head(eval)
+        : Rule::Head(eval, {{}, detail::mark_vars(selector), &rel})
         , selector(std::move(selector))
         , rel(rel)
       {}
@@ -328,23 +321,14 @@ struct table<T> : public Collection_base {
       }
     };
 
-    Rule::vars_t get_vars() const
+    operator Rule::ubody()
     {
-      return detail::mark_vars(selector);
+      return Query::allocate<Body>(std::move(selector), rel);
     }
 
-    operator Rule::with_meta<Rule::Body>()
+    operator Rule::uhead()
     {
-      Rule::elem_meta meta = { get_vars(), {}, &rel };
-      auto p = Query::allocate<Body>(std::move(selector), rel);
-      return std::make_pair(meta, p);
-    }
-
-    operator Rule::with_meta<Rule::Head>()
-    {
-      Rule::elem_meta meta = { {}, get_vars(), &rel };
-      auto p = Query::allocate<Head>(std::move(selector), rel);
-      return std::make_pair(meta, p);
+      return Query::allocate<Head>(std::move(selector), rel);
     }
   };
 

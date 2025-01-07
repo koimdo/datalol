@@ -100,13 +100,20 @@ public:
 class Rule {
 public:
   using vars_t = Var_::vars_t;
+  struct elem_meta {
+    vars_t positive, negative;
+    Collection_base *collection;
+    elem_meta(const elem_meta&) = default;
+  };
+
   class Elem : public IPrint {
     typedef void (*eval_t)(Elem&);
     friend class Query;
     eval_t eval_ = nullptr;
     Rule *rule_;
   protected:
-    Elem(eval_t eval_);
+    elem_meta meta;
+    Elem(eval_t eval_, const elem_meta& m);
     void set_eval(eval_t eval_);
     Elem(const Elem&) = delete;
     Rule& rule() noexcept { return *rule_; }
@@ -135,22 +142,17 @@ public:
     using Elem::Elem;
   };
 
-  struct elem_meta {
-    vars_t positive, negative;
-    Collection_base *collection;
-    elem_meta(const elem_meta&) = default;
-  };
-
-  template<class T>
-  using with_meta = std::pair<elem_meta, flat::pool_ptr<T>>;
+  using uelem = flat::pool_ptr<Elem>;
+  using ubody = flat::pool_ptr<Body>;
+  using uhead = flat::pool_ptr<Head>;
 
   class cursor {
-    friend cursor operator<<(with_meta<Head>&& h, with_meta<Body>&& b);
-    cursor(with_meta<Head>&& h, with_meta<Body>&& b);
+    friend cursor operator<<(uhead&& h, ubody&& b);
+    cursor(uhead&& h, ubody&& b);
 
     Rule *r;
   public:
-    cursor& operator&(with_meta<Body>&& b);
+    cursor& operator&(Rule::ubody&& b);
     ~cursor();
   };
 
@@ -164,7 +166,7 @@ private:
   std::vector<Var_> undo_stack;
 };
 
-Rule::cursor operator<<(Rule::with_meta<Rule::Head>&& h, Rule::with_meta<Rule::Body>&& b);
+Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
 template<typename T, typename Compare = std::less<T>>
 class Var : public Var_ {
@@ -225,7 +227,7 @@ private:
   static Query *current;
 
   debug_info *dbg;
-  std::vector<Rule::with_meta<Rule::Elem>> elems;
+  std::vector<Rule::uelem> elems;
   std::vector<Rule> rules;
   std::bitset<MAX_ELEMS> recursive;
 
@@ -251,6 +253,7 @@ private:
   };
 
   flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
+  void configure_rule(Rule& r, flat::span<int> order);
   void configure();
   void explain(const std::string& coll, const void *target);
 
@@ -267,7 +270,7 @@ private:
     void operator++();
   };
 
-  void add_elem(const Rule::with_meta<Rule::Elem>& e);
+  void add_elem(Rule::uelem e);
   Rule *start_rule();
   void end_rule(Rule *r);
 
@@ -332,7 +335,7 @@ class thunk : public thunk_base {
   struct head : Rule::Head {
     thunk fun;
     head(thunk&& th)
-      : Rule::Head(eval_head)
+      : Rule::Head(eval_head, fun.get_meta())
       , fun(std::move(th))
     {}
     static void eval_head(Rule::Elem& self) { (void)static_cast<head&>(self).fun.apply(); }
@@ -342,7 +345,7 @@ class thunk : public thunk_base {
   struct guard : Rule::Body {
     thunk fun;
     guard(thunk&& th)
-      : Rule::Body(eval_body)
+      : Rule::Body(eval_body, fun.get_meta)
       , fun(std::move(th))
     {}
     static void eval_body(Rule::Elem& self_)
@@ -358,9 +361,13 @@ class thunk : public thunk_base {
     using bound_t = Var<Res>;
     bound_t var;
     binder(thunk&& fun, bound_t& var)
-      : Rule::Body(eval)
+      : Rule::Body(eval, fun.get_meta())
       , fun(std::move(fun))
-      , var(std::move(var)) {}
+      , var(std::move(var))
+    {
+      meta.positive.set(var.get_id());
+      meta.positive &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    }
     static void eval(Rule::Elem& self_)
     {
       binder& self = static_cast<binder&>(self_);
@@ -384,24 +391,21 @@ class thunk : public thunk_base {
 public:
   Res apply() const { return fun(); }
 
-  operator Rule::with_meta<Rule::Head>()
+  operator Rule::uhead()
   {
-    return std::make_pair(get_meta(), Query::allocate<head>(std::move(*this)));
+    return Query::allocate<head>(std::move(*this));
   }
 
-  operator Rule::with_meta<Rule::Body>()
+  operator Rule::ubody()
   {
     static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
-    return std::make_pair(get_meta(), Query::allocate<head>(std::move(*this)));
+    return Query::allocate<head>(std::move(*this));
   }
 
-  Rule::with_meta<Rule::Body> operator==(Var<Res>& var)
+  Rule::ubody operator==(Var<Res>& var)
   {
-    auto meta = get_meta();
-    meta.positive.set(var.get_id());
-    meta.positive &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
-    return std::make_pair(std::move(meta), Query::allocate<binder>(std::move(*this), var));
+    return Query::allocate<binder>(std::move(*this), var);
   }
 };
 
@@ -415,7 +419,7 @@ auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()
 }
 
 template<typename T>
-Rule::with_meta<Rule::Body> operator==(Var<T>& v, thunk<T>&& getter)
+Rule::ubody operator==(Var<T>& v, thunk<T>&& getter)
 {
   return getter == v;
 }
