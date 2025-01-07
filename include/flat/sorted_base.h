@@ -151,6 +151,14 @@ public:
     auto itb = find_(p);
     return mkiter(itb.second ? itb.first : storage().end());
   }
+
+  template<typename Pred>
+  size_t erase_if(Pred&& pred) {
+    auto old_size = size();
+    storage().erase(std::remove_if(storage().begin(), storage().end(), std::forward<Pred>(pred)),
+                    storage().end());
+    return old_size - size();
+  }
 };
 
 }

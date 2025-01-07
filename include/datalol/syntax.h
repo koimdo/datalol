@@ -65,14 +65,26 @@ public:
   static constexpr size_t MAX_VARS = 64;
   typedef std::bitset<MAX_VARS> vars_t;
 protected:
+  struct iterator {
+    const char *p;
+    size_t stride;
+    constexpr bool operator!=(const iterator& o) const { return p != o.p; }
+    const void *operator*() { return p; }
+    iterator& operator++()
+    {
+      p += stride;
+      return *this;
+    }
+    iterator(const void *p, size_t stride): p(static_cast<const char*>(p)), stride(stride) {}
+  };
   struct Impl {
     Impl(ident id);
     const void *p = nullptr;
     ident id;
     int nvar;
+    virtual iterator begin() const = 0;
+    virtual iterator end() const = 0;
   };
-
-  static_assert(std::is_standard_layout<Impl>::value, "Must be standard layout!");
 
   Impl *impl;
 
@@ -88,13 +100,18 @@ protected:
 
   friend class Query;
   void set(const void *p) const { impl->p = p; }
+
+  iterator begin() const { return impl->begin(); }
+  iterator end() const { return impl->end(); }
 public:
+  constexpr bool is(const Var_& o) const { return impl == o.impl; }
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
   void zap() const { impl->p = nullptr; }
   const void *get() const { return impl->p; }
   int get_id() const noexcept { return impl->nvar; }
+  static const Var_ null;
 };
 
 class Rule {
@@ -107,18 +124,15 @@ public:
   };
 
   class Elem : public IPrint {
-    typedef void (*eval_t)(Elem&);
     friend class Query;
-    eval_t eval_ = nullptr;
     Rule *rule_;
   protected:
     elem_meta meta;
-    Elem(eval_t eval_, const elem_meta& m);
-    void set_eval(eval_t eval_);
+    Elem(const elem_meta& m);
     Elem(const Elem&) = delete;
     Rule& rule() noexcept { return *rule_; }
   public:
-    void eval() { (*eval_)(*this); }
+    virtual void eval() = 0;
   };
 
   class Body : public Elem {
@@ -127,6 +141,11 @@ public:
     Var_ *undo_vars;
     unsigned undo_count;
     friend class Query;
+
+    virtual size_t count() = 0;
+    virtual void propose(Var_ out) = 0;
+    virtual void intersect(Var_ out) = 0;
+
   protected:
     void next(bool doit) {
       if (doit) {
@@ -163,6 +182,7 @@ private:
   unsigned head = 0, last = 0;
   unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
   unsigned idx;
+  std::vector<std::vector<Body*>> leapers;
   std::vector<Var_> undo_stack;
 };
 
@@ -178,6 +198,16 @@ public:
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
     flat::set<T, Compare> candidates;
+    iterator begin() const override
+    {
+      flat::span<T> sp(candidates);
+      return iterator(sp.begin(), sizeof(T));
+    }
+    iterator end() const override
+    {
+      flat::span<T> sp(candidates);
+      return iterator(sp.end(), sizeof(T));
+    }
   };
 
   bool test(const T& t) const
@@ -209,6 +239,33 @@ public:
     }
     return os;
   }
+
+  // TODO: variant for binder values
+  void propose(const T& t) const
+  {
+    static_cast<Impl*>(impl)->candidates.insert(t);
+  }
+
+  void clear_propose() const
+  {
+    static_cast<Impl*>(impl)->candidates.clear();
+  }
+
+  bool contains(const T& t) const
+  {
+    return static_cast<Impl*>(impl)->candidates.contains(t);
+  }
+  template<typename F>
+  void retain_if(F&& f) const
+  {
+    auto& candidates = static_cast<Impl*>(impl)->candidates;
+    candidates.erase_if([this, &f](const T& t) {
+      set(&t);
+      bool res = f();
+      return !res;
+    });
+    zap();
+  }
 };
 
 class Query {
@@ -239,6 +296,7 @@ private:
   Rule::Elem& get_elem(unsigned i);
 
   void run_rule(Rule& r, size_t current_delta);
+  void run_var(Rule& r, int vidx);
 
   flat::autorelease pool;
   flat::guard current_query;
@@ -335,10 +393,10 @@ class thunk : public thunk_base {
   struct head : Rule::Head {
     thunk fun;
     head(thunk&& th)
-      : Rule::Head(eval_head, fun.get_meta())
+      : Rule::Head(fun.get_meta())
       , fun(std::move(th))
     {}
-    static void eval_head(Rule::Elem& self) { (void)static_cast<head&>(self).fun.apply(); }
+    void eval() override { (void)fun.apply(); }
     void print(std::ostream& os) const override final { os << fun; }
   };
 
@@ -361,22 +419,36 @@ class thunk : public thunk_base {
     using bound_t = Var<Res>;
     bound_t var;
     binder(thunk&& fun, bound_t& var)
-      : Rule::Body(eval, fun.get_meta())
+      : Rule::Body(fun.get_meta())
       , fun(std::move(fun))
       , var(std::move(var))
     {
       meta.positive.set(var.get_id());
       meta.positive &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
     }
-    static void eval(Rule::Elem& self_)
+    void eval() override final
     {
-      binder& self = static_cast<binder&>(self_);
-      auto res = self.fun.apply(); // `res` is now alive for the rest of the call chain
-      self.next(self.var.unify(res));
+      auto res = fun.apply(); // `res` is now alive for the rest of the call chain
+      next(var.unify(res));
     }
     void print(std::ostream& os) const override final
     {
       bound_t::do_print(os, var) << " == " << fun;
+    }
+    size_t count() override { return 1; }
+    void propose(Var_ out) override
+    {
+      assert(out.is(var));
+      var.propose(fun.apply()); // FIXME: by pointer
+    }
+    void intersect(Var_ out) override
+    {
+      assert(out.is(var));
+      auto res = fun.apply();
+      bool there = var.contains(res);
+      var.clear_propose();
+      if (there)
+        var.propose(res);
     }
   };
 

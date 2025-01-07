@@ -151,9 +151,8 @@ void Var_::register_var(const Var_* v)
   current_vars->set(v->impl->nvar);
 }
 
-Rule::Elem::Elem(eval_t eval_, const elem_meta& m)
-  : eval_(eval_)
-  , meta(m)
+Rule::Elem::Elem(const elem_meta& m)
+  : meta(m)
 {
 }
 

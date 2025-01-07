@@ -1,6 +1,7 @@
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 #include <datalol/debug.h>
+#include <limits>
 
 bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
 {
@@ -54,6 +55,20 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     next = &e;
     e.rule_ = &r;
   }
+
+  // Step 4: configure leapers for undo stack
+  // For var i, the possible leapers are those with i ∈ pos and neg ⊆ {var j : j < i}
+  Rule::vars_t valid;
+  for (auto v : r.undo_stack) {
+    std::vector<Rule::Body*> level;
+    for (unsigned i=r.head+1; i<r.last; i++) {
+      auto vars = get_meta(i);
+      if (vars.positive.test(v.get_id()) && ((vars.negative & valid) == vars.negative))
+        level.push_back(&static_cast<Rule::Body&>(get_elem(i)));
+    }
+    r.leapers.push_back(std::move(level));
+    valid.set(v.get_id());
+  }
 }
 
 void Query::configure()
@@ -87,12 +102,51 @@ void Query::configure()
   DEBUG_PROBE(BREAK_CONFIGURE);
 }
 
+void Query::run_var(Rule& r, int vidx)
+{
+  Var_ v = r.undo_stack[vidx];
+  auto& leapers = r.leapers[vidx];
+  size_t min_count = std::numeric_limits<size_t>::max();
+  Rule::Body *min_leaper = nullptr;
+  for (auto leaper : leapers) {
+    auto count = leaper->count();
+    if (count < min_count) {
+      min_count = count;
+      min_leaper = leaper;
+    }
+  }
+
+  if (!min_count)
+    return;
+
+  min_leaper->propose(v);
+  for (auto l : leapers) {
+    if (l != min_leaper)
+      l->intersect(v);
+  }
+
+  if (vidx == r.undo_stack.size()-1) {
+    auto& head = static_cast<Rule::Head&>(get_elem(r.head));
+    for (auto p : v) {
+      v.set(p);
+      head.eval();
+    }
+  } else {
+    for (auto p : v) {
+      v.set(p);
+      run_var(r, vidx+1);
+      v.zap();
+    }
+  }
+}
+
 void Query::run_rule(Rule& r, size_t current_delta)
 {
-  r.seminaive_current = current_delta;
-  auto start = r.head+1;
-  r.idx = start;
-  get_elem(start).eval();
+  // r.seminaive_current = current_delta;
+  // auto start = r.head+1;
+  // r.idx = start;
+  // get_elem(start).eval();
+  run_var(r, 0);
 }
 
 

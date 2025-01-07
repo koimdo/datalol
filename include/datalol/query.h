@@ -12,10 +12,14 @@
 #include <type_traits>
 
 namespace detail {
-  struct unify_ {
+  struct unify_base {
     // Elementwise cases
     template<class R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
-    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
+    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
+    {
+      assert(false && "Must override");
+      return false;
+    }
 
     template<typename S, typename R>
     constexpr bool operator()(size_t, const S&, const R&) const
@@ -24,6 +28,10 @@ namespace detail {
       return false;             // Never reached
     }
   };
+  struct unify_ : unify_base {
+    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
+  };
+
   template<typename Sel, typename Row>
   bool unify(const Sel& sel, const Row& row)
   {
@@ -139,7 +147,7 @@ struct Matcher_base : public Rule::Body {
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
 
   Matcher_base(Sel&& sel, Origin& origin)
-    : Rule::Body(run_full, {detail::mark_vars(sel), {}, &origin})
+    : Rule::Body({detail::mark_vars(sel), {}, &origin})
     , selector(std::forward<Sel>(sel))
     , origin(origin)
   {}
@@ -149,10 +157,58 @@ struct Matcher_base : public Rule::Body {
     os << origin.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
   }
 
-  static
-  void run_full(Rule::Elem& self_)
+  size_t count_impl()
   {
-    Derived& self = static_cast<Derived&>(self_);
+    Derived& self = static_cast<Derived&>(*this);
+    return self.get_coll().size();   // TODO: indexing, etc. for now it's a good hint
+  }
+
+  struct unify_propose : detail::unify_base {
+    Var_ leapvar;
+    unify_propose(Var_ leapvar): leapvar(leapvar) {}
+    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
+    {
+      if (!leapvar.is(s))
+        return s.test(r);
+      s.propose(r);
+      return true;
+    }
+  };
+
+  void propose_impl(Var_ out)
+  {
+    Derived& self = static_cast<Derived&>(*this);
+    for (auto const& row : self.get_coll())
+      for_each_in_tuple(unify_propose{out}, selector, row);
+  }
+
+  struct unify_intersect {
+    Var_ leapvar;
+    Derived& self;
+    template<class T> constexpr bool operator()(size_t, const T& v) const { return true; }
+    template<class T> constexpr bool operator()(size_t, const Var<T>& v) const
+    {
+      if (!leapvar.is(v))
+        return true;
+      v.retain_if([this]() {
+        for (auto const& row : self.get_coll())
+          if (detail::unify(self.selector, row))
+            return true;
+        return false;
+      });
+      return true;
+    }
+  };
+
+  void intersect_impl(Var_ out)
+  {
+    Derived& self = static_cast<Derived&>(*this);
+    for_each_in_tuple(unify_intersect{out, self}, selector);
+  }
+
+  void eval_impl()
+  {
+    Derived& self = static_cast<Derived&>(*this);
     for (auto const& row : self.get_coll()) {
       self.next(detail::unify(self.selector, row));
     }
@@ -210,6 +266,11 @@ public:
     struct Body : Matcher_base<Body, selector_t, external_> {
       using Matcher_base<Body, selector_t, external_>::Matcher_base;
       const Coll& get_coll() const noexcept { return this->origin.coll; }
+
+      size_t count() override final { return this->count_impl(); }
+      void propose(Var_ out) override final { this->propose_impl(out); }
+      void intersect(Var_ out) override final { this->intersect_impl(out); }
+      void eval() override final { this->eval_impl(); }
     };
 
     return Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
@@ -297,15 +358,14 @@ struct table<T> : public Collection_base {
       Sel selector;
       table& rel;
       Head(Sel&& selector, table& rel)
-        : Rule::Head(eval, {{}, detail::mark_vars(selector), &rel})
+        : Rule::Head({{}, detail::mark_vars(selector), &rel})
         , selector(std::move(selector))
         , rel(rel)
       {}
-      static void eval(Rule::Elem& self_)
+      void eval() override final
       {
-        Head& self = static_cast<Head&>(self_);
-        auto res = transform_each(self.selector, detail::get_value{});
-        self.rel.append(std::move(res));
+        auto res = transform_each(selector, detail::get_value{});
+        rel.append(std::move(res));
       }
       void print(std::ostream& os) const override final
       {
@@ -319,6 +379,11 @@ struct table<T> : public Collection_base {
       {
         return this->rule().use_delta() ? this->origin.delta : this->origin.all;
       }
+
+      size_t count() override final { return this->count_impl(); }
+      void propose(Var_ out) override final { this->propose_impl(out); }
+      void intersect(Var_ out) override final { this->intersect_impl(out); }
+      void eval() override final { this->eval_impl(); }
     };
 
     operator Rule::ubody()
