@@ -3,10 +3,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=suggest-override -Wshadow=local"
 
 add_library(${DATALOL_LIB} STATIC
   # Please keep this list sorted
+  datalol.cpp
   debug.cpp
   memory.cpp
-  query.cpp
-  syntax.cpp
   trace.cpp
 )
 
