@@ -41,17 +41,30 @@ TEST(Trivial, test0) {
 }
 
 TEST(Trivial, reachable) {
-  std::set<std::tuple<int, int>> edges;
+  std::set<std::tuple<int, int>> edges, answer;
   edges.emplace(1, 2);
   edges.emplace(2, 3);
   edges.emplace(3, 3);
   edges.emplace(3, 4);
+
   DATALOL(reachability) {
     auto E = external(edges, "edges");
     table<int, int> Reachable("Reachable");
     Var<int> u("u"), v("v"), w("w");
     Reachable(u, v) << E(u, v);
     Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
-    THUNK(std::cout << *u << " reaches " << *v << "\n") << Reachable(u, v);
+    THUNK((answer.emplace(*u, *v)), &answer) << Reachable(u, v);
   }
+
+  std::set<std::tuple<int, int>> expected = {
+    {1, 2},
+    {1, 3},
+    {1, 4},
+    {2, 3},
+    {2, 4},
+    {3, 3},
+    {3, 4},
+  };
+
+  ASSERT_EQ(answer, expected);
 }

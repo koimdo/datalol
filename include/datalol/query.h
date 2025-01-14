@@ -160,7 +160,10 @@ struct Matcher_base : public Rule::Body {
   size_t count_impl()
   {
     Derived& self = static_cast<Derived&>(*this);
-    return self.get_coll().size();   // TODO: indexing, etc. for now it's a good hint
+    size_t res = 0;
+    for (auto const& c : self.get_coll())
+      res += c.size(); // TODO: indexing, etc. for now it's a good hint
+    return res;
   }
 
   struct unify_propose : detail::unify_base {
@@ -178,8 +181,9 @@ struct Matcher_base : public Rule::Body {
   void propose_impl(Var_ out)
   {
     Derived& self = static_cast<Derived&>(*this);
-    for (auto const& row : self.get_coll())
-      for_each_in_tuple(unify_propose{out}, selector, row);
+    for (auto const& coll : self.get_coll())
+      for (auto const& row : coll)
+        for_each_in_tuple(unify_propose{out}, selector, row);
   }
 
   struct unify_intersect {
@@ -191,9 +195,10 @@ struct Matcher_base : public Rule::Body {
       if (!leapvar.is(v))
         return true;
       v.retain_if([this]() {
-        for (auto const& row : self.get_coll())
-          if (detail::unify(self.selector, row))
-            return true;
+        for (auto const& coll : self.get_coll())
+          for (auto const& row : coll)
+            if (detail::unify(self.selector, row))
+              return true;
         return false;
       });
       return true;
@@ -209,9 +214,9 @@ struct Matcher_base : public Rule::Body {
   void eval_impl()
   {
     Derived& self = static_cast<Derived&>(*this);
-    for (auto const& row : self.get_coll()) {
-      self.next(detail::unify(self.selector, row));
-    }
+    for (auto const& coll : self.get_coll())
+      for (auto const& row : coll)
+        self.next(detail::unify(self.selector, row));
   }
 };
 
@@ -265,7 +270,8 @@ public:
     using selector_t = decltype(build_selector(std::forward<SelectArgs>(args)...));
     struct Body : Matcher_base<Body, selector_t, external_> {
       using Matcher_base<Body, selector_t, external_>::Matcher_base;
-      const Coll& get_coll() const noexcept { return this->origin.coll; }
+      flat::span<typename std::remove_reference<Coll>::type>
+      get_coll() const noexcept { return {&this->origin.coll, 1}; }
 
       size_t count() override final { return this->count_impl(); }
       void propose(Var_ out) override final { this->propose_impl(out); }
@@ -295,32 +301,34 @@ struct table<T> : public Collection_base {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
-  flat::set<value_type> all;
-  flat::set<value_type> delta, next_delta;
+  flat::set<value_type> stable;
+  flat::set<value_type> recent;
+  flat::set<value_type> to_add;
 
   void append(value_type&& t)
   {
-    if (!all.contains(t))
-      next_delta.insert(std::move(t));
+    to_add.insert(std::move(t));
   }
 
   size_t merge() override final
   {
-    if (all.empty()) {
-      std::swap(all, delta);
-    } else if (!delta.empty()) {
-      all = all.set_union(delta);
-    }
-    delta = next_delta.diff(all);
     // TODO: combined union/diff operation
     // FIXME: indices
-    next_delta.clear();
-    return delta.size();
+    if (stable.empty()) {
+      std::swap(stable, recent);
+    } else if (!recent.empty()) {
+      stable = stable.set_union(recent);
+    }
+    recent = to_add.diff(stable);
+    to_add.clear();
+    return recent.size();
   }
 
   void print(std::ostream& os) const override final
   {
-    print_(os, this->all);
+    print_(os, this->stable, "stable");
+    print_(os, this->recent, "recent");
+    print_(os, this->to_add, "to_add");
     // TODO: indices?
   }
 
@@ -329,22 +337,16 @@ struct table<T> : public Collection_base {
     return Json::Value() << id.get_name() << true << id.type_name();
   }
 
-  Json::Value get_contents() const override final { return get_contents_common(this->all /* TODO: columns */); }
+  Json::Value get_contents() const override final { return get_contents_common(this->stable /* TODO: columns */); }
 
   template<class S>
-  void print_(std::ostream& os, const S& s) const
+  void print_(std::ostream& os, const S& s, const char *title) const
   {
     auto name = this->id.get_name();
-    os << "{";
+    os << "." << title << ": " "{";
     for (auto const& row : s)
-      os << "\n  " << name << "(" << detail::print_tuple<value_type>(row) << ")";
-    os <<"\n}";
-  }
-
-  template<typename... Args>
-  void insert(Args&&... args) {
-    value_type it(std::forward<Args>(args)...);
-    this->all.insert(it);
+      os << " " << name << "(" << detail::print_tuple<value_type>(row) << ")";
+    os <<" }\n";
   }
 
   // This class is required, since when we create T(v1, v2, ...), we don't know wheather
@@ -375,9 +377,17 @@ struct table<T> : public Collection_base {
 
     struct Body : Matcher_base<Body, Sel, table> {
       using Matcher_base<Body, Sel, table>::Matcher_base;
-      const flat::set<value_type>& get_coll() noexcept
+      flat::span<flat::set<value_type>> get_coll() noexcept
       {
-        return this->use_delta() ? this->origin.delta : this->origin.all;
+        int delta = this->use_delta();
+        if (delta < 0)
+          return {&this->origin.stable, 1};
+        else if (delta > 0)
+          // contiguous members with same access specifier are contiguous in memory.
+          // This returns both `stable` and `recent`.
+          return {&this->origin.stable, 2};
+        else // delta == 0
+          return {&this->origin.recent, 1};
       }
 
       size_t count() override final { return this->count_impl(); }

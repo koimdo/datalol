@@ -143,7 +143,7 @@ public:
       for (unsigned i=0; i<undo_count; ++i)
         undo_vars[i].zap();
     }
-    bool use_delta() const noexcept { return rule().seminaive_current == idx; }
+    bool use_delta() const noexcept { return rule().seminaive_current - idx; }
   };
 
   class Head : public Elem {
@@ -168,7 +168,7 @@ private:
   friend class Stubs;
   unsigned head = 0, last = 0;
   unsigned start = 0;
-  unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
+  int seminaive_current = 0;
   std::vector<std::vector<Body*>> leapers;
   std::vector<Var_> undo_stack;
 };

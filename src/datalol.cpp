@@ -206,7 +206,7 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     verify_neg(bound, r, vars);
 
     pos &= ~bound;
-    if (pos.any()) {
+    if (vars.positive.any()) {
       auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
       elem.undo_vars = stack.data() + stack.size();
       for (auto v : this->vars)
@@ -339,17 +339,21 @@ void Query::explain(const std::string& coll, const void *target)
 
 void Query::run()
 {
-  size_t changed = 1;
+  size_t changed = 0;
+  for (auto& r : rules)
+    if (!r.seminaive_current)
+      // Run nonrecursive rules only once, before the recursive rules
+      run_rule(r, 0);
+  for (auto c : to_merge)
+    changed += c->merge();
   for (int iter = 0; changed; iter++) {
     DEBUG_PROBE(BREAK_FIXPOINT);
     for (auto& r : rules) {
-      if (!r.seminaive_current) {
-        run_rule(r, 0);
-      } else {
-        for (size_t i=r.head+1; i<r.last; ++i) {
-          if (recursive.test(i))
-            run_rule(r, i-r.head);
-        }
+      if (!r.seminaive_current)
+        continue;
+      for (size_t i=r.head+1; i<r.last; ++i) {
+        if (recursive.test(i))
+          run_rule(r, i-r.head);
       }
     }
     changed = 0;
