@@ -377,7 +377,7 @@ struct table<T> : public Collection_base {
       using Matcher_base<Body, Sel, table>::Matcher_base;
       const flat::set<value_type>& get_coll() noexcept
       {
-        return this->rule().use_delta() ? this->origin.delta : this->origin.all;
+        return this->use_delta() ? this->origin.delta : this->origin.all;
       }
 
       size_t count() override final { return this->count_impl(); }

@@ -65,25 +65,13 @@ public:
   static constexpr size_t MAX_VARS = 64;
   typedef std::bitset<MAX_VARS> vars_t;
 protected:
-  struct iterator {
-    const char *p;
-    size_t stride;
-    constexpr bool operator!=(const iterator& o) const { return p != o.p; }
-    const void *operator*() { return p; }
-    iterator& operator++()
-    {
-      p += stride;
-      return *this;
-    }
-    iterator(const void *p, size_t stride): p(static_cast<const char*>(p)), stride(stride) {}
-  };
   struct Impl {
     Impl(ident id);
     const void *p = nullptr;
     ident id;
     int nvar;
-    virtual iterator begin() const = 0;
-    virtual iterator end() const = 0;
+    virtual flat::span<const void*> contents() const = 0;
+    virtual void clear_contents() = 0;
   };
 
   Impl *impl;
@@ -101,8 +89,8 @@ protected:
   friend class Query;
   void set(const void *p) const { impl->p = p; }
 
-  iterator begin() const { return impl->begin(); }
-  iterator end() const { return impl->end(); }
+  flat::span<const void*> contents() const { return impl->contents(); }
+  void clear_propose() { impl->clear_contents(); }
 public:
   constexpr bool is(const Var_& o) const { return impl == o.impl; }
   Var_(const Var_&) = default;
@@ -127,10 +115,11 @@ public:
     friend class Query;
     Rule *rule_;
   protected:
+    int idx;
     elem_meta meta;
     Elem(const elem_meta& m);
     Elem(const Elem&) = delete;
-    Rule& rule() noexcept { return *rule_; }
+    Rule& rule() const noexcept { return *rule_; }
   public:
     virtual void eval() = 0;
   };
@@ -149,12 +138,12 @@ public:
   protected:
     void next(bool doit) {
       if (doit) {
-        ++rule().idx;
         next_->eval();
       }
       for (unsigned i=0; i<undo_count; ++i)
         undo_vars[i].zap();
     }
+    bool use_delta() const noexcept { return rule().seminaive_current == idx; }
   };
 
   class Head : public Elem {
@@ -174,14 +163,12 @@ public:
     cursor& operator&(Rule::ubody&& b);
     ~cursor();
   };
-
-  bool use_delta() const noexcept { return seminaive_current == idx; }
 private:
   friend class Query;
   friend class Stubs;
   unsigned head = 0, last = 0;
+  unsigned start = 0;
   unsigned seminaive_current = 0;     // FIXME: finer choice of Delta'd relation
-  unsigned idx;
   std::vector<std::vector<Body*>> leapers;
   std::vector<Var_> undo_stack;
 };
@@ -197,17 +184,23 @@ public:
 
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
-    flat::set<T, Compare> candidates;
-    iterator begin() const override
+    static const T& cast(const void *p) { return *static_cast<const T*>(p); }
+    struct my_cmp {
+      Compare cmp;
+      bool operator()(const void*l, const void *r) const
+      {
+        return cmp(cast(l), cast(r));
+      }
+    };
+    flat::set<const void*, my_cmp> candidates;
+    flat::span<const void*> contents() const override
     {
-      flat::span<T> sp(candidates);
-      return iterator(sp.begin(), sizeof(T));
+      std::cerr << "In var " << id.get_name() << ": " << candidates.size() << " candidates\n";
+      for (auto t : candidates)
+        std::cerr << cast(t) << "\n";
+      return candidates;
     }
-    iterator end() const override
-    {
-      flat::span<T> sp(candidates);
-      return iterator(sp.end(), sizeof(T));
-    }
+    void clear_contents() override final { candidates.clear(); }
   };
 
   bool test(const T& t) const
@@ -243,7 +236,7 @@ public:
   // TODO: variant for binder values
   void propose(const T& t) const
   {
-    static_cast<Impl*>(impl)->candidates.insert(t);
+    static_cast<Impl*>(impl)->candidates.insert(&t);
   }
 
   void clear_propose() const
@@ -253,14 +246,14 @@ public:
 
   bool contains(const T& t) const
   {
-    return static_cast<Impl*>(impl)->candidates.contains(t);
+    return static_cast<Impl*>(impl)->candidates.contains(&t);
   }
   template<typename F>
   void retain_if(F&& f) const
   {
     auto& candidates = static_cast<Impl*>(impl)->candidates;
-    candidates.erase_if([this, &f](const T& t) {
-      set(&t);
+    candidates.erase_if([this, &f](const void *p) {
+      set(p);
       bool res = f();
       return !res;
     });
@@ -319,6 +312,7 @@ private:
   Query(Query&&) = delete;
   void print_vars(std::ostream& os, const Rule::elem_meta& vs) const;
   void run();
+  void print_rule(std::ostream& os, const Rule&) const;
   void print(std::ostream& os) const;
 
   struct iter : public control {
@@ -396,7 +390,7 @@ class thunk : public thunk_base {
       : Rule::Head(fun.get_meta())
       , fun(std::move(th))
     {}
-    void eval() override { (void)fun.apply(); }
+    void eval() override final { (void)fun.apply(); }
     void print(std::ostream& os) const override final { os << fun; }
   };
 
@@ -435,7 +429,7 @@ class thunk : public thunk_base {
     {
       bound_t::do_print(os, var) << " == " << fun;
     }
-    size_t count() override { return 1; }
+    size_t count() override final { return 1; } // FIXME: check if filter
     void propose(Var_ out) override
     {
       assert(out.is(var));

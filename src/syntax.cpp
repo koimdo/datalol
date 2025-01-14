@@ -67,6 +67,7 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
 
 void Query::add_elem(Rule::uelem me)
 {
+  me->idx = elems.size()-rules.back().head;
   elems.push_back(me);
 }
 
@@ -95,11 +96,12 @@ void Query::iter::operator++()
 {
   q->configure();
   q->print(std::cout);          // TODO: remove printf
+  std::cout << "\n";
   q->run();
   q = nullptr;
 }
 
-void Query::print(std::ostream& os) const
+void Query::print_rule(std::ostream& os, const Rule& r) const
 {
   auto print_with_vars = [this, &os](const Rule::Elem& e) {
     os << "[";
@@ -107,19 +109,24 @@ void Query::print(std::ostream& os) const
     os << "]";
     e.print(os);
   };
+  auto const& h = elems[r.head];
+  print_with_vars(*h);
+  os << " << ";
+  int count = 0;
+  for (int j = r.head+1; j < r.last; j++) {
+    os << (count++ ? " & " : "") << (r.seminaive_current == j-r.head ? "^" : "");
+    auto const& b = elems[j];
+    print_with_vars(*b);
+  }
+}
+
+void Query::print(std::ostream& os) const
+{
   os << "Query: {";
   size_t i=0;
   for (auto const& r : rules) {
     if (i) os << "\n";
-    auto const& h = elems[r.head];
-    print_with_vars(*h);
-    os << " << ";
-    int count = 0;
-    for (int j = r.head+1; j < r.last; j++) {
-      os << (count++ ? " & " : "") << (recursive.test(j) ? "^" : "");
-      auto const& b = elems[j];
-      print_with_vars(*b);
-    }
+    print_rule(os, r);
     os << ";";
     i++;
   }

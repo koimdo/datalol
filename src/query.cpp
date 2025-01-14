@@ -55,6 +55,7 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     next = &e;
     e.rule_ = &r;
   }
+  r.start = r.head+order.front();
 
   // Step 4: configure leapers for undo stack
   // For var i, the possible leapers are those with i ∈ pos and neg ⊆ {var j : j < i}
@@ -86,7 +87,7 @@ void Query::configure()
       auto coll = get_meta(i).collection;
       if (coll && to_merge.contains(coll)) {
         recursive.set(i);
-        r.seminaive_current = i;
+        r.seminaive_current = i-r.head;
       }
     }
   }
@@ -105,6 +106,7 @@ void Query::configure()
 void Query::run_var(Rule& r, int vidx)
 {
   Var_ v = r.undo_stack[vidx];
+  std::cerr << "Running var " << vidx << "/" << r.undo_stack.size() << " " << *v.impl << " leapers {";
   auto& leapers = r.leapers[vidx];
   size_t min_count = std::numeric_limits<size_t>::max();
   Rule::Body *min_leaper = nullptr;
@@ -114,7 +116,9 @@ void Query::run_var(Rule& r, int vidx)
       min_count = count;
       min_leaper = leaper;
     }
+    std::cerr << " " << *leaper << ": " << count;
   }
+  std::cerr << " }\n";
 
   if (!min_count)
     return;
@@ -127,26 +131,30 @@ void Query::run_var(Rule& r, int vidx)
 
   if (vidx == r.undo_stack.size()-1) {
     auto& head = static_cast<Rule::Head&>(get_elem(r.head));
-    for (auto p : v) {
+    for (auto p : v.contents()) {
       v.set(p);
+      std::cerr << "HEAD " << head << "\n";
       head.eval();
     }
   } else {
-    for (auto p : v) {
+    for (auto p : v.contents()) {
       v.set(p);
       run_var(r, vidx+1);
-      v.zap();
+      for (size_t i=vidx; i<r.undo_stack.size(); i++)
+        r.undo_stack[i].zap();  // May inadvertently set further vars.
     }
   }
+  v.clear_propose();
 }
 
 void Query::run_rule(Rule& r, size_t current_delta)
 {
-  // r.seminaive_current = current_delta;
-  // auto start = r.head+1;
-  // r.idx = start;
-  // get_elem(start).eval();
-  run_var(r, 0);
+  r.seminaive_current = current_delta;
+  std::cerr << "RUN rule ";
+  Query::print_rule(std::cerr, r);
+  std::cerr << " current_delta=" << current_delta << "\n";
+  get_elem(r.start).eval();
+  //run_var(r, 0);
 }
 
 
@@ -166,7 +174,7 @@ void Query::run()
       } else {
         for (size_t i=r.head+1; i<r.last; ++i) {
           if (recursive.test(i))
-            run_rule(r, i);
+            run_rule(r, i-r.head);
         }
       }
     }
