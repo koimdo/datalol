@@ -211,9 +211,21 @@ struct Matcher_base : public Rule::Body {
     for_each_in_tuple(unify_intersect{out, self}, selector);
   }
 
+  template<class T>
+  static
+  const T& get_elem(const T& t) { return t; }
+  static
+  const value_type& get_elem(const std::tuple<value_type>& t) { return std::get<0>(t); }
+
   void eval_impl()
   {
     Derived& self = static_cast<Derived&>(*this);
+    if (!self.undo.count) {
+      auto t = transform_each(selector, detail::get_value{});
+      for (auto const& coll : self.get_coll())
+        self.next(coll.contains(get_elem(t)));
+      return;
+    }
     for (auto const& coll : self.get_coll())
       for (auto const& row : coll)
         self.next(detail::unify(self.selector, row));

@@ -1,4 +1,5 @@
 #include "test_common.h"
+#include <random>
 
 struct A {
   int i, j, k;
@@ -13,6 +14,10 @@ struct A {
   bool operator<(const A& o) const
   {
     return std::make_tuple(i, j, k) < std::make_tuple(o.i, o.j, o.k);
+  }
+  bool operator==(const A& o) const
+  {
+    return std::make_tuple(i, j, k) == std::make_tuple(o.i, o.j, o.k);
   }
 };
 
@@ -41,11 +46,14 @@ TEST(Trivial, test0) {
 }
 
 TEST(Trivial, reachable) {
-  std::set<std::tuple<int, int>> edges, answer;
-  edges.emplace(1, 2);
-  edges.emplace(2, 3);
-  edges.emplace(3, 3);
-  edges.emplace(3, 4);
+  using edges_t = flat::set<std::tuple<int, int>>;
+  edges_t edges = {
+    {1, 2},
+    {2, 3},
+    {3, 3},
+    {3, 4},
+  };
+  edges_t answer;
 
   DATALOL(reachability) {
     auto E = external(edges, "edges");
@@ -53,10 +61,10 @@ TEST(Trivial, reachable) {
     Var<int> u("u"), v("v"), w("w");
     Reachable(u, v) << E(u, v);
     Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
-    THUNK((answer.emplace(*u, *v)), &answer) << Reachable(u, v);
+    THUNK((answer.insert({*u, *v})), &answer) << Reachable(u, v);
   }
 
-  std::set<std::tuple<int, int>> expected = {
+  edges_t expected = {
     {1, 2},
     {1, 3},
     {1, 4},
@@ -67,4 +75,81 @@ TEST(Trivial, reachable) {
   };
 
   ASSERT_EQ(answer, expected);
+}
+
+class TriangleTest : public ::testing::Test {
+protected:
+  static flat::set<std::tuple<int, int>> edges;
+  using result_t = flat::set<std::tuple<int, int, int>>;
+
+  static result_t result;
+
+  static constexpr int NUM_NODES = 200;
+
+  static void SetUpTestSuite()
+  {
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    // give "true" 1/4 of the time
+    // give "false" 3/4 of the time
+    std::bernoulli_distribution d(0.25);
+
+    for (int i=1; i<=NUM_NODES; i++)
+      for (int j=1; j<=NUM_NODES; j++)
+        if (d(gen))
+          edges.insert({i, j});
+    nested_hand(result);
+  }
+
+  static void nested_hand(result_t& res)
+  {
+    for (auto const& ab : edges) {
+      auto a1 = std::get<0>(ab);
+      auto b1 = std::get<1>(ab);
+      for (auto const& bc : edges) {
+        auto b2 = std::get<0>(bc);
+        auto c1 = std::get<1>(bc);
+        if (b1 != b2)
+          continue;
+        if (edges.contains({c1, a1}))
+          res.insert({a1,b1,c1});
+      }
+    }
+  }
+};
+
+flat::set<std::tuple<int, int>> TriangleTest::edges;
+TriangleTest::result_t TriangleTest::result;
+
+TEST_F(TriangleTest, hand) {
+  result_t myres;
+  nested_hand(myres);
+  ASSERT_EQ(myres.size(), result.size());
+}
+
+#define TRIANGLE_QUERY()                                                \
+  Var<int> a("a"), b("b"), c("c");                                      \
+  table<int, int, int> Triangle("Triangle");                            \
+  auto E = external(edges, "edges");                                    \
+                                                                        \
+  Triangle(a, b, c) << E(a, b) & E(b, c) & E(c, a);                     \
+  THUNK((myres.insert({*a,*b,*c})), &myres) << Triangle(a, b, c)
+
+TEST_F(TriangleTest, nested) {
+  result_t myres;
+  DATALOL(triangles) {
+    TRIANGLE_QUERY();
+    triangles.set_policy(Query::NESTED);
+  }
+  ASSERT_EQ(myres.size(), result.size());
+}
+
+TEST_F(TriangleTest, wcoj) {
+  result_t myres;
+  DATALOL(triangles) {
+    TRIANGLE_QUERY();
+    triangles.set_policy(Query::WCOJ);
+  }
+  ASSERT_NE(myres.size(), result.size()); // FIXME: turn into ASSERT_EQ() when WCOJ is fixed
 }
