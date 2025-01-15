@@ -112,6 +112,8 @@ protected:
         auto c1 = std::get<1>(bc);
         if (b1 != b2)
           continue;
+        if (!(a1 != b1 && b1 != c1 && a1 != c1))
+          continue;
         if (edges.contains({c1, a1}))
           res.insert({a1,b1,c1});
       }
@@ -133,8 +135,8 @@ TEST_F(TriangleTest, hand) {
   table<int, int, int> Triangle("Triangle");                            \
   auto E = external(edges, "edges");                                    \
                                                                         \
-  Triangle(a, b, c) << E(a, b) & E(b, c) & E(c, a);                     \
-  THUNK((myres.insert({*a,*b,*c})), &myres) << Triangle(a, b, c)
+  Triangle(a, b, c) << E(a, b) & E(b, c) & THUNK(a != b && b != c && a != c) & E(c, a);              \
+  THUNK((myres.insert({a, b, c})), &myres) << Triangle(a, b, c)
 
 TEST_F(TriangleTest, nested) {
   result_t myres;

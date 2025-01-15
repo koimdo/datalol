@@ -171,10 +171,10 @@ struct Matcher_base : public Rule::Body {
     unify_propose(Var_ leapvar): leapvar(leapvar) {}
     template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
     {
-      if (!leapvar.is(s))
-        return s.test(r);
-      s.propose(r);
-      return true;
+      auto res = s.unify(r);
+      if (res && s.is(leapvar))
+        s.propose(*s);
+      return res;
     }
   };
 

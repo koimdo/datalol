@@ -8,7 +8,6 @@
 #include <flat/memory>
 #include <flat/span>
 #include <flat/set>
-#include <flat/map>
 #include "debug.h"
 #include <json/json.h>
 
@@ -210,16 +209,13 @@ public:
     void clear_contents() override final { candidates.clear(); }
   };
 
-  bool test(const T& t) const
+  bool unify(const T& t) const
   {
     Compare cmp;                // FIXME: in impl?
-    return get() && !cmp(*get(), t) && !cmp(t, *get());
-  }
-
-  bool unify(const T& t) const
-
-  {
-    return get() ? test(t) : (set(&t), true);
+    return get()
+      // FIXME: use eq-like comaprison instead of this inefficient incantation
+      ? !cmp(*get(), t) && !cmp(t, *get())
+      : (set(&t), true);
   }
 
   const T *get() const noexcept
@@ -400,7 +396,7 @@ class thunk : public thunk_base {
   struct head : Rule::Head {
     thunk fun;
     head(thunk&& th)
-      : Rule::Head(fun.get_meta())
+      : Rule::Head(th.get_meta())
       , fun(std::move(th))
     {}
     void eval() override final { (void)fun.apply(); }
@@ -410,14 +406,16 @@ class thunk : public thunk_base {
   struct guard : Rule::Body {
     thunk fun;
     guard(thunk&& th)
-      : Rule::Body(eval_body, fun.get_meta)
+      : Rule::Body(th.get_meta())
       , fun(std::move(th))
     {}
-    static void eval_body(Rule::Elem& self_)
+    void eval() override final
     {
-      guard& self = static_cast<guard&>(self_);
-      self.next(self.fun.apply() && true);
+      next(fun.apply() && true);
     }
+    size_t count() override { return -1UL; }
+    void propose(Var_) override {}
+    void intersect(Var_) override {}
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
@@ -435,7 +433,7 @@ class thunk : public thunk_base {
     }
     void eval() override final
     {
-      auto res = fun.apply(); // `res` is now alive for the rest of the call chain
+      decltype(fun.apply()) res = fun.apply(); // `res` is now alive for the rest of the call chain
       next(var.unify(res));
     }
     void print(std::ostream& os) const override final
@@ -479,7 +477,7 @@ public:
   {
     static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
-    return Query::allocate<head>(std::move(*this));
+    return Query::allocate<guard>(std::move(*this));
   }
 
   Rule::ubody operator==(Var<Res>& var)

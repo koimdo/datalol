@@ -206,14 +206,12 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     verify_neg(bound, r, vars);
 
     pos &= ~bound;
-    if (vars.positive.any()) {
-      auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
-      elem.undo.vars = stack.data() + stack.size();
-      for (auto v : this->vars)
-        if (pos.test(v.get_id()))
-          stack.push_back(v);
-      elem.undo.count = (stack.data() + stack.size()) - elem.undo.vars;
-    }
+    auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
+    elem.undo.vars = stack.data() + stack.size();
+    for (auto v : this->vars)
+      if (pos.test(v.get_id()))
+        stack.push_back(v);
+    elem.undo.count = (stack.data() + stack.size()) - elem.undo.vars;
 
     bound |= pos;
   }
