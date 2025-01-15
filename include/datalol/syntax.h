@@ -11,6 +11,8 @@
 #include "debug.h"
 #include <json/json.h>
 
+namespace datalol {
+
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
   virtual Json::Value to_json() const; // Return string representation
@@ -501,9 +503,11 @@ Rule::ubody operator==(Var<T>& v, thunk<T>&& getter)
   return getter == v;
 }
 
+}
+
 #define THUNK(expr,...)                                                 \
   thunk_base::capture(#expr, [&]() {                                    \
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   })
 
-#define DATALOL(query, ...) for (auto query : ::Query(DEBUG_INFO(), #query, ##__VA_ARGS__))
+#define DATALOL(query, ...) for (auto query : ::datalol::Query(DEBUG_INFO(), #query, ##__VA_ARGS__))

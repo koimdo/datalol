@@ -5,6 +5,9 @@
 #include <memory>
 #include <tuple>
 
+namespace datalol
+{
+
 namespace detail
 {
 
@@ -84,3 +87,5 @@ for_each_in_tuple(F&& f, const T0& t0, const Ts&... ts)
   static_assert(detail::all<(arity == detail::tuple_lift<Ts>::size)...>::value, "All tuples must have the same arity");
   return detail::for_each_impl(std::forward<F>(f), std::make_index_sequence<arity>{}, t0, ts...);
 }
+
+} // namespace datalol

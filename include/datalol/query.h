@@ -11,6 +11,8 @@
 #include <flat/map>
 #include <type_traits>
 
+namespace datalol {
+
 namespace detail {
   struct unify_base {
     // Elementwise cases
@@ -432,3 +434,6 @@ struct table<T0, T1, Rest...> : public table<std::tuple<T0, T1, Rest...>> {
   static_assert(!std::is_base_of<Var_, T1>::value, "Cannot have var type!");
   static_assert(!detail::any<std::is_base_of<Var_, Rest>::value...>::value, "Cannot have var type");
 };
+
+}
+

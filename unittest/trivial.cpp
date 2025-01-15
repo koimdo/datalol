@@ -32,6 +32,7 @@ TEST(Trivial, test0) {
   std::vector<std::tuple<int, int>> results;
 
   DATALOL (qo) {
+    using namespace datalol;
     auto As = external(ASs, "ref");
     auto FAs = external(ASs.filter([](const A&) { return true; }), "value");
 
@@ -56,6 +57,7 @@ TEST(Trivial, reachable) {
   edges_t answer;
 
   DATALOL(reachability) {
+    using namespace datalol;
     auto E = external(edges, "edges");
     table<int, int> Reachable("Reachable");
     Var<int> u("u"), v("v"), w("w");
@@ -131,6 +133,7 @@ TEST_F(TriangleTest, hand) {
 }
 
 #define TRIANGLE_QUERY()                                                \
+  using namespace datalol;                                              \
   Var<int> a("a"), b("b"), c("c");                                      \
   table<int, int, int> Triangle("Triangle");                            \
   auto E = external(edges, "edges");                                    \

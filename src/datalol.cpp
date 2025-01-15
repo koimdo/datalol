@@ -8,6 +8,7 @@
 #include <datalol/query.h>
 #include <datalol/debug.h>
 
+namespace datalol {
 Query *Query::current = nullptr;
 Var_::vars_t *Var_::current_vars = nullptr;
 
@@ -363,3 +364,5 @@ void Query::run()
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;
 }
+
+} // namespace datalol

@@ -115,6 +115,8 @@ struct JsonPipe {
   }
 };
 
+namespace datalol {
+
 using JVal = Json::Value;
 
 // Utility functions for JsonCpp arrays, in the spirit of Qt's QList:
@@ -304,4 +306,6 @@ void debug_break(const debug_info *dbg, debug_flags pos)
   brk["pos"] = pos;
   stubs.notify("breakpoint", std::move(brk));
   stubs.mainloop();
+}
+
 }
