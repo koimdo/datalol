@@ -57,7 +57,7 @@ public:
   {}
   std::string get_name() const noexcept { return id.get_name(); }
   virtual size_t merge() = 0;
-  virtual Json::Value get_contents() const = 0; // FIXME: just use IPrint::to_json()?
+  virtual Json::Value get_contents() const = 0;
 };
 
 class Var_ {
@@ -124,11 +124,18 @@ public:
     virtual void eval() = 0;
   };
 
+  struct undo_pack {
+    Var_ *vars;
+    unsigned count;
+    void zap()
+    {
+      for (unsigned i=0; i<count; ++i)
+        vars[i].zap();
+    }
+  };
   class Body : public Elem {
     using Elem::Elem;
     Elem *next_ = nullptr;
-    Var_ *undo_vars;
-    unsigned undo_count;
     friend class Query;
 
     virtual size_t count() = 0;
@@ -136,12 +143,12 @@ public:
     virtual void intersect(Var_ out) = 0;
 
   protected:
+    undo_pack undo;
     void next(bool doit) {
       if (doit) {
         next_->eval();
       }
-      for (unsigned i=0; i<undo_count; ++i)
-        undo_vars[i].zap();
+      undo.zap();
     }
     bool use_delta() const noexcept { return rule().seminaive_current - idx; }
   };
@@ -263,13 +270,20 @@ public:
 
 class Query {
 public:
+  enum execution_policy {
+    NESTED,
+    WCOJ,
+  };
   class control {
     friend class Query;
   protected:
     Query* q;
     control(Query *q): q(q) {}
   public:
-    // TODO: public configuration methods for query
+    void set_policy(execution_policy p)
+    {
+      q->policy = p;
+    }
   };
 
 private:
@@ -277,11 +291,11 @@ private:
   static Query *current;
 
   debug_info *dbg;
+  execution_policy policy = NESTED;
   std::vector<Rule::uelem> elems;
   std::vector<Rule> rules;
   std::bitset<MAX_ELEMS> recursive;
 
-  // TODO: add typeid for verification on vars, db
   std::vector<Var_> vars;
   std::vector<flat::pool_ptr<Collection_base>> db;
 
@@ -378,7 +392,6 @@ namespace detail {
   struct is_contextual_bool<T, decltype(void(std::declval<T>() ? true : false))> : std::true_type {};
 }
 
-// TODO: perhaps just wrap std::function?
 template<typename Res>
 class thunk : public thunk_base {
   using fun_t = std::function<Res()>;

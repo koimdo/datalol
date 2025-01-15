@@ -208,11 +208,11 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     pos &= ~bound;
     if (vars.positive.any()) {
       auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
-      elem.undo_vars = stack.data() + stack.size();
+      elem.undo.vars = stack.data() + stack.size();
       for (auto v : this->vars)
         if (pos.test(v.get_id()))
           stack.push_back(v);
-      elem.undo_count = (stack.data() + stack.size()) - elem.undo_vars;
+      elem.undo.count = (stack.data() + stack.size()) - elem.undo.vars;
     }
 
     bound |= pos;
@@ -327,8 +327,10 @@ void Query::run_rule(Rule& r, size_t current_delta)
   std::cerr << "RUN rule ";
   Query::print_rule(std::cerr, r);
   std::cerr << " current_delta=" << current_delta << "\n";
-  get_elem(r.start).eval();
-  //run_var(r, 0);
+  switch (policy) {
+  case NESTED: return get_elem(r.start).eval();
+  case WCOJ: return run_var(r, 0);
+  }
 }
 
 
