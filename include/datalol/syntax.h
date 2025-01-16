@@ -88,11 +88,11 @@ protected:
   void register_var(const Var_*);
 
   friend class Query;
-  void set(const void *p) const { impl->p = p; }
 
   flat::span<const void*> contents() const { return impl->contents(); }
   void clear_propose() { impl->clear_contents(); }
 public:
+  void set(const void *p) const { impl->p = p; }
   constexpr bool is(const Var_& o) const { return impl == o.impl; }
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
@@ -128,7 +128,7 @@ public:
   struct undo_pack {
     Var_ *vars;
     unsigned count;
-    void zap()
+    void zap() const
     {
       for (unsigned i=0; i<count; ++i)
         vars[i].zap();
@@ -139,9 +139,9 @@ public:
     Elem *next_ = nullptr;
     friend class Query;
 
-    virtual size_t count() = 0;
-    virtual void propose(Var_ out) = 0;
-    virtual void intersect(Var_ out) = 0;
+    virtual size_t count(undo_pack undo) = 0;
+    virtual void propose(undo_pack undo, Var_ out) = 0;
+    virtual void intersect(undo_pack undo, Var_ out) = 0;
 
   protected:
     undo_pack undo;
@@ -415,9 +415,9 @@ class thunk : public thunk_base {
     {
       next(fun.apply() && true);
     }
-    size_t count() override { return -1UL; }
-    void propose(Var_) override {}
-    void intersect(Var_) override {}
+    size_t count(Rule::undo_pack) override final { return -1UL; }
+    void propose(Rule::undo_pack, Var_) override final {}
+    void intersect(Rule::undo_pack, Var_) override final {}
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
@@ -442,13 +442,13 @@ class thunk : public thunk_base {
     {
       bound_t::do_print(os, var) << " == " << fun;
     }
-    size_t count() override final { return 1; } // FIXME: check if filter
-    void propose(Var_ out) override
+    size_t count(Rule::undo_pack) override final { return 1; } // FIXME: check if filter
+    void propose(Rule::undo_pack, Var_ out) override
     {
       assert(out.is(var));
       var.propose(fun.apply()); // FIXME: by pointer
     }
-    void intersect(Var_ out) override
+    void intersect(Rule::undo_pack, Var_ out) override
     {
       assert(out.is(var));
       auto res = fun.apply();
