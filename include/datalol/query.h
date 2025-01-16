@@ -266,19 +266,8 @@ public:
   }
 };
 
-}
-
-template<typename Coll>
-detail::external_<Coll> external(Coll&& coll, const char *name)
-{
-  return detail::external_<Coll>(std::forward<Coll>(coll), ident::make<Coll>(name));
-}
-
-template<typename...>
-struct table;
-
 template<typename T>
-class table<T> : public Collection_base {
+class table : public Collection_base {
 public:
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
@@ -396,6 +385,33 @@ public:
   auto operator()(SelectArgs&&... args) -> susp<decltype(detail::build_selector(std::forward<SelectArgs>(args)...))> {
     return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
   }
+};
+
+}
+
+template<typename Coll>
+std::reference_wrapper<detail::external_<Coll>> external(Coll&& coll, const char *name)
+{
+  return *Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
+}
+
+template<typename...>
+struct table;
+
+template<typename T>
+class table<T> {
+  flat::pool_ptr<detail::table<T>> impl;
+public:
+  table(const char *name)
+    : impl(Query::allocate<detail::table<T>>(name))
+  {}
+
+public:
+  template<typename... SelectArgs>
+  auto operator()(SelectArgs&&... args) {
+    return (*impl)(std::forward<SelectArgs>(args)...);
+  }
+  ~table() { std::cerr << __PRETTY_FUNCTION__ << "\n"; }
 };
 
 template<typename T0, typename T1, typename... Rest>
