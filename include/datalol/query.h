@@ -159,83 +159,6 @@ struct Matcher_base : public Rule::Body {
     os << origin.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
   }
 
-  size_t count_impl(Rule::undo_pack undo)
-  {
-    // TODO: common refactor with `eval_impl()`
-    Derived& self = static_cast<Derived&>(*this);
-    if (!undo.count) {
-      auto t = transform_each(selector, detail::get_value{});
-      for (auto const& coll : self.get_coll())
-        if (coll.contains(get_elem(t)))
-          return 1;
-      return 0;
-    }
-    size_t res = 0;
-    for (auto const& coll : self.get_coll())
-      for (auto const& row : coll) {
-        res += detail::unify(self.selector, row);
-        undo.zap();
-      }
-    return res;
-  }
-
-  struct unify_propose : detail::unify_base {
-    Var_ leapvar;
-    unify_propose(Var_ leapvar): leapvar(leapvar) {}
-    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
-    {
-      auto res = s.unify(r);
-      if (res && s.is(leapvar))
-        s.propose(*s);
-      return res;
-    }
-  };
-
-  void propose_impl(Rule::undo_pack undo, Var_ out)
-  {
-    Derived& self = static_cast<Derived&>(*this);
-    for (auto const& coll : self.get_coll())
-      for (auto const& row : coll) {
-        for_each_in_tuple(unify_propose{out}, selector, row);
-        undo.zap();
-      }
-  }
-
-  struct unify_intersect {
-    Var_ leapvar;
-    Rule::undo_pack undo;
-    Derived& self;
-    template<class T> constexpr bool operator()(size_t, const T& v) const { return true; }
-    template<class T> constexpr bool operator()(size_t, const Var<T>& v) const
-    {
-      if (!leapvar.is(v))
-        return true;            // keep looking
-      v.retain_if([this, &v]() {
-        const void *current = leapvar.get();
-        for (auto const& coll : self.get_coll()) {
-          for (auto const& row : coll) {
-            bool res = detail::unify(self.selector, row);
-            undo.zap();
-            leapvar.set(current);
-            if (res)
-              return true;
-          }
-        }
-        return false;
-      });
-      return false;             // done looking
-    }
-  };
-
-  void intersect_impl(Rule::undo_pack undo, Var_ out)
-  {
-    Derived& self = static_cast<Derived&>(*this);
-    // Var::retain_if() takes care of current var. only clear the undetermined vars.
-    undo.vars++;
-    undo.count--;
-    for_each_in_tuple(unify_intersect{out, undo, self}, selector);
-  }
-
   template<class T>
   static
   const T& get_elem(const T& t) { return t; }
@@ -310,9 +233,6 @@ public:
       flat::span<typename std::remove_reference<Coll>::type>
       get_coll() const noexcept { return {&this->origin.coll, 1}; }
 
-      size_t count(Rule::undo_pack undo) override final { return this->count_impl(undo); }
-      void propose(Rule::undo_pack undo, Var_ out) override final { this->propose_impl(undo, out); }
-      void intersect(Rule::undo_pack undo, Var_ out) override final { this->intersect_impl(undo, out); }
       void eval() override final { this->eval_impl(); }
     };
 
@@ -427,9 +347,6 @@ struct table<T> : public Collection_base {
           return {&this->origin.recent, 1};
       }
 
-      size_t count(Rule::undo_pack undo) override final { return this->count_impl(undo); }
-      void propose(Rule::undo_pack undo, Var_ out) override final { this->propose_impl(undo, out); }
-      void intersect(Rule::undo_pack undo, Var_ out) override final { this->intersect_impl(undo, out); }
       void eval() override final { this->eval_impl(); }
     };
 

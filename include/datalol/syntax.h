@@ -71,8 +71,6 @@ protected:
     const void *p = nullptr;
     ident id;
     int nvar;
-    virtual flat::span<const void*> contents() const = 0;
-    virtual void clear_contents() = 0;
   };
 
   Impl *impl;
@@ -89,15 +87,13 @@ protected:
 
   friend class Query;
 
-  flat::span<const void*> contents() const { return impl->contents(); }
-  void clear_propose() { impl->clear_contents(); }
-public:
   void set(const void *p) const { impl->p = p; }
-  constexpr bool is(const Var_& o) const { return impl == o.impl; }
+
+public:
+  void zap() const { impl->p = nullptr; }
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
-  void zap() const { impl->p = nullptr; }
   const void *get() const { return impl->p; }
   int get_id() const noexcept { return impl->nvar; }
   static const Var_ null;
@@ -139,10 +135,6 @@ public:
     Elem *next_ = nullptr;
     friend class Query;
 
-    virtual size_t count(undo_pack undo) = 0;
-    virtual void propose(undo_pack undo, Var_ out) = 0;
-    virtual void intersect(undo_pack undo, Var_ out) = 0;
-
   protected:
     undo_pack undo;
     void next(bool doit) {
@@ -177,7 +169,6 @@ private:
   unsigned head = 0, last = 0;
   unsigned start = 0;
   int seminaive_current = 0;
-  std::vector<std::vector<Body*>> leapers;
   std::vector<Var_> undo_stack;
 };
 
@@ -192,28 +183,16 @@ public:
 
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
-    static const T& cast(const void *p) { return *static_cast<const T*>(p); }
-    struct my_cmp {
-      Compare cmp;
-      bool operator()(const void*l, const void *r) const
-      {
-        return cmp(cast(l), cast(r));
-      }
-    };
-    flat::set<const void*, my_cmp> candidates;
-    flat::span<const void*> contents() const override
-    {
-      std::cerr << "In var " << id.get_name() << ": " << candidates.size() << " candidates\n";
-      for (auto t : candidates)
-        std::cerr << cast(t) << "\n";
-      return candidates;
-    }
-    void clear_contents() override final { candidates.clear(); }
+    Compare cmp;
+    Impl(ident id, const Compare& cmp)
+      : Var_::Impl(id)
+      , cmp(cmp)
+    {}
   };
 
   bool unify(const T& t) const
   {
-    Compare cmp;                // FIXME: in impl?
+    auto const& cmp = static_cast<const Impl*>(impl)->cmp;
     return get()
       // FIXME: use eq-like comaprison instead of this inefficient incantation
       ? !cmp(*get(), t) && !cmp(t, *get())
@@ -237,40 +216,13 @@ public:
     }
     return os;
   }
-
-  // TODO: variant for binder values
-  void propose(const T& t) const
-  {
-    static_cast<Impl*>(impl)->candidates.insert(&t);
-  }
-
-  void clear_propose() const
-  {
-    static_cast<Impl*>(impl)->candidates.clear();
-  }
-
-  bool contains(const T& t) const
-  {
-    return static_cast<Impl*>(impl)->candidates.contains(&t);
-  }
-  template<typename F>
-  void retain_if(F&& f) const
-  {
-    auto& candidates = static_cast<Impl*>(impl)->candidates;
-    candidates.erase_if([this, &f](const void *p) {
-      set(p);
-      bool res = f();
-      return !res;
-    });
-    zap();
-  }
 };
 
 class Query {
 public:
   enum execution_policy {
     NESTED,
-    WCOJ,
+    // TODO: WCOJ
   };
   class control {
     friend class Query;
@@ -301,7 +253,6 @@ private:
   Rule::Elem& get_elem(unsigned i);
 
   void run_rule(Rule& r, size_t current_delta);
-  void run_var(Rule& r, int vidx);
 
   flat::autorelease pool;
   flat::guard current_query;
@@ -415,9 +366,6 @@ class thunk : public thunk_base {
     {
       next(fun.apply() && true);
     }
-    size_t count(Rule::undo_pack) override final { return -1UL; }
-    void propose(Rule::undo_pack, Var_) override final {}
-    void intersect(Rule::undo_pack, Var_) override final {}
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
@@ -441,21 +389,6 @@ class thunk : public thunk_base {
     void print(std::ostream& os) const override final
     {
       bound_t::do_print(os, var) << " == " << fun;
-    }
-    size_t count(Rule::undo_pack) override final { return 1; } // FIXME: check if filter
-    void propose(Rule::undo_pack, Var_ out) override
-    {
-      assert(out.is(var));
-      var.propose(fun.apply()); // FIXME: by pointer
-    }
-    void intersect(Rule::undo_pack, Var_ out) override
-    {
-      assert(out.is(var));
-      auto res = fun.apply();
-      bool there = var.contains(res);
-      var.clear_propose();
-      if (there)
-        var.propose(res);
     }
   };
 

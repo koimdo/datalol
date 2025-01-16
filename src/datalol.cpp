@@ -229,26 +229,6 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
     e.rule_ = &r;
   }
   r.start = r.head+order.front();
-
-  // Step 4: configure leapers for undo stack
-  // For var i, the possible leapers are those with i ∈ pos or neg ⊆ {var j : j < i}
-  Rule::vars_t valid;
-  for (auto v : r.undo_stack) {
-    std::cerr << "At var " << *v.impl << " adding leapers [";
-    std::vector<Rule::Body*> level;
-    for (unsigned i=r.head+1; i<r.last; i++) {
-      auto vars = get_meta(i);
-      if (vars.positive.test(v.get_id()) || ((vars.negative & valid) == vars.negative)) {
-        std::cerr << " " << get_elem(i);
-        level.push_back(&static_cast<Rule::Body&>(get_elem(i)));
-      } else {
-        std::cerr << " !" << get_elem(i);
-      }
-    }
-    std::cerr << " ]\n";
-    r.leapers.push_back(std::move(level));
-    valid.set(v.get_id());
-  }
 }
 
 void Query::configure()
@@ -282,49 +262,6 @@ void Query::configure()
   DEBUG_PROBE(BREAK_CONFIGURE);
 }
 
-void Query::run_var(Rule& r, int vidx)
-{
-  if (vidx == r.undo_stack.size()) {
-    // Everything determined
-    auto& head = get_elem(r.head);
-    std::cerr << "HEAD " << head << "\n";
-    head.eval();
-    return;
-  }
-
-  Var_ v = r.undo_stack[vidx];
-  std::cerr << "Running var " << vidx << "/" << r.undo_stack.size() << " " << *v.impl << " leapers {";
-  auto& leapers = r.leapers[vidx];
-  size_t min_count = std::numeric_limits<size_t>::max();
-  Rule::Body *min_leaper = nullptr;
-  Rule::undo_pack undo{r.undo_stack.data()+vidx, r.undo_stack.size()-vidx};
-  for (auto leaper : leapers) {
-    auto count = leaper->count(undo);
-    if (count < min_count) {
-      min_count = count;
-      min_leaper = leaper;
-    }
-    std::cerr << " " << *leaper << ": " << count;
-  }
-  std::cerr << " }\n";
-
-  if (!min_count)
-    return;
-
-  min_leaper->propose(undo, v);
-  for (auto l : leapers) {
-    if (l != min_leaper)
-      l->intersect(undo, v);
-  }
-
-  for (auto p : v.contents()) {
-    v.set(p);
-    run_var(r, vidx+1);
-  }
-  v.zap();
-  v.clear_propose();
-}
-
 void Query::run_rule(Rule& r, size_t current_delta)
 {
   r.seminaive_current = current_delta;
@@ -333,7 +270,6 @@ void Query::run_rule(Rule& r, size_t current_delta)
   std::cerr << " current_delta=" << current_delta << "\n";
   switch (policy) {
   case NESTED: return get_elem(r.start).eval();
-  case WCOJ: return run_var(r, 0);
   }
 }
 
