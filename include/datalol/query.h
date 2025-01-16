@@ -77,7 +77,7 @@ namespace detail {
     bool operator () (size_t i, const Var<T>& v)
     {
       os << (i? ", " : "");
-      Var<T>::do_print(os, v);
+      v.print(os);
       return true;
     }
   };
@@ -138,7 +138,6 @@ namespace detail {
     for_each_in_tuple(generic_json{res}, t);
     return res;
   };
-}
 
 template<typename Derived, typename Sel, typename Origin>
 struct Matcher_base : public Rule::Body {
@@ -149,14 +148,14 @@ struct Matcher_base : public Rule::Body {
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
 
   Matcher_base(Sel&& sel, Origin& origin)
-    : Rule::Body({detail::mark_vars(sel), {}, &origin})
+    : Rule::Body({mark_vars(sel), {}, &origin})
     , selector(std::forward<Sel>(sel))
     , origin(origin)
   {}
 
   void print(std::ostream& os) const override final
   {
-    os << origin.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
+    os << origin.get_name() << "(" << print_tuple<Sel>(selector) << ")";
   }
 
   template<class T>
@@ -172,8 +171,7 @@ struct Matcher_base : public Rule::Body {
 
   void config_impl()
   {
-    auto& self = static_cast<Derived&>(*this);
-    if (!self.undo.count) {
+    if (!undo.count) {
       config = POINT;
     } else {
       config = FULL;
@@ -183,9 +181,9 @@ struct Matcher_base : public Rule::Body {
   void eval_point()
   {
     auto& self = static_cast<Derived&>(*this);
-    auto t = transform_each(selector, detail::get_value{});
+    auto t = transform_each(selector, get_value{});
     for (auto const& coll : self.get_coll())
-      self.next(coll.contains(get_elem(t)));
+      next(coll.contains(get_elem(t)));
   }
 
   void eval_full()
@@ -193,7 +191,7 @@ struct Matcher_base : public Rule::Body {
     auto& self = static_cast<Derived&>(*this);
     for (auto const& coll : self.get_coll())
       for (auto const& row : coll)
-        self.next(detail::unify(self.selector, row));
+        next(unify(self.selector, row));
   }
 
   void eval_impl()
@@ -219,7 +217,7 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
   Json::Value res;
   Json::Value& values = (res["values"] = Json::arrayValue);
   for (auto const& t : coll)
-    values << detail::json_of(t);
+    values << json_of(t);
   if (columns.size()) {
     Json::Value& jcolumns = (res["columns"] = Json::arrayValue);
     for (auto const& col : columns)
@@ -231,8 +229,6 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
 template<typename Coll>
 class external_ : public Collection_base {
   Coll coll;
-public:
-  using value_type = typename flat::remove_cvref<Coll>::type::value_type;
 
   Json::Value to_json() const override final
   {
@@ -246,6 +242,10 @@ public:
     os << id.get_name() << " = external<" << id.type_name() << ">, size=" << coll.size();
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); return 0; }
+
+public:
+  using value_type = typename flat::remove_cvref<Coll>::type::value_type;
+
   external_(const Coll& coll_, const ident& id)
     : Collection_base(id)
     , coll(coll_) {}
@@ -266,24 +266,28 @@ public:
   }
 };
 
+}
+
 template<typename Coll>
-external_<Coll> external(Coll&& coll, const char *name)
+detail::external_<Coll> external(Coll&& coll, const char *name)
 {
-  return external_<Coll>(std::forward<Coll>(coll), ident::make<Coll>(name));
+  return detail::external_<Coll>(std::forward<Coll>(coll), ident::make<Coll>(name));
 }
 
 template<typename...>
 struct table;
 
 template<typename T>
-struct table<T> : public Collection_base {
+class table<T> : public Collection_base {
+public:
+  static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
+  using value_type = T;
+
   table(const char *name)
     : Collection_base(ident::make<table>(name))
   {}
 
-  static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
-  using value_type = T;
-
+private:
   flat::set<value_type> stable;
   flat::set<value_type> recent;
   flat::set<value_type> to_add;
@@ -320,7 +324,7 @@ struct table<T> : public Collection_base {
     return Json::Value() << id.get_name() << true << id.type_name();
   }
 
-  Json::Value get_contents() const override final { return get_contents_common(this->stable /* TODO: columns */); }
+  Json::Value get_contents() const override final { return detail::get_contents_common(this->stable /* TODO: columns */); }
 
   template<class S>
   void print_(std::ostream& os, const S& s, const char *title) const
@@ -358,8 +362,8 @@ struct table<T> : public Collection_base {
       }
     };
 
-    struct Body : Matcher_base<Body, Sel, table> {
-      using Matcher_base<Body, Sel, table>::Matcher_base;
+    struct Body : detail::Matcher_base<Body, Sel, table> {
+      using detail::Matcher_base<Body, Sel, table>::Matcher_base;
       flat::span<flat::set<value_type>> get_coll() noexcept
       {
         int delta = this->use_delta();
@@ -387,10 +391,10 @@ struct table<T> : public Collection_base {
       return Query::allocate<Head>(std::move(selector), rel);
     }
   };
-
+public:
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> susp<decltype(build_selector(std::forward<SelectArgs>(args)...))> {
-    return susp<decltype(build_selector(args...))>{*this, build_selector(std::forward<SelectArgs>(args)...)};
+  auto operator()(SelectArgs&&... args) -> susp<decltype(detail::build_selector(std::forward<SelectArgs>(args)...))> {
+    return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
   }
 };
 
@@ -403,4 +407,3 @@ struct table<T0, T1, Rest...> : public table<std::tuple<T0, T1, Rest...>> {
 };
 
 }
-

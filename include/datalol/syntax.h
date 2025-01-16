@@ -53,9 +53,7 @@ protected:
   Collection_base(Collection_base&&) = default;
 public:
   Collection_base(const Collection_base&) = delete;
-  explicit Collection_base(const ident& id)
-    : id(id)
-  {}
+  explicit Collection_base(const ident& id);
   std::string get_name() const noexcept { return id.get_name(); }
   virtual size_t merge() = 0;
   virtual Json::Value get_contents() const = 0;
@@ -208,12 +206,12 @@ public:
   const T *operator->() const noexcept { return get(); }
   operator const T&() const noexcept { return *get(); }
   const T& operator*() const noexcept { return *get(); }
-  static std::ostream& do_print(std::ostream& os, const Var& v)
+
+  std::ostream& print(std::ostream& os) const
   {
-    os << *v.impl;
-    if (v.get()) {
-      const T& t = *v.get();
-      os << "=" << t;
+    os << *impl;
+    if (get()) {
+      os << "=" << *get();
     }
     return os;
   }
@@ -248,7 +246,7 @@ private:
   std::bitset<MAX_ELEMS> recursive;
 
   std::vector<Var_> vars;
-  std::vector<flat::pool_ptr<Collection_base>> db;
+  std::vector<Collection_base*> db;
 
   Rule::elem_meta& get_meta(unsigned i);
   Rule::Elem& get_elem(unsigned i);
@@ -262,6 +260,7 @@ private:
   friend class Rule::cursor;
   template<class T, class Cmp>
   friend class Var;
+  friend class Collection_base;
 
   struct cmp {
     bool operator()(Collection_base *l, Collection_base *r) const;
@@ -389,7 +388,7 @@ class thunk : public thunk_base {
     }
     void print(std::ostream& os) const override final
     {
-      bound_t::do_print(os, var) << " == " << fun;
+      var.print(os) << " == " << fun;
     }
   };
 

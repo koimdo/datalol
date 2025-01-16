@@ -37,6 +37,12 @@ std::string ident::get_name() const
   return std::string();
 }
 
+Collection_base::Collection_base(const ident& id)
+  : id(id)
+{
+  Query::current->db.push_back(this);
+}
+
 Rule::cursor::cursor(uhead&& hh, ubody&& bb)
 {
   auto q = Query::current;
