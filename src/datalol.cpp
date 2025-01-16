@@ -166,6 +166,10 @@ Rule::Elem::Elem(const elem_meta& m)
 {
 }
 
+void Rule::Elem::configure()
+{
+}
+
 thunk_base::thunk_base(const char *desc)
   : desc(desc)
   , vars(*Var_::current_vars)
@@ -218,6 +222,10 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
   }
 
   verify_neg(bound, r, get_meta(r.head));
+
+  // Now that bound vars are known, configure elements for e.g. index access
+  for (unsigned i=r.head; i != r.last; i++)
+    get_elem(i).configure();
 
   // Final step: chain rule body (and head) for execution
   auto next = &get_elem(r.head);

@@ -165,18 +165,43 @@ struct Matcher_base : public Rule::Body {
   static
   const value_type& get_elem(const std::tuple<value_type>& t) { return std::get<0>(t); }
 
-  void eval_impl()
+  enum query_type {
+    FULL,
+    POINT,
+  } config;
+
+  void config_impl()
   {
-    Derived& self = static_cast<Derived&>(*this);
+    auto& self = static_cast<Derived&>(*this);
     if (!self.undo.count) {
-      auto t = transform_each(selector, detail::get_value{});
-      for (auto const& coll : self.get_coll())
-        self.next(coll.contains(get_elem(t)));
-      return;
+      config = POINT;
+    } else {
+      config = FULL;
     }
+  }
+
+  void eval_point()
+  {
+    auto& self = static_cast<Derived&>(*this);
+    auto t = transform_each(selector, detail::get_value{});
+    for (auto const& coll : self.get_coll())
+      self.next(coll.contains(get_elem(t)));
+  }
+
+  void eval_full()
+  {
+    auto& self = static_cast<Derived&>(*this);
     for (auto const& coll : self.get_coll())
       for (auto const& row : coll)
         self.next(detail::unify(self.selector, row));
+  }
+
+  void eval_impl()
+  {
+    switch (config) {
+    case POINT: return eval_point();
+    case FULL: return eval_full();
+    }
   }
 };
 
@@ -233,6 +258,7 @@ public:
       flat::span<typename std::remove_reference<Coll>::type>
       get_coll() const noexcept { return {&this->origin.coll, 1}; }
 
+      void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
     };
 
@@ -347,6 +373,7 @@ struct table<T> : public Collection_base {
           return {&this->origin.recent, 1};
       }
 
+      void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
     };
 

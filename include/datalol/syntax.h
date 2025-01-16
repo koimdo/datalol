@@ -118,6 +118,7 @@ public:
     Elem(const Elem&) = delete;
     Rule& rule() const noexcept { return *rule_; }
   public:
+    virtual void configure();
     virtual void eval() = 0;
   };
 
