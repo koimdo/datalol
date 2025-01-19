@@ -1,0 +1,9 @@
+// -*- C++ -*-
+#pragma once
+
+#include "syntax.h"
+#include "query.h"
+
+#ifdef DATALOL_SHORT_THUNK
+#define $_(expr, ...) THUNK(expr, ##__VA_ARGS__)
+#endif

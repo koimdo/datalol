@@ -1,3 +1,4 @@
+#define DATALOL_SHORT_THUNK
 #include "test_common.h"
 #include <random>
 
@@ -40,7 +41,7 @@ TEST(Trivial, test0) {
     std::cout << "FAs: " << FAs << "\n";
     Var<A> a("a");
     Var<int> i("i"), k("k");
-    THUNK((results.emplace_back(i, k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
+    THUNK((results.emplace_back(*i, *k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
   }
   //std::cout << qo.to_json();
   ASSERT_EQ(results.size(), 4);
@@ -137,7 +138,7 @@ TEST_F(TriangleTest, hand) {
   Var<int> a("a"), b("b"), c("c");                                      \
   auto E = external(edges, "edges");                                    \
                                                                         \
-  THUNK((myres.insert({a, b, c})), &myres) << E(a, b) & E(b, c) & THUNK(a != b && b != c && a != c) & E(c, a)
+  THUNK((myres.insert({*a, *b, *c})), &myres) << E(a, b) & E(b, c) & $_(*a != *b && *b != *c && *a != *c) & E(c, a)
 
 TEST_F(TriangleTest, nested) {
   result_t myres;

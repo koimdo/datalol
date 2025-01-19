@@ -204,7 +204,6 @@ public:
     return res;
   }
   const T *operator->() const noexcept { return get(); }
-  operator const T&() const noexcept { return *get(); }
   const T& operator*() const noexcept { return *get(); }
 
   std::ostream& print(std::ostream& os) const
@@ -311,7 +310,9 @@ public:
 template<class T, class Cmp>
 Var<T, Cmp>::Var(const char *name)
   : Var_(Query::current->mkvar<T>(name))
-{}
+{
+  static_assert(sizeof(Var<T, Cmp>) == sizeof(Var_), "Extra members?");
+}
 
 template<typename Res>
 class thunk;
@@ -364,7 +365,7 @@ class thunk : public thunk_base {
     {}
     void eval() override final
     {
-      next(fun.apply() && true);
+      next(fun.apply() ? true : false);
     }
     void print(std::ostream& os) const override final { os << fun;; }
   };
@@ -439,7 +440,7 @@ Rule::ubody operator==(Var<T>& v, thunk<T>&& getter)
 }
 
 #define THUNK(expr,...)                                                 \
-  thunk_base::capture(#expr, [&]() {                                    \
+  ::datalol::thunk_base::capture(#expr, [&]() {                         \
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   })
 

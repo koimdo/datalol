@@ -204,9 +204,11 @@ struct Matcher_base : public Rule::Body {
 };
 
 template<typename... Sel>
-std::tuple<typename flat::remove_cvref<Sel>::type...>
+auto
 build_selector(Sel&&... sel)
 {
+  // FIXME: figure out the real construction pattern where `Var` is always move-constructed
+  // and everything else is perfectly forwarded
   return std::tuple<typename flat::remove_cvref<Sel>::type...>
     (std::forward<typename flat::remove_cvref<Sel>::type>(sel)...);
 }
