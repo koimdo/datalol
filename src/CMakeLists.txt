@@ -8,9 +8,6 @@ add_library(${DATALOL_LIB} STATIC
   memory.cpp
 )
 
-add_dependencies(${DATALOL_LIB} jsoncpp)
-target_link_libraries(${DATALOL_LIB} "-ljsoncpp")
-
 install( TARGETS ${DATALOL_LIB}
   ARCHIVE DESTINATION lib PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
 )

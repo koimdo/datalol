@@ -1,0 +1,7 @@
+/.gitattributes export-ignore
+/.gitignore     export-ignore
+
+/TODO.org       export-ignore
+/external/      export-ignore
+/unittest/      export-ignore
+/Makefile       export-ignore
