@@ -1,15 +1,16 @@
 // -*- C++ -*-
 #pragma once
 
+#include <cassert>
 #include <vector>
 #include <iostream>
 #include <bitset>
 #include <functional>
-#include <flat/memory>
-#include <flat/span>
-#include <flat/set>
-#include "debug.h"
 #include <json/json.h>
+
+#include "relation.h"
+#include "debug.h"
+#include "pool.h"
 
 namespace datalol {
 
@@ -149,9 +150,8 @@ public:
     using Elem::Elem;
   };
 
-  using uelem = flat::pool_ptr<Elem>;
-  using ubody = flat::pool_ptr<Body>;
-  using uhead = flat::pool_ptr<Head>;
+  using ubody = detail::pool::wrap<Body>;
+  using uhead = detail::pool::wrap<Head>;
 
   class cursor {
     friend cursor operator<<(uhead&& h, ubody&& b);
@@ -238,9 +238,11 @@ private:
   static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
 
+  const char *name;
   debug_info *dbg;
+  Query *old_current;
   execution_policy policy = NESTED;
-  std::vector<Rule::uelem> elems;
+  std::vector<Rule::Elem*> elems;
   std::vector<Rule> rules;
   std::bitset<MAX_ELEMS> recursive;
 
@@ -252,8 +254,7 @@ private:
 
   void run_rule(Rule& r, size_t current_delta);
 
-  flat::autorelease pool;
-  flat::guard current_query;
+  detail::pool pool;
 
   friend class Stubs;
   friend class Rule::cursor;
@@ -265,8 +266,8 @@ private:
     bool operator()(Collection_base *l, Collection_base *r) const;
   };
 
-  flat::set<Collection_base *, cmp> to_merge; // TODO: real query plan
-  void configure_rule(Rule& r, flat::span<int> order);
+  detail::relation<Collection_base *, cmp> to_merge; // TODO: real query plan
+  void configure_rule(Rule& r, detail::span<int> order);
   void configure();
   void explain(const std::string& coll, const void *target);
 
@@ -284,15 +285,14 @@ private:
     void operator++();
   };
 
-  void add_elem(Rule::uelem e);
+  void add_elem(Rule::Elem *e);
   Rule *start_rule();
   void end_rule(Rule *r);
 
   template<class T>
   Var_ mkvar(const char *name)
   {
-    auto buf = pool.allocate<typename Var<T>::Impl>(ident::make<T>(name));
-    Var_::Impl *impl = buf.get(flat::unsafe_extract_pointer{});
+    Var_::Impl *impl = pool.allocate<typename Var<T>::Impl>(ident::make<T>(name)).get();
     impl->nvar = vars.size();
     vars.push_back(Var_(impl));
     return impl;
@@ -300,9 +300,10 @@ private:
 public:
   template<typename T, typename... Args>
   static
-  flat::pool_ptr<T> allocate(Args&&... args) { return current->pool.allocate<T>(std::forward<Args>(args)...); }
+  auto allocate(Args&&... args) { return current->pool.template allocate<T>(std::forward<Args>(args)...); }
 
   Query(debug_info *dbg, const char *name);
+  ~Query();
   iter begin() { return iter{this}; }
   iter end() const { return iter{nullptr}; }
 };
@@ -444,4 +445,4 @@ Rule::ubody operator==(Var<T>& v, thunk<T>&& getter)
     return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
   })
 
-#define DATALOL(query, ...) for (auto query : ::datalol::Query(DEBUG_INFO(), #query, ##__VA_ARGS__))
+#define DATALOL(query, ...) for (auto query : ::datalol::Query(DEBUG_INFO(), #query))

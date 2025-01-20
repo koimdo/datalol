@@ -1,15 +1,13 @@
 // -*- C++ -*-
 #pragma once
 
-#include "stamp"
-#include "debug.h"
 #include <algorithm>
 
 namespace flat {
 
 // A common code base class for sequence-adapter sorted containers
 template<typename Key, typename Value, typename Compare>
-class sorted_base : public stamp {
+class sorted_base  {
   using Sequence = std::vector<Value>;
 
   template<typename Iter, typename K>
@@ -48,16 +46,16 @@ public:
   typedef typename Sequence::size_type size_type;
   typedef typename Sequence::pointer pointer;
   typedef typename Sequence::const_pointer const_pointer;
-  typedef stamp::iterator<typename Sequence::const_iterator> const_iterator;
-  typedef stamp::iterator<typename Sequence::iterator> iterator;
-  typedef stamp::iterator<typename Sequence::const_reverse_iterator> const_reverse_iterator;
+  typedef typename Sequence::const_iterator const_iterator;
+  typedef typename Sequence::iterator iterator;
+  typedef typename Sequence::const_reverse_iterator const_reverse_iterator;
   typedef const_reverse_iterator reverse_iterator;
 
   const Compare& key_comp() const { return compare_; }
 
   explicit sorted_base(const Compare& comp): compare_(comp) {}
 
-  sorted_base(const sorted_base& o): stamp(), compare_(o.compare_), storage_(o.storage_) {}
+  sorted_base(const sorted_base& o): compare_(o.compare_), storage_(o.storage_) {}
 
   sorted_base(std::initializer_list<value_type> init, const Compare& cmp = Compare())
     : sorted_base(init.begin(), init.end(), cmp) {}
@@ -81,20 +79,18 @@ public:
     auto itb = find_(p);
     if (!itb.second) {
       itb.first = storage().insert(itb.first, std::forward<value_type>(p));
-      invalidate();
     }
 
-    return { mkiter(std::move(itb.first)), !itb.second };
+    return { std::move(itb.first), !itb.second };
   }
 
   std::pair<iterator, bool> insert(const value_type& p) {
     auto itb = find_(p);
     if (!itb.second) {
       itb.first = storage().insert(itb.first, p);
-      invalidate();
     }
 
-    return { mkiter(std::move(itb.first)), !itb.second };
+    return { std::move(itb.first), !itb.second };
   }
 
   bool operator==(const sorted_base& o) const {
@@ -106,22 +102,18 @@ public:
   bool operator!=(const sorted_base& o) const { return &o != this && !(*this == o); }
 
   const_iterator erase(const_iterator pos) {
-    invalidate();
-    return mkiter(storage().erase(pos.base()));
+    return storage().erase(pos.base());
   }
 
   bool erase(const Key& p) {
     auto itb = find_(p);
     if (itb.second) {
-      invalidate();
       storage().erase(itb.first);
     }
     return itb.second;
   }
 
   void clear() {
-    if (!empty())
-      invalidate();
     storage().clear();
   }
 
@@ -139,17 +131,17 @@ public:
 
   bool empty() const { return storage().empty(); }
 
-  const_iterator begin() const { return mkiter(storage().begin()); }
-  const_iterator cbegin() const { return mkiter(storage().begin()); }
-  const_iterator end() const { return mkiter(storage().end()); }
-  const_iterator cend() const { return mkiter(storage().end()); }
+  const_iterator begin() const { return storage().begin(); }
+  const_iterator cbegin() const { return storage().begin(); }
+  const_iterator end() const { return storage().end(); }
+  const_iterator cend() const { return storage().end(); }
 
-  const_reverse_iterator rbegin() const { return mkiter(storage().rbegin()); }
-  const_reverse_iterator rend() const { return mkiter(storage().rend()); }
+  const_reverse_iterator rbegin() const { return storage().rbegin(); }
+  const_reverse_iterator rend() const { return storage().rend(); }
 
   const_iterator find(const Key& p) const {
     auto itb = find_(p);
-    return mkiter(itb.second ? itb.first : storage().end());
+    return itb.second ? itb.first : storage().end();
   }
 
   template<typename Pred>

@@ -6,7 +6,6 @@ add_library(${DATALOL_LIB} STATIC
   datalol.cpp
   debug.cpp
   memory.cpp
-  trace.cpp
 )
 
 add_dependencies(${DATALOL_LIB} jsoncpp)

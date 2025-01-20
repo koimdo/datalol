@@ -3,7 +3,6 @@
 #include <cstring>
 #include <limits>
 
-#include <flat/pnr_utils.h>
 #include <datalol/syntax.h>
 #include <datalol/query.h>
 #include <datalol/debug.h>
@@ -48,8 +47,8 @@ Rule::cursor::cursor(uhead&& hh, ubody&& bb)
   auto q = Query::current;
 
   r = q->start_rule();
-  q->add_elem(hh);
-  q->add_elem(bb);
+  q->add_elem(hh.get());
+  q->add_elem(bb.get());
 }
 
 Rule::cursor::~cursor()
@@ -64,7 +63,7 @@ Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b)
 
 Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
 {
-  Query::current->add_elem(b);
+  Query::current->add_elem(b.get());
   return *this;
 }
 
@@ -74,7 +73,7 @@ std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
   return os;
 }
 
-void Query::add_elem(Rule::uelem me)
+void Query::add_elem(Rule::Elem *me)
 {
   me->idx = elems.size()-rules.back().head;
   elems.push_back(me);
@@ -95,17 +94,21 @@ void Query::end_rule(Rule *r)
 }
 
 Query::Query(debug_info *dbg, const char *name)
-  : pool(name)
+  : name(name)
   , dbg(dbg)
+  , old_current(current)
 {
-  current_query.set(&current, this);
+  current = this;
+}
+
+Query::~Query()
+{
+  current = old_current;
 }
 
 void Query::iter::operator++()
 {
   q->configure();
-  q->print(std::cout);          // TODO: remove printf
-  std::cout << "\n";
   q->run();
   q = nullptr;
 }
@@ -205,7 +208,7 @@ Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i]->meta; }
 Rule::Elem& Query::get_elem(unsigned i) { return *elems[i]; }
 
 
-void Query::configure_rule(Rule& r, flat::span<int> order)
+void Query::configure_rule(Rule& r, detail::span<int> order)
 {
   // Step 3: set undo variables
   Rule::vars_t bound;
@@ -236,23 +239,26 @@ void Query::configure_rule(Rule& r, flat::span<int> order)
   // Final step: chain rule body (and head) for execution
   auto next = &get_elem(r.head);
   next->rule_ = &r;
-  for (auto it = order.rbegin(), end = order.rend(); it != end; ++it) {
-    auto& e = static_cast<Rule::Body&>(get_elem(r.head+*it));
+  for (auto it = order.end(), end = order.begin(); it != end; --it) {
+    auto& e = static_cast<Rule::Body&>(get_elem(r.head+it[-1]));
     e.next_ = next;
     next = &e;
     e.rule_ = &r;
   }
-  r.start = r.head+order.front();
+  r.start = r.head+order[0];
 }
 
 void Query::configure()
 {
   // Step 1: figure out relations that are on the HEAD side
+  std::vector<Collection_base*> heads;
   for (auto& r : rules) {
     auto c = get_meta(r.head).collection;
     if (c)
-      to_merge.insert(c);
+      heads.push_back(c);
   }
+  to_merge.assign(std::move(heads));
+
   // Step 2: Mark recursions in rule bodies
   // TODO: stratify using SCC on the rule graph.
   for (auto& r : rules) {
@@ -271,7 +277,7 @@ void Query::configure()
     // TODO: smarter ordering
     for (int i=r.head+1; i<r.last; i++)
       order.push_back(i-r.head);
-    configure_rule(r, order);
+    configure_rule(r, {order.data(), order.size()});
   }
   DEBUG_PROBE(BREAK_CONFIGURE);
 }
@@ -279,9 +285,6 @@ void Query::configure()
 void Query::run_rule(Rule& r, size_t current_delta)
 {
   r.seminaive_current = current_delta;
-  std::cerr << "RUN rule ";
-  Query::print_rule(std::cerr, r);
-  std::cerr << " current_delta=" << current_delta << "\n";
   switch (policy) {
   case NESTED: return get_elem(r.start).eval();
   }

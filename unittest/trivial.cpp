@@ -1,6 +1,7 @@
 #define DATALOL_SHORT_THUNK
 #include "test_common.h"
 #include <random>
+#include "set"
 
 struct A {
   int i, j, k;
@@ -133,6 +134,43 @@ TEST_F(TriangleTest, hand) {
   ASSERT_EQ(myres.size(), result.size());
 }
 
+TEST_F(TriangleTest, noinline_hand) {
+  result_t myres;
+  int a, b, c;
+
+  auto head = [&a, &b, &c, &myres]() __attribute__((noinline)) {
+    myres.insert({a,b,c});
+  };
+  auto lca = [&a, &b, &c, &head]() __attribute__((noinline)) {
+    if (edges.contains({c, a}))
+      head();
+  };
+  auto guard = [&a, &b, &c, &lca]() __attribute__((noinline)) {
+    if (a != b && b != c && a != c)
+      lca();
+  };
+  auto lbc = [&a, &b, &c, &guard]() __attribute__((noinline)) {
+    for (auto const& bc : edges) {
+      auto b1 = std::get<0>(bc);
+      c = std::get<1>(bc);
+      if (b != b1)
+        continue;
+      guard();
+    }
+  };
+
+  auto lab = [&a, &b, &c, &lbc]() __attribute__((noinline)) {
+    for (auto const& ab : edges) {
+      a = std::get<0>(ab);
+      b = std::get<1>(ab);
+      lbc();
+    }
+  };
+
+  lab();
+  ASSERT_EQ(myres.size(), result.size());
+}
+
 #define TRIANGLE_QUERY()                                                \
   using namespace datalol;                                              \
   Var<int> a("a"), b("b"), c("c");                                      \
@@ -147,6 +185,17 @@ TEST_F(TriangleTest, nested) {
     triangles.set_policy(Query::NESTED);
   }
   ASSERT_EQ(myres.size(), result.size());
+}
+
+TEST_F(TriangleTest, reachable) {
+  DATALOL(reachability) {
+    using namespace datalol;
+    auto E = external(edges, "edges");
+    table<int, int> Reachable("Reachable");
+    Var<int> u("u"), v("v"), w("w");
+    Reachable(u, v) << E(u, v);
+    Reachable(u, w) << E(u, v) & Reachable(v, w);
+  }
 }
 
 TEST_F(TriangleTest, DISABLED_wcoj) {

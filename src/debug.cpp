@@ -9,14 +9,14 @@
 #include <sstream>
 #include <json/json.h>
 #include <cassert>
-#include <flat/span>
-#include <flat/map>
+#include <unordered_map>
 #include "datalol/debug.h"
 #include "datalol/syntax.h"
+#include "datalol/relation.h" // for detail::span
 
 extern __attribute__((weak)) struct debug_info  __start_info[];
 extern __attribute__((weak)) struct debug_info  __stop_info[];
-static const flat::span<debug_info> all_queries = {__start_info,  __stop_info};
+static datalol::detail::span<debug_info> all_queries = {__start_info,  __stop_info};
 static
 int get_qid(const debug_info *dbg)
 {
@@ -145,7 +145,7 @@ struct Stubs {
   JsonPipe pipe;
 
   using action_t = Json::Value (Stubs::*)(const Json::Value&);
-  flat::map<std::string, action_t> methods;
+  std::unordered_map<std::string, action_t> methods;
 
   static
   JVal getQuery_(const debug_info& d)
@@ -191,8 +191,7 @@ struct Stubs {
   {
     int id = v["qid"].asInt();
     int flags = v["flags"].asInt();
-    // FIXME: span<T> is not const, while span<const T> is
-    const_cast<debug_info&>(all_queries[id]).flags = flags;
+    all_queries[id].flags = flags;
     JVal res(v);
     res["flags"] = all_queries[id].flags;
     return res;

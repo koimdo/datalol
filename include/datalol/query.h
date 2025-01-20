@@ -1,14 +1,11 @@
 #pragma once
 
 #include "syntax.h"
+#include "relation.h"
 #include "debug.h"
 
 #include <cstddef>
 #include <datalol/tuple_util.h>
-#include <array>
-
-#include <flat/set>
-#include <flat/map>
 #include <type_traits>
 
 namespace datalol {
@@ -203,14 +200,20 @@ struct Matcher_base : public Rule::Body {
   }
 };
 
+// Backported from C++20
+template<typename T>
+struct remove_cvref {
+  using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+
 template<typename... Sel>
 auto
 build_selector(Sel&&... sel)
 {
   // FIXME: figure out the real construction pattern where `Var` is always move-constructed
-  // and everything else is perfectly forwarded
-  return std::tuple<typename flat::remove_cvref<Sel>::type...>
-    (std::forward<typename flat::remove_cvref<Sel>::type>(sel)...);
+  // and everything else is perfectly forwarded. Stop using ham-fisted `remove_cvref`.
+  return std::tuple<typename remove_cvref<Sel>::type...>
+    (std::forward<typename remove_cvref<Sel>::type>(sel)...);
 }
 
 template<typename Coll>
@@ -246,7 +249,7 @@ class external_ : public Collection_base {
   size_t merge() override final { assert(false && "Cannot merge into external relations"); return 0; }
 
 public:
-  using value_type = typename flat::remove_cvref<Coll>::type::value_type;
+  using value_type = typename remove_cvref<Coll>::type::value_type;
 
   external_(const Coll& coll_, const ident& id)
     : Collection_base(id)
@@ -257,7 +260,7 @@ public:
     using selector_t = decltype(build_selector(std::forward<SelectArgs>(args)...));
     struct Body : Matcher_base<Body, selector_t, external_> {
       using Matcher_base<Body, selector_t, external_>::Matcher_base;
-      flat::span<typename std::remove_reference<Coll>::type>
+      span<typename std::remove_reference<Coll>::type>
       get_coll() const noexcept { return {&this->origin.coll, 1}; }
 
       void configure() override final { this->config_impl(); }
@@ -268,38 +271,36 @@ public:
   }
 };
 
-template<typename T>
+template<typename T, typename Compare = std::less<T>>
 class table : public Collection_base {
 public:
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
-  table(const char *name)
+  table(const char *name, const Compare& cmp = Compare{})
     : Collection_base(ident::make<table>(name))
+    , stable(cmp)
+    , recent(cmp)
   {}
 
 private:
-  flat::set<value_type> stable;
-  flat::set<value_type> recent;
-  flat::set<value_type> to_add;
-
-  void append(value_type&& t)
-  {
-    to_add.insert(std::move(t));
-  }
+  relation<T, Compare> stable;
+  relation<T, Compare> recent;
+  std::vector<T> to_add;
 
   size_t merge() override final
   {
-    // TODO: combined union/diff operation
+    // TODO: hold multiple `stable` relations, defer merges?
     // FIXME: indices
-    if (stable.empty()) {
-      std::swap(stable, recent);
-    } else if (!recent.empty()) {
-      stable = stable.set_union(recent);
-    }
-    recent = to_add.diff(stable);
+    stable.merge_from(std::move(recent));
+    to_add.erase(std::remove_if(to_add.begin(), to_add.end(),
+                                [this](const T& x) {
+                                  return stable.contains(x);
+                                }),
+                 to_add.end());
+    recent.assign(std::move(to_add));
     to_add.clear();
-    return recent.size();
+    return !recent.empty();
   }
 
   void print(std::ostream& os) const override final
@@ -345,7 +346,7 @@ private:
       void eval() override final
       {
         auto res = transform_each(selector, detail::get_value{});
-        rel.append(std::move(res));
+        rel.to_add.push_back(std::move(res));
       }
       void print(std::ostream& os) const override final
       {
@@ -355,7 +356,7 @@ private:
 
     struct Body : detail::Matcher_base<Body, Sel, table> {
       using detail::Matcher_base<Body, Sel, table>::Matcher_base;
-      flat::span<flat::set<value_type>> get_coll() noexcept
+      span<relation<T, Compare>> get_coll() noexcept
       {
         int delta = this->use_delta();
         if (delta < 0)
@@ -398,22 +399,21 @@ std::reference_wrapper<detail::external_<Coll>> external(Coll&& coll, const char
 }
 
 template<typename...>
-struct table;
+class table;
 
 template<typename T>
 class table<T> {
-  flat::pool_ptr<detail::table<T>> impl;
+  detail::table<T>& impl;
 public:
   table(const char *name)
-    : impl(Query::allocate<detail::table<T>>(name))
+    : impl(*Query::allocate<detail::table<T>>(name))
   {}
 
 public:
   template<typename... SelectArgs>
   auto operator()(SelectArgs&&... args) {
-    return (*impl)(std::forward<SelectArgs>(args)...);
+    return impl(std::forward<SelectArgs>(args)...);
   }
-  ~table() { std::cerr << __PRETTY_FUNCTION__ << "\n"; }
 };
 
 template<typename T0, typename T1, typename... Rest>
