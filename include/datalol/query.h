@@ -13,8 +13,8 @@ namespace datalol {
 namespace detail {
   struct unify_base {
     // Elementwise cases
-    template<class R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
-    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
+    template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
+    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
     {
       assert(false && "Must override");
       return false;
@@ -28,7 +28,7 @@ namespace detail {
     }
   };
   struct unify_ : unify_base {
-    template<class R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
+    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
   };
 
   template<typename Sel, typename Row>
@@ -39,8 +39,8 @@ namespace detail {
 
   struct mark_vars_ {
     Rule::vars_t res;
-    template<class T> bool operator()(size_t, const T&) { return true; }
-    template<class T> bool operator()(size_t, const Var<T>& v)
+    template<typename T> bool operator()(size_t, const T&) { return true; }
+    template<typename T> bool operator()(size_t, const Var<T>& v)
     {
       res.set(v.get_id());
       return true;
@@ -105,12 +105,12 @@ namespace detail {
   BASIC_TYPE(bool)
 #undef BASIC_TYPE
 
-  template<class T, typename = void>
+  template<typename T, typename = void>
   struct is_printable : std::false_type {};
-  template<class T>
+  template<typename T>
   struct is_printable<T, decltype(void(std::declval<std::ostream>() << std::declval<T>()))> : std::true_type {};
 
-  template<class T>
+  template<typename T>
   typename std::enable_if<is_printable<T>::value, Json::Value>::type
   json_of(const T& t) {
     std::ostringstream s;
@@ -136,6 +136,18 @@ namespace detail {
     return res;
   };
 
+template<typename Coll, typename V>
+bool do_contains(const Coll& coll, const V& val)
+{
+  return coll.contains(val);
+}
+
+template<typename V>
+bool do_contains(const std::vector<V>& coll, const V& val)
+{
+  return std::find(coll.begin(), coll.end(), val) != coll.end();
+}
+
 template<typename Derived, typename Sel, typename Origin>
 struct Matcher_base : public Rule::Body {
   Sel selector;
@@ -155,7 +167,7 @@ struct Matcher_base : public Rule::Body {
     os << origin.get_name() << "(" << print_tuple<Sel>(selector) << ")";
   }
 
-  template<class T>
+  template<typename T>
   static
   const T& get_elem(const T& t) { return t; }
   static
@@ -179,16 +191,18 @@ struct Matcher_base : public Rule::Body {
   {
     auto& self = static_cast<Derived&>(*this);
     auto t = transform_each(selector, get_value{});
-    for (auto const& coll : self.get_coll())
-      next(coll.contains(get_elem(t)));
+    self.with_coll([this, &self, &t](auto& coll) {
+      next(do_contains(coll, get_elem(t)));
+    });
   }
 
   void eval_full()
   {
     auto& self = static_cast<Derived&>(*this);
-    for (auto const& coll : self.get_coll())
+    self.with_coll([this, &self](auto& coll) {
       for (auto const& row : coll)
         next(unify(self.selector, row));
+    });
   }
 
   void eval_impl()
@@ -232,7 +246,7 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
 }
 
 template<typename Coll>
-class external_ : public Collection_base {
+struct external_ : public Collection_base {
   Coll coll;
 
   Json::Value to_json() const override final
@@ -248,32 +262,42 @@ class external_ : public Collection_base {
   }
   size_t merge() override final { assert(false && "Cannot merge into external relations"); return 0; }
 
-public:
   using value_type = typename remove_cvref<Coll>::type::value_type;
 
   external_(const Coll& coll_, const ident& id)
     : Collection_base(id)
     , coll(coll_) {}
 
-  template<typename... SelectArgs>
-  Rule::ubody operator()(SelectArgs&&... args) {
-    using selector_t = decltype(build_selector(std::forward<SelectArgs>(args)...));
-    struct Body : Matcher_base<Body, selector_t, external_> {
-      using Matcher_base<Body, selector_t, external_>::Matcher_base;
-      span<typename std::remove_reference<Coll>::type>
-      get_coll() const noexcept { return {&this->origin.coll, 1}; }
+  template<typename Sel>
+  struct susp {
+    external_& rel;
+    Sel selector;
+
+    struct Body : Matcher_base<Body, Sel, external_> {
+      using Matcher_base<Body, Sel, external_>::Matcher_base;
+
+      template<typename F>
+      void
+      with_coll(F&& f) const noexcept { f(this->origin.coll); }
 
       void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
     };
 
-    return Query::allocate<Body>(build_selector(std::forward<SelectArgs>(args)...), *this);
+    operator Rule::ubody()
+    {
+      return Query::allocate<Body>(std::move(selector), rel);
+    }
+  };
+
+  template<typename... SelectArgs>
+  auto operator()(SelectArgs&&... args) {
+    return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
   }
 };
 
 template<typename T, typename Compare = std::less<T>>
-class table : public Collection_base {
-public:
+struct table : public Collection_base {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
@@ -283,7 +307,6 @@ public:
     , recent(cmp)
   {}
 
-private:
   relation<T, Compare> stable;
   relation<T, Compare> recent;
   std::vector<T> to_add;
@@ -318,7 +341,7 @@ private:
 
   Json::Value get_contents() const override final { return detail::get_contents_common(this->stable /* TODO: columns */); }
 
-  template<class S>
+  template<typename S>
   void print_(std::ostream& os, const S& s, const char *title) const
   {
     auto name = this->id.get_name();
@@ -356,17 +379,19 @@ private:
 
     struct Body : detail::Matcher_base<Body, Sel, table> {
       using detail::Matcher_base<Body, Sel, table>::Matcher_base;
-      span<relation<T, Compare>> get_coll() noexcept
+      template<typename F>
+      void
+      with_coll(F&& f) const noexcept
       {
         int delta = this->use_delta();
-        if (delta < 0)
-          return {&this->origin.stable, 1};
-        else if (delta > 0)
-          // contiguous members with same access specifier are contiguous in memory.
-          // This returns both `stable` and `recent`.
-          return {&this->origin.stable, 2};
-        else // delta == 0
-          return {&this->origin.recent, 1};
+        if (delta < 0) {
+          f(this->origin.stable);
+        } else if (delta > 0) {
+          f(this->origin.stable);
+          f(this->origin.recent);
+        } else {// delta == 0
+          f(this->origin.recent);
+        }
       }
 
       void configure() override final { this->config_impl(); }
@@ -383,9 +408,9 @@ private:
       return Query::allocate<Head>(std::move(selector), rel);
     }
   };
-public:
+
   template<typename... SelectArgs>
-  auto operator()(SelectArgs&&... args) -> susp<decltype(detail::build_selector(std::forward<SelectArgs>(args)...))> {
+  auto operator()(SelectArgs&&... args) {
     return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
   }
 };
@@ -393,9 +418,24 @@ public:
 }
 
 template<typename Coll>
-std::reference_wrapper<detail::external_<Coll>> external(Coll&& coll, const char *name)
+class external_ {
+  detail::external_<Coll>& impl;
+public:
+  external_(detail::external_<Coll>& impl)
+    : impl(impl)
+  {}
+
+  template<typename... SelectArgs>
+  auto operator()(SelectArgs&&... args) {
+    return impl(std::forward<SelectArgs>(args)...);
+  }
+};
+
+template<typename Coll>
+external_<Coll> external(Coll&& coll, const char *name)
 {
-  return *Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
+  auto impl = Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
+  return external_<Coll>(*impl);
 }
 
 template<typename...>
@@ -404,12 +444,12 @@ class table;
 template<typename T>
 class table<T> {
   detail::table<T>& impl;
+
 public:
   table(const char *name)
     : impl(*Query::allocate<detail::table<T>>(name))
   {}
 
-public:
   template<typename... SelectArgs>
   auto operator()(SelectArgs&&... args) {
     return impl(std::forward<SelectArgs>(args)...);

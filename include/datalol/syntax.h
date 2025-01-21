@@ -38,7 +38,7 @@ class ident {
   const char *name;             // May be null
   constexpr ident(type_id_t type, const char *name): type(type), name(name) {}
 public:
-  template<class T>
+  template<typename T>
   static ident make(const char *name = nullptr)
   {
     return ident{type_id_t::of<T>(), name};
@@ -258,7 +258,7 @@ private:
 
   friend class Stubs;
   friend class Rule::cursor;
-  template<class T, class Cmp>
+  template<typename T, typename Cmp>
   friend class Var;
   friend class Collection_base;
 
@@ -289,7 +289,7 @@ private:
   Rule *start_rule();
   void end_rule(Rule *r);
 
-  template<class T>
+  template<typename T>
   Var_ mkvar(const char *name)
   {
     Var_::Impl *impl = pool.allocate<typename Var<T>::Impl>(ident::make<T>(name)).get();
@@ -308,7 +308,7 @@ public:
   iter end() const { return iter{nullptr}; }
 };
 
-template<class T, class Cmp>
+template<typename T, typename Cmp>
 Var<T, Cmp>::Var(const char *name)
   : Var_(Query::current->mkvar<T>(name))
 {
@@ -337,9 +337,9 @@ public:
 };
 
 namespace detail {
-  template<class T, typename = void>
+  template<typename T, typename = void>
   struct is_contextual_bool : std::false_type {};
-  template<class T>
+  template<typename T>
   struct is_contextual_bool<T, decltype(void(std::declval<T>() ? true : false))> : std::true_type {};
 }
 
@@ -395,7 +395,7 @@ class thunk : public thunk_base {
   };
 
   friend class thunk_base;
-  template<class Fun>
+  template<typename Fun>
   thunk(const char *desc, Fun&& fun)
     : thunk_base(desc)
     , fun(std::forward<Fun>(fun))

@@ -38,8 +38,6 @@ TEST(Trivial, test0) {
     auto As = external(ASs, "ref");
     auto FAs = external(ASs.filter([](const A&) { return true; }), "value");
 
-    std::cout << "As: " << As << "\n";
-    std::cout << "FAs: " << FAs << "\n";
     Var<A> a("a");
     Var<int> i("i"), k("k");
     THUNK((results.emplace_back(*i, *k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
