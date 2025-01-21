@@ -191,11 +191,6 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
   return os << "THUNK(" << t.desc << ")";
 }
 
-bool Query::cmp::operator()(Collection_base *l, Collection_base *r) const
-{
-  return l->get_name() < r->get_name();
-}
-
 static
 void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::elem_meta& e)
 {
@@ -232,11 +227,7 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
 
   verify_neg(bound, r, get_meta(r.head));
 
-  // Now that bound vars are known, configure elements for e.g. index access
-  for (unsigned i=r.head; i != r.last; i++)
-    get_elem(i).configure();
-
-  // Final step: chain rule body (and head) for execution
+  // Chain rule body (and head) for execution
   auto next = &get_elem(r.head);
   next->rule_ = &r;
   for (auto it = order.end(), end = order.begin(); it != end; --it) {
@@ -245,28 +236,30 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
     next = &e;
     e.rule_ = &r;
   }
+
+  // Now that bound vars and order are known, configure elements for e.g. index access
+  for (unsigned i=r.head; i != r.last; i++)
+    get_elem(i).configure();
+
   r.start = r.head+order[0];
 }
 
 void Query::configure()
 {
-  // Step 1: figure out relations that are on the HEAD side
-  std::vector<Collection_base*> heads;
-  for (auto& r : rules) {
-    auto c = get_meta(r.head).collection;
-    if (c)
-      heads.push_back(c);
-  }
-  to_merge.assign(std::move(heads));
+  // Step 1: stratify (if not manually-stratified before)
+  if (strata.empty())
+    stratify();
 
   // Step 2: Mark recursions in rule bodies
-  // TODO: stratify using SCC on the rule graph.
-  for (auto& r : rules) {
-    for (size_t i=r.head+1; i<r.last; ++i) {
-      auto coll = get_meta(i).collection;
-      if (coll && to_merge.contains(coll)) {
-        recursive.set(i);
-        r.seminaive_current = i-r.head;
+  for (auto& srules : strata) {
+    for (auto& r : srules.extent) {
+      for (size_t i=r.head+1; i<r.last; ++i) {
+        auto coll = get_meta(i).collection;
+        auto& to_merge = srules.to_merge;
+        if (coll && std::find(to_merge.begin(), to_merge.end(), coll) != to_merge.end()) {
+          recursive.set(i);
+          r.seminaive_current = i-r.head;
+        }
       }
     }
   }
@@ -280,6 +273,32 @@ void Query::configure()
     configure_rule(r, {order.data(), order.size()});
   }
   DEBUG_PROBE(BREAK_CONFIGURE);
+}
+
+void Query::stratify()
+{
+  // FIXME: really stratify
+  unsigned all = rules.size();
+  return do_stratify({&all, 1});
+}
+
+void Query::do_stratify(detail::span<const unsigned> counts)
+{
+  Rule *last = rules.data();
+  for (auto count : counts) {
+    detail::span<Rule> extent{last, count};
+    last += count;
+    std::vector<Collection_base*> to_merge;
+    for (auto const& r : extent) {
+      auto c = get_meta(r.head).collection;
+      if (c)
+        to_merge.push_back(c);
+    }
+    std::sort(to_merge.begin(), to_merge.end());
+    to_merge.erase(std::unique(to_merge.begin(), to_merge.end()), to_merge.end());
+    strata.push_back(stratum{extent, std::move(to_merge)});
+  }
+  assert(rules.data() + rules.size() == last);
 }
 
 void Query::run_rule(Rule& r, size_t current_delta)
@@ -298,26 +317,24 @@ void Query::explain(const std::string& coll, const void *target)
 
 void Query::run()
 {
-  size_t changed = 0;
-  for (auto& r : rules)
-    if (!r.seminaive_current)
-      // Run nonrecursive rules only once, before the recursive rules
-      run_rule(r, 0);
-  for (auto c : to_merge)
-    changed += c->merge();
-  for (int iter = 0; changed; iter++) {
-    DEBUG_PROBE(BREAK_FIXPOINT);
-    for (auto& r : rules) {
-      if (!r.seminaive_current)
-        continue;
-      for (size_t i=r.head+1; i<r.last; ++i) {
-        if (recursive.test(i))
-          run_rule(r, i-r.head);
+  for (auto& srules : strata) {
+    auto const& to_merge = srules.to_merge;
+
+    size_t changed = 1;
+    for (int iter = 0; changed; iter++) {
+      DEBUG_PROBE(BREAK_FIXPOINT);
+      for (auto& r : srules.extent) {
+        if (!r.seminaive_current)
+          run_rule(r, 0);
+        for (size_t i=r.head+1; i<r.last; ++i) {
+          if (recursive.test(i))
+            run_rule(r, i-r.head);
+        }
       }
+      changed = 0;
+      for (auto c : to_merge)
+        changed += c->merge();
     }
-    changed = 0;
-    for (auto c : to_merge)
-      changed += c->merge();
   }
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;

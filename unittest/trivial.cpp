@@ -81,6 +81,7 @@ TEST(Trivial, reachable) {
 
 class TriangleTest : public ::testing::Test {
 protected:
+  static flat::set<int> nodes;
   static flat::set<std::tuple<int, int>> edges;
   using result_t = flat::set<std::tuple<int, int, int>>;
 
@@ -98,7 +99,10 @@ protected:
     std::bernoulli_distribution d(0.25);
 
     for (int i=1; i<=NUM_NODES; i++)
-      for (int j=1; j<=NUM_NODES; j++)
+      nodes.insert(i);
+
+    for (auto i : nodes)
+      for (auto j : nodes)
         if (d(gen))
           edges.insert({i, j});
     nested_hand(result);
@@ -123,6 +127,7 @@ protected:
   }
 };
 
+flat::set<int> TriangleTest::nodes;
 flat::set<std::tuple<int, int>> TriangleTest::edges;
 TriangleTest::result_t TriangleTest::result;
 
@@ -186,14 +191,19 @@ TEST_F(TriangleTest, nested) {
 }
 
 TEST_F(TriangleTest, reachable) {
+  std::vector<std::pair<int, int>> answer;
   DATALOL(reachability) {
     using namespace datalol;
     auto E = external(edges, "edges");
     table<int, int> Reachable("Reachable");
     Var<int> u("u"), v("v"), w("w");
     Reachable(u, v) << E(u, v);
-    Reachable(u, w) << E(u, v) & Reachable(v, w);
+    Reachable(u, w) << Reachable(u, v) & E(v, w);
+
+    $_(answer.push_back({*u, *v}), &answer) << Reachable(u, v);
+    reachability.manual_stratify({1, 1, 1});
   }
+  ASSERT_GT(answer.size(), 5000);
 }
 
 TEST_F(TriangleTest, DISABLED_wcoj) {

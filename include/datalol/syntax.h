@@ -95,7 +95,6 @@ public:
   Var_& operator=(const Var_&) = delete;
   const void *get() const { return impl->p; }
   int get_id() const noexcept { return impl->nvar; }
-  static const Var_ null;
 };
 
 class Rule {
@@ -228,6 +227,10 @@ public:
     Query* q;
     control(Query *q): q(q) {}
   public:
+    void manual_stratify(std::initializer_list<unsigned> counts)
+    {
+      q->do_stratify({counts.begin(), counts.end()});
+    }
     void set_policy(execution_policy p)
     {
       q->policy = p;
@@ -244,6 +247,12 @@ private:
   execution_policy policy = NESTED;
   std::vector<Rule::Elem*> elems;
   std::vector<Rule> rules;
+
+  struct stratum {
+    detail::span<Rule> extent;
+    std::vector<Collection_base*> to_merge;
+  };
+  std::vector<stratum> strata;
   std::bitset<MAX_ELEMS> recursive;
 
   std::vector<Var_> vars;
@@ -262,11 +271,8 @@ private:
   friend class Var;
   friend class Collection_base;
 
-  struct cmp {
-    bool operator()(Collection_base *l, Collection_base *r) const;
-  };
-
-  detail::relation<Collection_base *, cmp> to_merge; // TODO: real query plan
+  void do_stratify(detail::span<const unsigned> counts);
+  void stratify();
   void configure_rule(Rule& r, detail::span<int> order);
   void configure();
   void explain(const std::string& coll, const void *target);
