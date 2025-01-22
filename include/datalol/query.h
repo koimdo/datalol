@@ -93,49 +93,6 @@ namespace detail {
     }
   };
 
-#define BASIC_TYPE(typ) \
-  static Json::Value json_of(typ value) { return Json::Value(value); }
-  BASIC_TYPE(Json::Int)
-  BASIC_TYPE(Json::UInt)
-  BASIC_TYPE(Json::Int64)
-  BASIC_TYPE(Json::UInt64)
-  BASIC_TYPE(double)
-  BASIC_TYPE(const char *)
-  BASIC_TYPE(const Json::String&)
-  BASIC_TYPE(bool)
-#undef BASIC_TYPE
-
-  template<typename T, typename = void>
-  struct is_printable : std::false_type {};
-  template<typename T>
-  struct is_printable<T, decltype(void(std::declval<std::ostream>() << std::declval<T>()))> : std::true_type {};
-
-  template<typename T>
-  typename std::enable_if<is_printable<T>::value, Json::Value>::type
-  json_of(const T& t) {
-    std::ostringstream s;
-    s << t;
-    return Json::Value(s.str());
-  }
-
-  struct generic_json {
-    Json::Value& vec;
-    template<typename T>
-    bool operator () (int i, T const &v)
-    {
-      vec.append(json_of(v));
-      return true;
-    }
-  };
-
-  template<typename... Args>
-  Json::Value json_of(const std::tuple<Args...>& t)
-  {
-    Json::Value res;
-    for_each_in_tuple(generic_json{res}, t);
-    return res;
-  };
-
 template<typename Coll, typename V>
 bool do_contains(const Coll& coll, const V& val)
 {
@@ -256,19 +213,11 @@ build_selector(Sel&&... sel)
     (std::forward<typename remove_cvref<Sel>::type>(sel)...);
 }
 
+// FIXME: use the real machinery in json.h once ready
 template<typename Coll>
 Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>& columns = {})
 {
-  Json::Value res;
-  Json::Value& values = (res["values"] = Json::arrayValue);
-  for (auto const& t : coll)
-    values << json_of(t);
-  if (columns.size()) {
-    Json::Value& jcolumns = (res["columns"] = Json::arrayValue);
-    for (auto const& col : columns)
-      jcolumns << col;
-  }
-  return res;
+  return Json::Value();
 }
 
 template<typename Coll>
