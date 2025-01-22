@@ -11,24 +11,16 @@
 namespace datalol {
 
 namespace detail {
-  struct unify_base {
+  struct unify_ {
     // Elementwise cases
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
-    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const
-    {
-      assert(false && "Must override");
-      return false;
-    }
-
-    template<typename S, typename R>
-    constexpr bool operator()(size_t, const S&, const R&) const
-    {
-      static_assert(std::is_same<S, R>::value, "Type mismatch");
-      return false;             // Never reached
-    }
-  };
-  struct unify_ : unify_base {
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
+    template<typename S, typename R>
+    constexpr bool operator()(size_t, const S& s, const R& r) const
+    {
+      static_assert(!std::is_base_of<Var_, S>::value, "Var type mismatch");
+      return s == r;
+    }
   };
 
   template<typename Sel, typename Row>
@@ -93,16 +85,31 @@ namespace detail {
     }
   };
 
+// Backported from C++20
+template<typename T>
+struct remove_cvref {
+  using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+
+template<typename T>
+struct contain_trait {
+  template<typename V>
+  static bool contains(const T& coll, const V& val) { return coll.contains(val); }
+};
+
+template<typename T>
+struct contain_trait<std::vector<T>> {
+  template<typename V>
+  static bool contains(const std::vector<T>& vec, const V& val)
+  {
+    return std::find(vec.begin(), vec.end(), val) != vec.end();
+  }
+};
+
 template<typename Coll, typename V>
 bool do_contains(const Coll& coll, const V& val)
 {
-  return coll.contains(val);
-}
-
-template<typename V>
-bool do_contains(const std::vector<V>& coll, const V& val)
-{
-  return std::find(coll.begin(), coll.end(), val) != coll.end();
+  return contain_trait<typename remove_cvref<Coll>::type>::template contains(coll, val);
 }
 
 template<typename Derived, typename Sel, typename Origin>
@@ -163,7 +170,7 @@ struct Matcher_base : public Rule::Body {
     auto t = transform_each(selector, get_value{});
     bool found = false;
     self.with_coll([this, &self, &t, &found](auto& coll) {
-      if (coll.contains(get_elem(t))) {
+      if (do_contains(coll, get_elem(t))) {
         found = true;
       }
     });
@@ -196,12 +203,6 @@ struct Matcher_base : public Rule::Body {
     case NEGATIVE: return eval_neg();
     }
   }
-};
-
-// Backported from C++20
-template<typename T>
-struct remove_cvref {
-  using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 
 template<typename... Sel>
@@ -310,9 +311,13 @@ struct table : public Collection_base {
 
   void print(std::ostream& os) const override final
   {
-    print_(os, this->stable, "stable");
-    print_(os, this->recent, "recent");
-    print_(os, this->to_add, "to_add");
+    if (recent.empty() && to_add.empty()) {
+      print_(os, this->stable, "");
+    } else {
+      print_(os, this->stable, "stable: ");
+      print_(os, this->recent, "recent: ");
+      print_(os, this->to_add, "to_add: ");
+    }
     // TODO: indices?
   }
 
@@ -327,7 +332,7 @@ struct table : public Collection_base {
   void print_(std::ostream& os, const S& s, const char *title) const
   {
     auto name = this->id.get_name();
-    os << "." << title << ": " "{";
+    os << title << " {";
     for (auto const& row : s)
       os << " " << name << "(" << detail::print_tuple<value_type>(row) << ")";
     os <<" }\n";

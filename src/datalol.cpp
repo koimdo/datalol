@@ -1,11 +1,15 @@
 #include <cassert>
 #include <algorithm>
+#include <numeric>
 #include <cstring>
 #include <limits>
 
 #include <datalol/syntax.h>
 #include <datalol/query.h>
+#include <datalol/lattice.h>
 #include <datalol/debug.h>
+
+#define $_(expr, ...) THUNK(expr, ##__VA_ARGS__)
 
 namespace datalol {
 Query *Query::current = nullptr;
@@ -229,12 +233,10 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
 
   // Chain rule body (and head) for execution
   auto next = &get_elem(r.head);
-  next->rule_ = &r;
   for (auto it = order.end(), end = order.begin(); it != end; --it) {
     auto& e = static_cast<Rule::Body&>(get_elem(r.head+it[-1]));
     e.next_ = next;
     next = &e;
-    e.rule_ = &r;
   }
 
   // Now that bound vars and order are known, configure elements for e.g. index access
@@ -246,6 +248,11 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
 
 void Query::configure()
 {
+  // Step 0: associate elements to rules (now that the don't move anymore)
+  for (auto& r : rules)
+    for (auto i=r.head; i<r.last; i++)
+      get_elem(i).rule_ = &r;
+
   // Step 1: stratify (if not manually-stratified before)
   if (strata.empty())
     stratify();
@@ -277,6 +284,84 @@ void Query::configure()
 
 void Query::stratify()
 {
+  std::vector<Rule*> rules_(rules.size());
+  std::iota(rules_.begin(), rules_.end(), rules.data());
+
+  struct sccmap_ {
+    std::vector<min_lattice<size_t>> m;
+    const Rule *base;
+    sccmap_(const std::vector<Rule>& rules)
+      : m(rules.size())
+      , base(rules.data())
+    {}
+    size_t ofs(const Rule *r) const { return r-base; }
+    void set(const Rule *l, const Rule *r) { m[ofs(l)] |= ofs(r); }
+    size_t get(const Rule *r) const { return m[ofs(r)].get(); }
+    bool same(const Rule *l, const Rule *r) const { return m[ofs(l)] == m[ofs(r)]; }
+  } sccMap(rules);
+
+  std::vector<std::tuple<int, size_t, Rule*>> times;
+  DATALOL(stratifier) {
+    auto R = external(rules_, "rules"); // FIXME: allow `external()` on vectors
+    auto Elem = external(elems, "elems");
+
+    table<Rule*, Rule*, bool> deps("deps"), reach("reach"); // (rh, rb, N) if head of `rh` is in body of `rb` and body in `rb` is negative
+    table<int, Rule*> whenAll("whenAll");
+    table<int, size_t, Rule*> when("when"); // time, minSCC representitive, rule
+    Var<Rule*> rh, rb, rc;
+    Var<Rule::Elem*> e;
+    Var<Collection_base*> body;
+    Var<bool> neg, nl, nr;
+    Var<int> s, t;
+    Var<size_t> minSCC;
+
+    deps(rh, rb, neg) << Elem(e) & $_(dynamic_cast<Rule::Body*>(*e)) & rb == $_((*e)->rule_)
+      & body == $_((*e)->meta.collection) & $_(*body)
+      & R(rh) & body == $_(this->get_elem((*rh)->head).meta.collection)
+      & neg == $_((*e)->meta.negative);
+
+
+    // TODO: when we get lattice-valued relations, `reach` is lmap({rh, rb} -> lbool)
+    reach(rh, rb, neg) << deps(rh, rb, neg);
+    reach(rh, rb, neg) << reach(rh, rc, nl) & deps(rc, rb, nr) & neg == $_(*nl || *nr);
+
+    $_(throw std::logic_error("Cannot stratify")) << reach(rb, rb, true);
+
+    // Possible enhancement for SCC once we get WCOJ:
+    // https://www3.cs.stonybrook.edu/~warren/xsbbook/node18.html
+
+    // Kludge due to current lack of min-aggergation
+    $_(sccMap.set(*rb, *rb), &sccMap) << R(rb);
+    $_(sccMap.set(*rb, *rh), &sccMap) << reach(rh, rb, nl) & reach(rb, rh, nr);
+
+    // Topological sorting in datalog,
+    // from https://lmeyerov.blogspot.com/2011/04/topological-sort-in-datalog.html
+
+    whenAll(0, rb) << R(rb) & R(rh) & !reach(rh, rb, false) & !reach(rh, rb, true);
+
+    whenAll(s, rb) << whenAll(s, rh) & R(rb)              & $_( sccMap.same(*rh, *rb), &sccMap);
+    whenAll(t, rb) << whenAll(s, rh) & reach(rh, rb, neg) & $_(!sccMap.same(*rh, *rb), &sccMap) & t == $_(*s+1);
+
+    when(s, minSCC, rb) << whenAll(s, rb) & t == $_(*s+1) & !whenAll(t, rb)
+      & minSCC == $_(sccMap.get(*rb), &sccMap); // figure out binder typing on value vs. reference
+
+    $_(times.push_back({*t, *minSCC, *rb}), &times) << when(t, minSCC, rb);
+
+    // At the end: index-sort the rules while adding strata
+    // See: https://stackoverflow.com/a/78397050
+    stratifier.manual_stratify({
+        1, // deps
+        2, // reach
+
+        3, // negative stratification condition, sccMap
+
+        3, // whenAll(0, r) // FIXME: why 1, 2 fails here?
+
+        1, // when
+        1, // times
+      });
+  }
+  assert(times.size() == rules.size());
   // FIXME: really stratify
   unsigned all = rules.size();
   return do_stratify({&all, 1});
