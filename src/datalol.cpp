@@ -195,10 +195,9 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
   return os << "THUNK(" << t.desc << ")";
 }
 
-static
-void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::elem_meta& e)
+void Query::verify_neg(const Rule::vars_t& bound, const Rule::Elem& e)
 {
-  auto neg = e.consume;
+  auto neg = e.meta.consume;
   neg &= ~bound;
   assert(neg.none());
 }
@@ -214,14 +213,13 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
   std::vector<Var_>& stack = r.undo_stack;
   stack.reserve(vars.size());
   for (auto ofs : order) {
-    auto vars = get_meta(r.head+ofs);
-    auto pos = vars.produce;
-    verify_neg(bound, r, vars);
+    auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
+    auto pos = elem.meta.produce;
+    verify_neg(bound, elem);
 
     pos &= ~bound;
-    auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
     elem.undo.vars = stack.data() + stack.size();
-    for (auto v : this->vars)
+    for (auto v : vars)
       if (pos.test(v.get_id()))
         stack.push_back(v);
     elem.undo.count = (stack.data() + stack.size()) - elem.undo.vars;
@@ -229,7 +227,7 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
     bound |= pos;
   }
 
-  verify_neg(bound, r, get_meta(r.head));
+  verify_neg(bound, get_elem(r.head));
 
   // Chain rule body (and head) for execution
   auto next = &get_elem(r.head);
@@ -302,7 +300,7 @@ void Query::stratify()
 
   std::vector<std::tuple<int, size_t, Rule*>> times;
   DATALOL(stratifier) {
-    auto R = external(rules_, "rules"); // FIXME: allow `external()` on vectors
+    auto R = external(rules_, "rules");
     auto Elem = external(elems, "elems");
 
     table<Rule*, Rule*, bool> deps("deps"), reach("reach"); // (rh, rb, N) if head of `rh` is in body of `rb` and body in `rb` is negative
@@ -347,8 +345,6 @@ void Query::stratify()
 
     $_(times.push_back({*t, *minSCC, *rb}), &times) << when(t, minSCC, rb);
 
-    // At the end: index-sort the rules while adding strata
-    // See: https://stackoverflow.com/a/78397050
     stratifier.manual_stratify({
         1, // deps
         2, // reach
@@ -362,28 +358,56 @@ void Query::stratify()
       });
   }
   assert(times.size() == rules.size());
-  // FIXME: really stratify
-  unsigned all = rules.size();
-  return do_stratify({&all, 1});
+
+  // TODO: index-sort the rules in-place while adding strata.
+  // See: https://stackoverflow.com/a/78397050
+  std::vector<Rule> nrules;
+  nrules.reserve(rules.size()); // Not an optimization - we want fixed rules location for add_stratum
+  int last_time = std::get<0>(times[0]);
+  size_t last_scc = std::get<1>(times[0]);
+  auto last = nrules.data();
+  for (size_t i = 0; i<times.size(); i++) {
+    auto time = std::get<0>(times[i]);
+    auto scc = std::get<1>(times[i]);
+    auto rule = std::get<2>(times[i]);
+    
+    std::cerr << "STRATIFY: time=" << time << " scc=" << scc << " rule=" << sccMap.ofs(rule) << "\n";
+    if (last_time != time || last_scc != scc) {
+      auto nend = std::addressof(*nrules.end());
+      add_stratum({last, nend});
+      last = nend;
+
+      last_time = time;
+      last_scc = scc;
+      // FIXME: collect multiple equally-timed nonrecursive rules into the same stratum?
+    }
+    nrules.push_back(std::move(*rule));
+  }
+  add_stratum({last, std::addressof(*nrules.end())});
+  rules = std::move(nrules);
 }
 
-void Query::do_stratify(detail::span<const unsigned> counts)
+void Query::control::manual_stratify(std::initializer_list<unsigned> counts)
 {
-  Rule *last = rules.data();
+  Rule *last = q->rules.data();
   for (auto count : counts) {
-    detail::span<Rule> extent{last, count};
+    q->add_stratum({last, count});
     last += count;
-    std::vector<Collection_base*> to_merge;
-    for (auto const& r : extent) {
-      auto c = get_meta(r.head).collection;
-      if (c)
-        to_merge.push_back(c);
-    }
-    std::sort(to_merge.begin(), to_merge.end());
-    to_merge.erase(std::unique(to_merge.begin(), to_merge.end()), to_merge.end());
-    strata.push_back(stratum{extent, std::move(to_merge)});
   }
-  assert(rules.data() + rules.size() == last);
+  assert(q->rules.data() + q->rules.size() == last);
+}
+
+void Query::add_stratum(detail::span<Rule> extent)
+{
+  std::vector<Collection_base*> to_merge;
+  for (auto const& r : extent) {
+    auto c = get_meta(r.head).collection;
+    if (c)
+      to_merge.push_back(c);
+  }
+  std::sort(to_merge.begin(), to_merge.end());
+  to_merge.erase(std::unique(to_merge.begin(), to_merge.end()), to_merge.end());
+  strata.push_back(stratum{extent, std::move(to_merge)});
 }
 
 void Query::run_rule(Rule& r, size_t current_delta)

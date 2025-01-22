@@ -47,7 +47,7 @@ TEST(Trivial, test0) {
 }
 
 TEST(Trivial, reachable) {
-  using edges_t = flat::set<std::tuple<int, int>>;
+  using edges_t = std::vector<std::tuple<int, int>>;
   edges_t edges = {
     {1, 2},
     {2, 3},
@@ -59,13 +59,18 @@ TEST(Trivial, reachable) {
   DATALOL(reachability) {
     using namespace datalol;
     auto E = external(edges, "edges");
-    table<int, int> Reachable("Reachable");
+    table<int, int> Reachable("Reachable"), lolable("Lolable"), zork("zork");
     Var<int> u("u"), v("v"), w("w");
+    THUNK((answer.push_back({*u, *v})), &answer) << Reachable(u, v);
+    lolable(u, v) << Reachable(u, v);
+    zork(u, v) << E(u, v);
+    Reachable(u, v) << zork(u, v);
+    Reachable(u, v) << lolable(u, v);
     Reachable(u, v) << E(u, v);
     Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
-    THUNK((answer.insert({*u, *v})), &answer) << Reachable(u, v);
   }
 
+  std::sort(answer.begin(), answer.end());
   edges_t expected = {
     {1, 2},
     {1, 3},
@@ -217,7 +222,6 @@ TEST_F(TriangleTest, reachable) {
     Reachable(u, w) << Reachable(u, v) & E(v, w);
 
     $_(answer.push_back({*u, *v}), &answer) << Reachable(u, v);
-    reachability.manual_stratify({1, 1, 1});
   }
   ASSERT_GT(answer.size(), 5000);
 }

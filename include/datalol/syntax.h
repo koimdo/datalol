@@ -236,10 +236,7 @@ public:
     Query* q;
     control(Query *q): q(q) {}
   public:
-    void manual_stratify(std::initializer_list<unsigned> counts)
-    {
-      q->do_stratify({counts.begin(), counts.end()});
-    }
+    void manual_stratify(std::initializer_list<unsigned> counts);
     void set_policy(execution_policy p)
     {
       q->policy = p;
@@ -280,7 +277,8 @@ private:
   friend class Var;
   friend class Collection_base;
 
-  void do_stratify(detail::span<const unsigned> counts);
+  void verify_neg(const Rule::vars_t& bound, const Rule::Elem& e);
+  void add_stratum(detail::span<Rule> extent);
   void stratify();
   void configure_rule(Rule& r, detail::span<int> order);
   void configure();
