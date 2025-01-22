@@ -106,6 +106,7 @@ public:
     Collection_base *collection;
     bool negative;
     elem_meta(const elem_meta&) = default;
+    elem_meta(Collection_base *collection);
     elem_meta(const vars_t& produce, const vars_t& consume,
               Collection_base *collection = nullptr,
               bool negative = false)
@@ -113,6 +114,7 @@ public:
       , collection(collection)
       , negative(negative)
     {}
+    void negate_vars();
   };
 
   class Elem : public IPrint {
@@ -347,6 +349,8 @@ public:
   template<typename Make>
   static
   auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
+
+  Rule::vars_t captured_vars() const { return vars; }
 };
 
 namespace detail {

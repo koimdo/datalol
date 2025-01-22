@@ -16,6 +16,9 @@ namespace detail {
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
     template<typename S, typename R>
+    constexpr bool operator()(size_t, const thunk<S>& s, const R& r) const { return s.apply() == r; }
+
+    template<typename S, typename R>
     constexpr bool operator()(size_t, const S& s, const R& r) const
     {
       static_assert(!std::is_base_of<Var_, S>::value, "Var type mismatch");
@@ -30,26 +33,32 @@ namespace detail {
   }
 
   struct mark_vars_ {
-    Rule::vars_t res;
+    Rule::elem_meta& res;
     template<typename T> bool operator()(size_t, const T&) { return true; }
+    template<typename T> bool operator()(size_t, const thunk<T>& f)
+    {
+      res.consume |= f.captured_vars();
+      return true;
+    }
     template<typename T> bool operator()(size_t, const Var<T>& v)
     {
-      res.set(v.get_id());
+      res.produce.set(v.get_id());
       return true;
     }
   };
 
   template<typename Sel>
-  Rule::vars_t mark_vars(const Sel& sel)
+  void mark_vars(const Sel& sel, Rule::elem_meta& meta)
   {
-    mark_vars_ mv;
+    mark_vars_ mv{meta};
     for_each_in_tuple(mv, sel);
-    return mv.res;
   }
 
   struct get_value {
     template<typename T>
     const T& operator()(const Var<T>& v) const { return *v.get(); }
+    template<typename T>
+    auto operator()(const thunk<T>& f) const { return f.apply(); }
     template<typename T>
     constexpr const T& operator()(const T& t) const { return t; }
   };
@@ -121,10 +130,12 @@ struct Matcher_base : public Rule::Body {
   static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
 
   Matcher_base(Sel&& sel, Origin& origin)
-    : Rule::Body({mark_vars(sel), {}, &origin})
+    : Rule::Body(&origin)
     , selector(std::forward<Sel>(sel))
     , origin(origin)
-  {}
+  {
+    mark_vars(sel, meta);
+  }
 
   void print(std::ostream& os) const override final
   {
@@ -148,7 +159,7 @@ struct Matcher_base : public Rule::Body {
     if (is_negative())
       return;
     config = NEGATIVE;
-    std::swap(meta.produce, meta.consume);
+    meta.negate_vars();
     meta.negative = true;
   }
 
@@ -349,10 +360,13 @@ struct table : public Collection_base {
       Sel selector;
       table& rel;
       Head(Sel&& selector, table& rel)
-        : Rule::Head({{}, detail::mark_vars(selector), &rel})
+        : Rule::Head(&rel)
         , selector(std::move(selector))
         , rel(rel)
-      {}
+      {
+        mark_vars(selector, meta);
+        meta.negate_vars();
+      }
       void eval() override final
       {
         auto res = transform_each(selector, detail::get_value{});
