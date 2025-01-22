@@ -86,6 +86,7 @@ protected:
   using result_t = flat::set<std::tuple<int, int, int>>;
 
   static result_t result;
+  static result_t almost;
 
   static constexpr int NUM_NODES = 200;
 
@@ -105,10 +106,10 @@ protected:
       for (auto j : nodes)
         if (d(gen))
           edges.insert({i, j});
-    nested_hand(result);
+    nested_hand(result, almost);
   }
 
-  static void nested_hand(result_t& res)
+  static void nested_hand(result_t& res, result_t& almost)
   {
     for (auto const& ab : edges) {
       auto a1 = std::get<0>(ab);
@@ -122,6 +123,8 @@ protected:
           continue;
         if (edges.contains({c1, a1}))
           res.insert({a1,b1,c1});
+        else
+          almost.insert({a1,b1,c1});
       }
     }
   }
@@ -130,10 +133,11 @@ protected:
 flat::set<int> TriangleTest::nodes;
 flat::set<std::tuple<int, int>> TriangleTest::edges;
 TriangleTest::result_t TriangleTest::result;
+TriangleTest::result_t TriangleTest::almost;
 
 TEST_F(TriangleTest, hand) {
-  result_t myres;
-  nested_hand(myres);
+  result_t myres, dummy;
+  nested_hand(myres, dummy);
   ASSERT_EQ(myres.size(), result.size());
 }
 
@@ -188,6 +192,18 @@ TEST_F(TriangleTest, nested) {
     triangles.set_policy(Query::NESTED);
   }
   ASSERT_EQ(myres.size(), result.size());
+}
+
+TEST_F(TriangleTest, almost_triangle) {
+  result_t myres;
+  DATALOL(triangles) {
+    using namespace datalol;
+    Var<int> a("a"), b("b"), c("c");
+    auto E = external(edges, "edges");
+
+    THUNK((myres.insert({*a, *b, *c})), &myres) << E(a, b) & E(b, c) & $_(*a != *b && *b != *c && *a != *c) & !E(c, a);
+  }
+  ASSERT_EQ(myres.size(), almost.size());
 }
 
 TEST_F(TriangleTest, reachable) {

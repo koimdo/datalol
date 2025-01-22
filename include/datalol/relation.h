@@ -23,6 +23,7 @@ struct span {
 
 template<typename T, typename Compare>
 struct relation {
+  using value_type = T;
   using elems_t = std::vector<T>;
   elems_t elements;
   Compare cmp; // FIXME: move `cmp` to the owning table instead of every `relation`?
@@ -49,6 +50,7 @@ struct relation {
   }
 
   bool empty() const { return elements.empty(); }
+  size_t size() const { return elements.size(); }
   auto begin() const { return elements.begin(); }
   auto end() const { return elements.end(); }
 

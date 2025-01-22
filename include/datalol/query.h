@@ -176,15 +176,40 @@ struct Matcher_base : public Rule::Body {
   enum query_type {
     FULL,
     POINT,
-  } config;
+    NEGATIVE,
+  } config = FULL;
 
+  void set_negative()
+  {
+    if (is_negative())
+      return;
+    config = NEGATIVE;
+    std::swap(meta.positive, meta.negative);
+  }
+
+  bool is_negative() const { return NEGATIVE == config; }
   void config_impl()
   {
+    if (is_negative())
+      return;
     if (!undo.count) {
       config = POINT;
     } else {
       config = FULL;
     }
+  }
+
+  void eval_neg()
+  {
+    auto& self = static_cast<Derived&>(*this);
+    auto t = transform_each(selector, get_value{});
+    bool found = false;
+    self.with_coll([this, &self, &t, &found](auto& coll) {
+      if (coll.contains(get_elem(t))) {
+        found = true;
+      }
+    });
+    next(!found);
   }
 
   void eval_point()
@@ -210,6 +235,7 @@ struct Matcher_base : public Rule::Body {
     switch (config) {
     case POINT: return eval_point();
     case FULL: return eval_full();
+    case NEGATIVE: return eval_neg();
     }
   }
 };
@@ -287,6 +313,12 @@ struct external_ : public Collection_base {
     operator Rule::ubody()
     {
       return Query::allocate<Body>(std::move(selector), rel);
+    }
+
+    Rule::ubody operator!() {
+      auto b = Query::allocate<Body>(std::move(selector), rel);
+      b->set_negative();
+      return b;
     }
   };
 
@@ -383,6 +415,9 @@ struct table : public Collection_base {
       void
       with_coll(F&& f) const noexcept
       {
+        if (this->is_negative()) {
+          return f(this->origin.stable);
+        }
         int delta = this->use_delta();
         if (delta < 0) {
           f(this->origin.stable);
@@ -401,6 +436,13 @@ struct table : public Collection_base {
     operator Rule::ubody()
     {
       return Query::allocate<Body>(std::move(selector), rel);
+    }
+
+
+    Rule::ubody operator!() {
+      auto b = Query::allocate<Body>(std::move(selector), rel);
+      b->set_negative();
+      return b;
     }
 
     operator Rule::uhead()
