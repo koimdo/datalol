@@ -150,8 +150,8 @@ void Query::print_vars(std::ostream& os, const Rule::elem_meta& vs) const
   int i=0;
   int out = 0;
   for (auto const& v : vars) {
-    bool is_pos = vs.positive.test(i);
-    bool is_neg = vs.negative.test(i);
+    bool is_pos = vs.produce.test(i);
+    bool is_neg = vs.consume.test(i);
     i++;
     if (!is_pos && !is_neg)
       continue;
@@ -194,7 +194,7 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
 static
 void verify_neg(const Rule::vars_t& bound, const Rule& r, const Rule::elem_meta& e)
 {
-  auto neg = e.negative;
+  auto neg = e.consume;
   neg &= ~bound;
   assert(neg.none());
 }
@@ -211,7 +211,7 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
   stack.reserve(vars.size());
   for (auto ofs : order) {
     auto vars = get_meta(r.head+ofs);
-    auto pos = vars.positive;
+    auto pos = vars.produce;
     verify_neg(bound, r, vars);
 
     pos &= ~bound;

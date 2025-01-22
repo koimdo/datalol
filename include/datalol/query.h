@@ -141,7 +141,8 @@ struct Matcher_base : public Rule::Body {
     if (is_negative())
       return;
     config = NEGATIVE;
-    std::swap(meta.positive, meta.negative);
+    std::swap(meta.produce, meta.consume);
+    meta.negative = true;
   }
 
   bool is_negative() const { return NEGATIVE == config; }

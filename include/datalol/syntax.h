@@ -101,9 +101,18 @@ class Rule {
 public:
   using vars_t = Var_::vars_t;
   struct elem_meta {
-    vars_t positive, negative;
+    vars_t produce;
+    vars_t consume;
     Collection_base *collection;
+    bool negative;
     elem_meta(const elem_meta&) = default;
+    elem_meta(const vars_t& produce, const vars_t& consume,
+              Collection_base *collection = nullptr,
+              bool negative = false)
+      : produce(produce), consume(consume)
+      , collection(collection)
+      , negative(negative)
+    {}
   };
 
   class Elem : public IPrint {
@@ -331,7 +340,7 @@ class thunk_base {
 protected:
   Rule::elem_meta get_meta() const noexcept
   {
-    return { {}, vars, nullptr };
+    return { {}, vars };
   }
   explicit thunk_base(const char *desc);
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
@@ -386,8 +395,8 @@ class thunk : public thunk_base {
       , fun(std::move(fun))
       , var(std::move(var))
     {
-      meta.positive.set(var.get_id());
-      meta.positive &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+      meta.produce.set(var.get_id());
+      meta.produce &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
     }
     void eval() override final
     {
