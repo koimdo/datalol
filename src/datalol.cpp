@@ -322,7 +322,7 @@ void Query::stratify()
     Var<Rule::Elem*> e;
     Var<Collection_base*> body;
     Var<bool> neg, nl, nr;
-    Var<int> t;
+    Var<int> s, t;
     Var<size_t> minSCC;
 
     deps(rh, rb, neg) << Elem(e) & $_(dynamic_cast<Rule::Body*>(*e)) & rb == $_((*e)->rule_)
@@ -332,8 +332,8 @@ void Query::stratify()
 
 
     // TODO: when we get lattice-valued relations, `reach` is lmap({rh, rb} -> lbool)
-    reach(rh, rb, neg           ) << deps(rh, rb, neg);
-    reach(rh, rb, $_(*nl || *nr)) << reach(rh, rc, nl) & deps(rc, rb, nr);
+    reach(rh, rb, neg) << deps(rh, rb, neg);
+    reach(rh, rb, neg) << reach(rh, rc, nl) & deps(rc, rb, nr) & neg == $_(*nl || *nr);
 
     $_(throw std::logic_error("Cannot stratify")) << reach(rb, rb, true);
 
@@ -349,10 +349,10 @@ void Query::stratify()
 
     whenAll(0, rb) << R(rb) & R(rh) & !reach(rh, rb, false) & !reach(rh, rb, true);
 
-    whenAll(t,        rb) << whenAll(t, rh) & R(rb)              & $_( sccMap.same(*rh, *rb), &sccMap);
-    whenAll($_(*t+1), rb) << whenAll(t, rh) & reach(rh, rb, neg) & $_(!sccMap.same(*rh, *rb), &sccMap);
+    whenAll(s, rb) << whenAll(s, rh) & R(rb)              & $_( sccMap.same(*rh, *rb), &sccMap);
+    whenAll(t, rb) << whenAll(s, rh) & reach(rh, rb, neg) & $_(!sccMap.same(*rh, *rb), &sccMap) & t == $_(*s+1);
 
-    when(t, minSCC, rb) << whenAll(t, rb) & !whenAll($_(*t+1), rb)
+    when(s, minSCC, rb) << whenAll(s, rb) & t == $_(*s+1) & !whenAll(t, rb)
       & minSCC == $_(sccMap.get(*rb), &sccMap); // figure out binder typing on value vs. reference
 
     $_(times.push_back({*t, *minSCC, *rb}), &times) << when(t, minSCC, rb);

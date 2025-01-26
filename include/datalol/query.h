@@ -16,9 +16,6 @@ namespace detail {
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
     template<typename S, typename R>
-    constexpr bool operator()(size_t, const thunk<S>& s, const R& r) const { return s.apply() == r; }
-
-    template<typename S, typename R>
     constexpr bool operator()(size_t, const S& s, const R& r) const
     {
       static_assert(!std::is_base_of<Var_, S>::value, "Var type mismatch");
@@ -35,11 +32,6 @@ namespace detail {
   struct mark_vars_ {
     Rule::elem_meta& res;
     template<typename T> bool operator()(size_t, const T&) { return true; }
-    template<typename T> bool operator()(size_t, const thunk<T>& f)
-    {
-      res.consume |= f.captured_vars();
-      return true;
-    }
     template<typename T> bool operator()(size_t, const Var<T>& v)
     {
       res.produce.set(v.get_id());
@@ -57,8 +49,6 @@ namespace detail {
   struct get_value {
     template<typename T>
     const T& operator()(const Var<T>& v) const { return *v.get(); }
-    template<typename T>
-    auto operator()(const thunk<T>& f) const { return f.apply(); }
     template<typename T>
     constexpr const T& operator()(const T& t) const { return t; }
   };

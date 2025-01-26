@@ -349,8 +349,6 @@ public:
   template<typename Make>
   static
   auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
-
-  Rule::vars_t captured_vars() const { return vars; }
 };
 
 namespace detail {
