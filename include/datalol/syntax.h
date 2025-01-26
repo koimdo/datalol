@@ -360,6 +360,8 @@ namespace detail {
 
 template<typename Res>
 class thunk : public thunk_base {
+  thunk(const thunk&) = delete;
+  thunk(thunk&&) = default;
   using fun_t = std::function<Res()>;
   fun_t fun;
 
@@ -386,9 +388,9 @@ class thunk : public thunk_base {
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
+  using bound_t = Var<typename std::remove_cv<typename std::remove_reference<Res>::type>::type>;
   struct binder : Rule::Body {
     thunk fun;
-    using bound_t = Var<Res>;
     bound_t var;
     binder(thunk&& fun, bound_t& var)
       : Rule::Body(fun.get_meta())
@@ -432,7 +434,7 @@ public:
     return Query::allocate<guard>(std::move(*this));
   }
 
-  Rule::ubody operator==(Var<Res>& var)
+  Rule::ubody operator==(bound_t& var)
   {
     return Query::allocate<binder>(std::move(*this), var);
   }
@@ -447,8 +449,8 @@ auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()
   return { desc, make() };
 }
 
-template<typename T>
-Rule::ubody operator==(Var<T>& v, thunk<T>&& getter)
+template<typename S, typename T>
+Rule::ubody operator==(Var<S>& v, T&& getter)
 {
   return getter == v;
 }
