@@ -271,7 +271,7 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
 }
 
 template<typename Coll>
-struct external_ : public Collection_base {
+struct external_ : public Collection {
   Coll coll;
 
   Json::Value to_json() const override final
@@ -290,7 +290,7 @@ struct external_ : public Collection_base {
   using value_type = typename remove_cvref<Coll>::type::value_type;
 
   external_(const Coll& coll_, const ident& id)
-    : Collection_base(id)
+    : Collection(id)
     , coll(coll_) {}
 
   template<typename Sel>
@@ -327,12 +327,12 @@ struct external_ : public Collection_base {
 };
 
 template<typename T, typename Compare = std::less<T>>
-struct table : public Collection_base {
+struct table : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
   table(const char *name, const Compare& cmp = Compare{})
-    : Collection_base(ident::make<table>(name))
+    : Collection(ident::make<table>(name))
     , stable(cmp)
     , recent(cmp)
   {}

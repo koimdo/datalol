@@ -40,14 +40,14 @@ std::string ident::get_name() const
   return std::string();
 }
 
-Collection_base::Collection_base(const ident& id)
+Collection::Collection(const ident& id)
   : id(id)
 {
   Query::current->db.push_back(this);
 }
 
-Rule::elem_meta::elem_meta(Collection_base *coll)
-  : collection(coll)
+Rule::elem_meta::elem_meta(dependency *dep)
+  : dep(dep)
   , negative(false)
 {}
 
@@ -270,9 +270,10 @@ void Query::configure()
   for (auto& srules : strata) {
     for (auto& r : srules.extent) {
       for (size_t i=r.head+1; i<r.last; ++i) {
-        auto coll = get_meta(i).collection;
+        auto dep = get_meta(i).dep;
         auto& to_merge = srules.to_merge;
-        if (coll && std::find(to_merge.begin(), to_merge.end(), coll) != to_merge.end()) {
+        // FIXME: do it in stratify
+        if (dep && std::find(to_merge.begin(), to_merge.end(), dep) != to_merge.end()) {
           recursive.set(i);
           r.seminaive_current = i-r.head;
         }
@@ -410,9 +411,9 @@ void Query::control::manual_stratify(std::initializer_list<unsigned> counts)
 
 void Query::add_stratum(detail::span<Rule> extent)
 {
-  std::vector<Collection_base*> to_merge;
+  std::vector<dependency*> to_merge;
   for (auto const& r : extent) {
-    auto c = get_meta(r.head).collection;
+    auto c = get_meta(r.head).dep;
     if (c)
       to_merge.push_back(c);
   }

@@ -48,15 +48,19 @@ public:
 };
 std::ostream& operator<<(std::ostream& os, const ident& id);
 
-class Collection_base : public IPrint {
+class dependency : public IPrint {
+  friend class Query;
+  virtual size_t merge() = 0;
+};
+
+class Collection : public dependency {
 protected:
   ident id;
-  Collection_base(Collection_base&&) = default;
+  Collection(Collection&&) = default;
 public:
-  Collection_base(const Collection_base&) = delete;
-  explicit Collection_base(const ident& id);
+  Collection(const Collection&) = delete;
+  explicit Collection(const ident& id);
   std::string get_name() const noexcept { return id.get_name(); }
-  virtual size_t merge() = 0;
   virtual Json::Value get_contents() const = 0;
 };
 
@@ -103,15 +107,15 @@ public:
   struct elem_meta {
     vars_t produce;
     vars_t consume;
-    Collection_base *collection;
+    dependency *dep;
     bool negative;
     elem_meta(const elem_meta&) = default;
-    elem_meta(Collection_base *collection);
+    elem_meta(dependency *dep);
     elem_meta(const vars_t& produce, const vars_t& consume,
-              Collection_base *collection = nullptr,
+              dependency *dep = nullptr,
               bool negative = false)
       : produce(produce), consume(consume)
-      , collection(collection)
+      , dep(dep)
       , negative(negative)
     {}
     void negate_vars();
@@ -256,13 +260,13 @@ private:
 
   struct stratum {
     detail::span<Rule> extent;
-    std::vector<Collection_base*> to_merge;
+    std::vector<dependency*> to_merge;
   };
   std::vector<stratum> strata;
   std::bitset<MAX_ELEMS> recursive;
 
   std::vector<Var_> vars;
-  std::vector<Collection_base*> db;
+  std::vector<Collection*> db;
 
   Rule::elem_meta& get_meta(unsigned i);
   Rule::Elem& get_elem(unsigned i);
@@ -275,7 +279,7 @@ private:
   friend class Rule::cursor;
   template<typename T, typename Cmp>
   friend class Var;
-  friend class Collection_base;
+  friend class Collection;
 
   void verify_neg(const Rule::vars_t& bound, const Rule::Elem& e);
   void add_stratum(detail::span<Rule> extent);
