@@ -60,13 +60,6 @@ namespace detail {
       os << prefix() << "ignore";
       return true;
     }
-    template<typename T>
-    bool operator () (size_t, const Var<T>& v)
-    {
-      os << prefix();
-      v.print(os);
-      return true;
-    }
   };
 
   template<typename T>

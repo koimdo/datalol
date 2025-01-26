@@ -83,10 +83,9 @@ Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
   return *this;
 }
 
-std::ostream& operator<<(std::ostream& os, const Var_::Impl& impl)
+void Var_::Impl::print_common(std::ostream& os) const
 {
-  os << "?" << impl.id.get_name() << "[" << impl.id.type_name() << "]";
-  return os;
+  os << "?" << id.get_name() << "[" << id.type_name() << "]";
 }
 
 void Query::add_elem(Rule::Elem *me)
@@ -180,10 +179,10 @@ Var_::Impl::Impl(ident id)
   : id(id)
 {}
 
-void Var_::register_var(const Var_* v)
+void Var_::register_var(const Var_::Impl* v)
 {
   assert(current_vars);
-  current_vars->set(v->impl->nvar);
+  current_vars->set(v->nvar);
 }
 
 Rule::Elem::Elem(const elem_meta& m)

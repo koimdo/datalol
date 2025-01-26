@@ -65,24 +65,24 @@ public:
   static constexpr size_t MAX_VARS = 64;
   typedef std::bitset<MAX_VARS> vars_t;
 protected:
-  struct Impl {
+  struct Impl : public IPrint {
     Impl(ident id);
     const void *p = nullptr;
     ident id;
     int nvar;
+    void print_common(std::ostream& os) const;
   };
 
   Impl *impl;
 
-  friend
-  std::ostream& operator<<(std::ostream& os, const Impl&);
+  friend std::ostream& operator<<(std::ostream& os, const Var_& v) { return os << *v.impl; }
   Var_(Impl *impl): impl(impl) {}
 
   friend class thunk_base;
   static vars_t *current_vars;
 
   static
-  void register_var(const Var_*);
+  void register_var(const Impl*);
 
   friend class Query;
 
@@ -187,7 +187,7 @@ template<typename T, typename Compare = std::less<T>>
 class Var : public Var_ {
 public:
   Var(const char *name = nullptr);
-  Var(const Var& v): Var_(v) { register_var(this); }
+  Var(const Var& v): Var_(v) { register_var(impl); }
   Var(Var&&) = default;
 
   struct Impl : public Var_::Impl {
@@ -197,6 +197,13 @@ public:
       : Var_::Impl(id)
       , cmp(cmp)
     {}
+    void print(std::ostream& os) const override
+    {
+      print_common(os);
+      if (p) {
+        os << "=" << static_cast<const T*>(p);
+      }
+    }
   };
 
   bool unify(const T& t) const
@@ -215,15 +222,6 @@ public:
   }
   const T *operator->() const noexcept { return get(); }
   const T& operator*() const noexcept { return *get(); }
-
-  std::ostream& print(std::ostream& os) const
-  {
-    os << *impl;
-    if (get()) {
-      os << "=" << *get();
-    }
-    return os;
-  }
 };
 
 class Query {
@@ -407,7 +405,7 @@ class thunk : public thunk_base {
     }
     void print(std::ostream& os) const override final
     {
-      var.print(os) << " == " << fun;
+      os << var << " == " << fun;
     }
   };
 
