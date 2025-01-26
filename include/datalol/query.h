@@ -169,31 +169,30 @@ struct Matcher_base : public Rule::Body {
   {
     auto& self = static_cast<Derived&>(*this);
     auto t = transform_each(selector, get_value{});
-    bool found = false;
-    self.with_coll([this, &self, &t, &found](auto& coll) {
+    for (auto& coll : self.get_coll()) {
       if (do_contains(coll, get_elem(t))) {
-        found = true;
+        return;
       }
-    });
-    next(!found);
+    }
+    next(true);
   }
 
   void eval_point()
   {
     auto& self = static_cast<Derived&>(*this);
     auto t = transform_each(selector, get_value{});
-    self.with_coll([this, &self, &t](auto& coll) {
+    for (auto& coll : self.get_coll()) {
       next(do_contains(coll, get_elem(t)));
-    });
+    }
   }
 
   void eval_full()
   {
     auto& self = static_cast<Derived&>(*this);
-    self.with_coll([this, &self](auto& coll) {
+    for (auto& coll : self.get_coll()) {
       for (auto const& row : coll)
         next(unify(self.selector, row));
-    });
+    }
   }
 
   void eval_impl()
@@ -206,14 +205,26 @@ struct Matcher_base : public Rule::Body {
   }
 };
 
+template<typename T>
+struct sel_unwrap {
+  using type = T;
+  template<typename S>
+  static
+  auto unwrap(S&& s) { return std::forward<S>(s); }
+};
+
+template<typename T>
+struct sel_unwrap<Var<T>&> {
+  using type = Var<T>;
+  static
+  Var<T> unwrap(Var<T>& v) { return std::move(v); }
+};
+
 template<typename... Sel>
 auto
 build_selector(Sel&&... sel)
 {
-  // FIXME: figure out the real construction pattern where `Var` is always move-constructed
-  // and everything else is perfectly forwarded. Stop using ham-fisted `remove_cvref`.
-  return std::tuple<typename remove_cvref<Sel>::type...>
-    (std::forward<typename remove_cvref<Sel>::type>(sel)...);
+  return std::make_tuple(sel_unwrap<Sel>::unwrap(sel)...);
 }
 
 // FIXME: use the real machinery in json.h once ready
@@ -254,9 +265,8 @@ struct external_ : public Collection_base {
     struct Body : Matcher_base<Body, Sel, external_> {
       using Matcher_base<Body, Sel, external_>::Matcher_base;
 
-      template<typename F>
-      void
-      with_coll(F&& f) const noexcept { f(this->origin.coll); }
+      span<typename std::remove_reference<Coll>::type>
+      get_coll() const noexcept { return {&this->origin.coll, 1}; }
 
       void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
@@ -370,22 +380,19 @@ struct table : public Collection_base {
 
     struct Body : detail::Matcher_base<Body, Sel, table> {
       using detail::Matcher_base<Body, Sel, table>::Matcher_base;
-      template<typename F>
-      void
-      with_coll(F&& f) const noexcept
+      span<relation<T, Compare>> get_coll() noexcept
       {
-        if (this->is_negative()) {
-          return f(this->origin.stable);
-        }
+        if (this->is_negative())
+          return {&this->origin.stable, 1};
         int delta = this->use_delta();
-        if (delta < 0) {
-          f(this->origin.stable);
-        } else if (delta > 0) {
-          f(this->origin.stable);
-          f(this->origin.recent);
-        } else {// delta == 0
-          f(this->origin.recent);
-        }
+        if (delta < 0)
+          return {&this->origin.stable, 1};
+        else if (delta > 0)
+          // contiguous members with same access specifier are contiguous in memory.
+          // This returns both `stable` and `recent`.
+          return {&this->origin.stable, 2};
+        else // delta == 0
+          return {&this->origin.recent, 1};
       }
 
       void configure() override final { this->config_impl(); }
