@@ -14,6 +14,7 @@ namespace detail {
   struct unify_ {
     // Elementwise cases
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
+    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, std::reference_wrapper<R> r) const { return s.unify(r.get()); }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
     template<typename S, typename R>
     constexpr bool operator()(size_t, const S& s, const R& r) const
@@ -22,12 +23,6 @@ namespace detail {
       return s == r;
     }
   };
-
-  template<typename Sel, typename Row>
-  bool unify(const Sel& sel, const Row& row)
-  {
-    return for_each_in_tuple(unify_{}, sel, row);
-  }
 
   struct mark_vars_ {
     Rule::elem_meta& res;
@@ -38,13 +33,6 @@ namespace detail {
       return true;
     }
   };
-
-  template<typename Sel>
-  void mark_vars(const Sel& sel, Rule::elem_meta& meta)
-  {
-    mark_vars_ mv{meta};
-    for_each_in_tuple(mv, sel);
-  }
 
   struct get_value {
     template<typename T>
@@ -117,19 +105,18 @@ struct Matcher_base : public Rule::Body {
   Origin& origin;
 
   using value_type = typename Origin::value_type;
-  static_assert(std::tuple_size<Sel>::value == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
 
   Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(&origin)
     , selector(std::forward<Sel>(sel))
     , origin(origin)
   {
-    mark_vars(sel, meta);
+    sel.mark_vars(meta);
   }
 
   void print(std::ostream& os) const override final
   {
-    os << origin.get_name() << "(" << print_tuple<Sel>(selector) << ")";
+    os << origin.get_name() << "(" << selector << ")";
   }
 
   template<typename T>
@@ -168,7 +155,7 @@ struct Matcher_base : public Rule::Body {
   void eval_neg()
   {
     auto& self = static_cast<Derived&>(*this);
-    auto t = transform_each(selector, get_value{});
+    auto t = selector.get_value();
     for (auto& coll : self.get_coll()) {
       if (do_contains(coll, get_elem(t))) {
         return;
@@ -180,7 +167,7 @@ struct Matcher_base : public Rule::Body {
   void eval_point()
   {
     auto& self = static_cast<Derived&>(*this);
-    auto t = transform_each(selector, get_value{});
+    auto t = selector.get_value();
     for (auto& coll : self.get_coll()) {
       next(do_contains(coll, get_elem(t)));
     }
@@ -191,7 +178,7 @@ struct Matcher_base : public Rule::Body {
     auto& self = static_cast<Derived&>(*this);
     for (auto& coll : self.get_coll()) {
       for (auto const& row : coll)
-        next(unify(self.selector, row));
+        next(selector.unify(row));
     }
   }
 
@@ -205,26 +192,53 @@ struct Matcher_base : public Rule::Body {
   }
 };
 
-template<typename T>
-struct sel_unwrap {
-  using type = T;
-  template<typename S>
-  static
-  auto unwrap(S&& s) { return std::forward<S>(s); }
+template<typename T, typename... Sel>
+struct Selector {
+  using value_type = T;
+
+  static_assert(sizeof...(Sel) == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
+
+  std::tuple<Sel...> sel;
+  Selector(Sel&&... sel)
+    : sel(std::forward<Sel>(sel)...)
+  {}
+
+  void mark_vars(Rule::elem_meta& meta) const
+  {
+    mark_vars_ mv{meta};
+    for_each_in_tuple(mv, sel);
+  }
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const Selector& s)
+  {
+    return os << print_tuple<decltype(s.sel)>(s.sel);
+  }
+
+  bool unify(const value_type& row) const
+  {
+    unify_ u;
+    return for_each_in_tuple(u, sel, row);
+  }
+
+  // TODO: return tuple of const references, suitable for comparison or construction
+  auto get_value() const
+  {
+    return transform_each(sel, detail::get_value{});
+  }
 };
 
 template<typename T>
-struct sel_unwrap<Var<T>&> {
-  using type = Var<T>;
-  static
-  Var<T> unwrap(Var<T>& v) { return std::move(v); }
-};
+auto sel_unwrap(T&& s) { return std::forward<T>(s); }
+template<typename T>
+Var<T> sel_unwrap(Var<T>& v) { return std::move(v); }
 
-template<typename... Sel>
+template<typename T, typename... Sel>
 auto
 build_selector(Sel&&... sel)
 {
-  return std::make_tuple(sel_unwrap<Sel>::unwrap(sel)...);
+  // Unlike std::make_tuple, we want to preserve std::reference_wrapper as-is
+  return Selector<T, typename std::decay<Sel>::type...>(sel_unwrap(sel)...);
 }
 
 // FIXME: use the real machinery in json.h once ready
@@ -286,7 +300,7 @@ struct external_ : public Collection_base {
 
   template<typename... SelectArgs>
   auto operator()(SelectArgs&&... args) {
-    return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
+    return susp<decltype(detail::build_selector<value_type>(args...))>{*this, detail::build_selector<value_type>(std::forward<SelectArgs>(args)...)};
   }
 };
 
@@ -364,17 +378,16 @@ struct table : public Collection_base {
         , selector(std::move(selector))
         , rel(rel)
       {
-        mark_vars(selector, meta);
+        selector.mark_vars(meta);
         meta.negate_vars();
       }
       void eval() override final
       {
-        auto res = transform_each(selector, detail::get_value{});
-        rel.to_add.push_back(std::move(res));
+        rel.to_add.push_back(selector.get_value());
       }
       void print(std::ostream& os) const override final
       {
-        os << rel.get_name() << "(" << detail::print_tuple<Sel>(selector) << ")";
+        os << rel.get_name() << "(" << selector << ")";
       }
     };
 
@@ -419,7 +432,7 @@ struct table : public Collection_base {
 
   template<typename... SelectArgs>
   auto operator()(SelectArgs&&... args) {
-    return susp<decltype(detail::build_selector(args...))>{*this, detail::build_selector(std::forward<SelectArgs>(args)...)};
+    return susp<decltype(detail::build_selector<value_type>(args...))>{*this, detail::build_selector<value_type>(std::forward<SelectArgs>(args)...)};
   }
 };
 
