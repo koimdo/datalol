@@ -10,10 +10,14 @@
 
 namespace datalol {
 
+struct ignore_t {};
+static constexpr ignore_t ignore{};
+
 namespace detail {
   struct unify_ {
     // Elementwise cases
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
+    template<typename R> constexpr bool operator()(size_t, ignore_t, const R&) const { return true; }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, std::reference_wrapper<R> r) const { return s.unify(r.get()); }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
     template<typename S, typename R>
@@ -43,16 +47,23 @@ namespace detail {
 
   struct generic_print {
     std::ostream& os;
+    size_t i = 0;
+    const char *prefix() { return i++ ? ", " : ""; }
     template<typename T>
-    bool operator () (size_t i, T const &v)
+    bool operator () (size_t, T const &v)
     {
-      os << (i? ", " : "") << v;
+      os << prefix() << v;
+      return true;
+    }
+    bool operator () (size_t, ignore_t)
+    {
+      os << prefix() << "ignore";
       return true;
     }
     template<typename T>
-    bool operator () (size_t i, const Var<T>& v)
+    bool operator () (size_t, const Var<T>& v)
     {
-      os << (i? ", " : "");
+      os << prefix();
       v.print(os);
       return true;
     }
@@ -78,26 +89,48 @@ struct remove_cvref {
   using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 
-template<typename T>
-struct contain_trait {
-  template<typename V>
-  static bool contains(const T& coll, const V& val) { return coll.contains(val); }
-};
+template<typename Sel, bool has_value = true>
+struct eval_helper {
+  decltype(std::declval<Sel>().get_value()) value;
+  eval_helper(const Sel& sel)
+    : value(sel.get_value())
+  {}
 
-template<typename T>
-struct contain_trait<std::vector<T>> {
-  template<typename V>
-  static bool contains(const std::vector<T>& vec, const V& val)
+  using value_t = typename Sel::value_type;
+  static
+  const value_t& get_elem(const value_t& t) { return t; }
+  static
+  const value_t& get_elem(const std::tuple<value_t>& t) { return std::get<0>(t); }
+
+  // TODO: SFINAE-generalize it according to support of coll.count(value)
+  template<typename T>
+  bool find_in(const std::vector<T>& vec) const
   {
-    return std::find(vec.begin(), vec.end(), val) != vec.end();
+    return std::find(vec.begin(), vec.end(), get_elem(value)) != vec.end();
+  }
+  template<typename Coll>
+  bool find_in(const Coll& coll) const
+  {
+    return coll.contains(get_elem(value));
   }
 };
 
-template<typename Coll, typename V>
-bool do_contains(const Coll& coll, const V& val)
-{
-  return contain_trait<typename remove_cvref<Coll>::type>::template contains(coll, val);
-}
+template<typename Sel>
+struct eval_helper<Sel, false> {
+  const Sel& sel;
+  eval_helper(const Sel& sel)
+    : sel(sel)
+  {}
+  template<typename Coll>
+  bool find_in(const Coll& coll) const
+  {
+    for (auto const& row : coll) {
+      if (sel.unify(row))
+        return true;
+    }
+    return false;
+  }
+};
 
 template<typename Derived, typename Sel, typename Origin>
 struct Matcher_base : public Rule::Body {
@@ -118,12 +151,6 @@ struct Matcher_base : public Rule::Body {
   {
     os << origin.get_name() << "(" << selector << ")";
   }
-
-  template<typename T>
-  static
-  const T& get_elem(const T& t) { return t; }
-  static
-  const value_type& get_elem(const std::tuple<value_type>& t) { return std::get<0>(t); }
 
   enum query_type {
     FULL,
@@ -152,12 +179,13 @@ struct Matcher_base : public Rule::Body {
     }
   }
 
+  using helper_t = eval_helper<Sel, Sel::has_value>;
   void eval_neg()
   {
+    helper_t aux{selector};
     auto& self = static_cast<Derived&>(*this);
-    auto t = selector.get_value();
     for (auto& coll : self.get_coll()) {
-      if (do_contains(coll, get_elem(t))) {
+      if (aux.find_in(coll)) {
         return;
       }
     }
@@ -166,10 +194,10 @@ struct Matcher_base : public Rule::Body {
 
   void eval_point()
   {
+    helper_t aux{selector};
     auto& self = static_cast<Derived&>(*this);
-    auto t = selector.get_value();
     for (auto& coll : self.get_coll()) {
-      next(do_contains(coll, get_elem(t)));
+      next(aux.find_in(coll));
     }
   }
 
@@ -197,6 +225,7 @@ struct Selector {
   using value_type = T;
 
   static_assert(sizeof...(Sel) == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
+  static constexpr bool has_value = !any<std::is_same<Sel, ignore_t>::value...>::value;
 
   std::tuple<Sel...> sel;
   Selector(Sel&&... sel)
