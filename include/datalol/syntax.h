@@ -202,7 +202,7 @@ private:
 
 Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
-template<typename T, typename Compare = std::less<T>>
+template<typename T, typename Equal = detail::equal_to<T>>
 class Var : public Var_ {
 public:
   Var(const char *name = nullptr);
@@ -211,10 +211,10 @@ public:
 
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
-    Compare cmp;
-    Impl(ident id, const Compare& cmp)
+    Equal eq;
+    Impl(ident id, const Equal& eq)
       : Var_::Impl(id)
-      , cmp(cmp)
+      , eq(eq)
     {}
 
     void print_value(std::ostream& os, const T& t, std::true_type) const{ os << t; }
@@ -234,10 +234,9 @@ public:
 
   bool unify(const T& t) const
   {
-    auto const& cmp = static_cast<const Impl*>(impl)->cmp;
+    auto const& eq = static_cast<const Impl*>(impl)->eq;
     return get()
-      // FIXME: use eq-like comaprison instead of this inefficient incantation
-      ? !cmp(*get(), t) && !cmp(t, *get())
+      ? eq(*get(), t)
       : (set(&t), true);
   }
 
