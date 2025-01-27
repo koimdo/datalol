@@ -138,20 +138,12 @@ void Query::iter::operator++()
 
 void Query::print_rule(std::ostream& os, const Rule& r) const
 {
-  auto print_with_vars = [this, &os](const Rule::Elem& e) {
-    os << "[";
-    print_vars(os, e.meta);
-    os << "]";
-    e.print(os);
-  };
-  auto const& h = elems[r.head];
-  print_with_vars(*h);
+  os << *elems[r.head];
   os << " << ";
   int count = 0;
   for (int j = r.head+1; j < r.last; j++) {
-    os << (count++ ? " & " : "") << (r.seminaive_current == j-r.head ? "^" : "");
-    auto const& b = elems[j];
-    print_with_vars(*b);
+    os << (count++ ? " & " : "");
+    os << *elems[j];
   }
 }
 
@@ -166,21 +158,6 @@ void Query::print(std::ostream& os) const
     i++;
   }
   os <<"}";
-}
-
-void Query::print_vars(std::ostream& os, const Rule::elem_meta& vs) const
-{
-  int i=0;
-  int out = 0;
-  for (auto const& v : vars) {
-    bool is_pos = vs.produce.test(i);
-    bool is_neg = vs.consume.test(i);
-    i++;
-    if (!is_pos && !is_neg)
-      continue;
-    os << (out?", ":"") << (is_pos ? "+":"") << (is_neg ? "-":"") << v.impl->id.get_name();
-    out++;
-  }
 }
 
 Var_::Impl::Impl(ident id)
@@ -421,8 +398,6 @@ void Query::stratify()
   std::tie(last_time, last_scc, std::ignore, std::ignore) = times[0];
   for (size_t i = 0; i<times.size(); i++) {
     std::tie(time, scc, rule, is_recursive) = times[i];
-    
-    std::cerr << "STRATIFY: time=" << time << " scc=" << scc << " rule=" << rule-rules.data() << "\n";
     if (last_time != time || last_scc != scc) {
       auto nend = std::addressof(*nrules.end());
       add_stratum({last, nend});

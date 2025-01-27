@@ -310,7 +310,6 @@ private:
 
   Query(const Query&) = delete;
   Query(Query&&) = delete;
-  void print_vars(std::ostream& os, const Rule::elem_meta& vs) const;
   void run();
   void print_rule(std::ostream& os, const Rule&) const;
   void print(std::ostream& os) const;
