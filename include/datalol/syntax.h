@@ -11,6 +11,7 @@
 #include "relation.h"
 #include "debug.h"
 #include "pool.h"
+#include "type_traits.h"
 
 namespace datalol {
 
@@ -50,7 +51,7 @@ std::ostream& operator<<(std::ostream& os, const ident& id);
 
 class dependency : public IPrint {
   friend class Query;
-  virtual size_t merge() = 0;
+  virtual size_t merge(bool recursive = true) = 0;
 };
 
 class Collection : public dependency {
@@ -157,7 +158,17 @@ public:
       }
       undo.zap();
     }
-    bool use_delta() const noexcept { return rule().seminaive_current - idx; }
+    enum delta_t {
+      RECENT,
+      STABLE,
+      BOTH,
+    };
+    delta_t use_delta() const noexcept {
+      int d = rule().seminaive_current - idx;
+      if (d < 0) return STABLE;
+      if (d > 0) return BOTH;
+      return RECENT;
+    }
   };
 
   class Head : public Elem {
@@ -176,12 +187,16 @@ public:
     cursor& operator&(Rule::ubody&& b);
     ~cursor();
   };
+
+  size_t size() const { return last-head; }
+  bool operator<(const Rule& o) const { return last < o.last; }
 private:
   friend class Query;
   friend class Stubs;
-  unsigned head = 0, last = 0;
-  unsigned start = 0;
-  int seminaive_current = 0;
+  short head = 0, last = 0, start = 0;
+  short seminaive_current = 0;
+  static constexpr size_t MAX_ELEMS = 64;
+  std::bitset<MAX_ELEMS> recursive;
   std::vector<Var_> undo_stack;
 };
 
@@ -201,11 +216,18 @@ public:
       : Var_::Impl(id)
       , cmp(cmp)
     {}
+
+    void print_value(std::ostream& os, const T& t, std::true_type) const{ os << t; }
+    void print_value(std::ostream& os, const T& t, std::false_type) const
+    {
+      os << "<" << ident::make<T>().type_name() << " @ " << static_cast<const void*>(&t) << ">";
+    }
     void print(std::ostream& os) const override
     {
       print_common(os);
       if (p) {
-        os << "=" << static_cast<const T*>(p);
+        os << "=";
+        print_value(os, *static_cast<const T*>(p), detail::is_printable<T>{});
       }
     }
   };
@@ -248,7 +270,6 @@ public:
   };
 
 private:
-  static constexpr size_t MAX_ELEMS = 128;
   static Query *current;
 
   const char *name;
@@ -263,7 +284,6 @@ private:
     std::vector<dependency*> to_merge;
   };
   std::vector<stratum> strata;
-  std::bitset<MAX_ELEMS> recursive;
 
   std::vector<Var_> vars;
   std::vector<Collection*> db;
@@ -352,13 +372,6 @@ public:
   static
   auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
 };
-
-namespace detail {
-  template<typename T, typename = void>
-  struct is_contextual_bool : std::false_type {};
-  template<typename T>
-  struct is_contextual_bool<T, decltype(void(std::declval<T>() ? true : false))> : std::true_type {};
-}
 
 template<typename Res>
 class thunk : public thunk_base {

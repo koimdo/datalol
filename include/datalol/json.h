@@ -24,11 +24,6 @@ BASIC_TYPE(const Json::String&);
 BASIC_TYPE(bool);
 #undef BASIC_TYPE
 
-template<typename T, typename = void>
-struct is_printable : std::false_type {};
-template<typename T>
-struct is_printable<T, decltype(void(std::declval<std::ostream>() << std::declval<T>()))> : std::true_type {};
-
 template<typename T>
 Json::Value
 json_of(const T&) {

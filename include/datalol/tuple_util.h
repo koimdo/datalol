@@ -42,7 +42,7 @@ namespace detail
   template <class F, typename Tuple, size_t... Is>
   auto transform_each_impl(const Tuple& t, F&& f, std::index_sequence<Is...>)
   {
-    return std::make_tuple(f(tuple_lift<Tuple>::template get<Is>(t) )...);
+    return std::tie(f(tuple_lift<Tuple>::template get<Is>(t) )...);
   }
 
   template <size_t Is, class F, typename T0, typename... Ts>

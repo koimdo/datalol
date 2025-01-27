@@ -18,7 +18,8 @@ namespace detail {
     // Elementwise cases
     template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
     template<typename R> constexpr bool operator()(size_t, ignore_t, const R&) const { return true; }
-    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, std::reference_wrapper<R> r) const { return s.unify(r.get()); }
+    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<R> r) const { return s.unify(r.get()); }
+    template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<const R> r) const { return s.unify(r.get()); }
     template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
     template<typename S, typename R>
     constexpr bool operator()(size_t, const S& s, const R& r) const
@@ -55,6 +56,12 @@ namespace detail {
       os << prefix() << v;
       return true;
     }
+    template<typename T>
+    bool operator () (size_t, reference<T> v)
+    {
+      os << prefix() << "<" << ident::make<T>().type_name() << " @ " << static_cast<const void*>(&v.get()) << ">";
+      return true;
+    }
     bool operator () (size_t, ignore_t)
     {
       os << prefix() << "ignore";
@@ -89,11 +96,12 @@ struct eval_helper {
     : value(sel.get_value())
   {}
 
-  using value_t = typename Sel::value_type;
+  template<typename T>
   static
-  const value_t& get_elem(const value_t& t) { return t; }
+  const T& get_elem(const T& t) { return t; }
+  template<typename T>
   static
-  const value_t& get_elem(const std::tuple<value_t>& t) { return std::get<0>(t); }
+  const T& get_elem(const std::tuple<const T&>& t) { return std::get<0>(t); }
 
   // TODO: SFINAE-generalize it according to support of coll.count(value)
   template<typename T>
@@ -140,9 +148,9 @@ struct Matcher_base : public Rule::Body {
     sel.mark_vars(meta);
   }
 
-  void print(std::ostream& os) const override final
+  void print_impl(std::ostream& os) const
   {
-    os << origin.get_name() << "(" << selector << ")";
+    os << (is_negative() ? "!" : "") << origin.get_name() << "(" << selector << ")";
   }
 
   enum query_type {
@@ -285,7 +293,7 @@ struct external_ : public Collection {
   {
     os << id.get_name() << " = external<" << id.type_name() << ">, size=" << coll.size();
   }
-  size_t merge() override final { assert(false && "Cannot merge into external relations"); return 0; }
+  size_t merge(bool) override final { assert(false && "Cannot merge into external relations"); return 0; }
 
   using value_type = typename remove_cvref<Coll>::type::value_type;
 
@@ -306,6 +314,7 @@ struct external_ : public Collection {
 
       void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
+      void print(std::ostream& os) const override final { this->print_impl(os); }
     };
 
     operator Rule::ubody()
@@ -326,7 +335,7 @@ struct external_ : public Collection {
   }
 };
 
-template<typename T, typename Compare = std::less<T>>
+template<typename T, typename Compare = std::less<void>>
 struct table : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
@@ -341,8 +350,13 @@ struct table : public Collection {
   relation<T, Compare> recent;
   std::vector<T> to_add;
 
-  size_t merge() override final
+  size_t merge(bool recursive) override final
   {
+    if (!recursive) {
+      assert(stable.empty() && recent.empty());
+      stable.assign(std::move(to_add));
+      return 0;
+    }
     // TODO: hold multiple `stable` relations, defer merges?
     // FIXME: indices
     stable.merge_from(std::move(recent));
@@ -358,6 +372,7 @@ struct table : public Collection {
 
   void print(std::ostream& os) const override final
   {
+    os << this->id.get_name();
     if (recent.empty() && to_add.empty()) {
       print_(os, this->stable, "");
     } else {
@@ -405,7 +420,7 @@ struct table : public Collection {
       }
       void eval() override final
       {
-        rel.to_add.push_back(selector.get_value());
+        rel.to_add.push_back(value_type(selector.get_value()));
       }
       void print(std::ostream& os) const override final
       {
@@ -419,19 +434,30 @@ struct table : public Collection {
       {
         if (this->is_negative())
           return {&this->origin.stable, 1};
-        int delta = this->use_delta();
-        if (delta < 0)
-          return {&this->origin.stable, 1};
-        else if (delta > 0)
+        switch (this->use_delta()) {
+        case Rule::Body::RECENT: return {&this->origin.recent, 1};
+        case Rule::Body::STABLE: return {&this->origin.stable, 1};
+        case Rule::Body::BOTH:
           // contiguous members with same access specifier are contiguous in memory.
           // This returns both `stable` and `recent`.
           return {&this->origin.stable, 2};
-        else // delta == 0
-          return {&this->origin.recent, 1};
+        }
+        return {nullptr, nullptr};
       }
 
       void configure() override final { this->config_impl(); }
       void eval() override final { this->eval_impl(); }
+      void print(std::ostream& os) const override final
+      {
+        if (!this->is_negative()) {
+          switch (this->use_delta()) {
+          case Rule::Body::RECENT: os << "δ"; break;
+          case Rule::Body::STABLE: break;
+          case Rule::Body::BOTH:   os << "δ⁺"; break;
+          }
+        }
+        this->print_impl(os);
+      }
     };
 
     operator Rule::ubody()
