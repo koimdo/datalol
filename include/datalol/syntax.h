@@ -366,6 +366,7 @@ protected:
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
 
 public:
+  const Rule::vars_t& captured_vars() const { return vars; }
   template<typename Make>
   static
   auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
@@ -374,7 +375,6 @@ public:
 template<typename Res>
 class thunk : public thunk_base {
   thunk(const thunk&) = delete;
-  thunk(thunk&&) = default;
   using fun_t = std::function<Res()>;
   fun_t fun;
 
@@ -401,29 +401,6 @@ class thunk : public thunk_base {
     void print(std::ostream& os) const override final { os << fun;; }
   };
 
-  using bound_t = Var<typename std::remove_cv<typename std::remove_reference<Res>::type>::type>;
-  struct binder : Rule::Body {
-    thunk fun;
-    bound_t var;
-    binder(thunk&& fun, bound_t& var)
-      : Rule::Body(fun.get_meta())
-      , fun(std::move(fun))
-      , var(std::move(var))
-    {
-      meta.produce.set(var.get_id());
-      meta.produce &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
-    }
-    void eval() override final
-    {
-      decltype(fun.apply()) res = fun.apply(); // `res` is now alive for the rest of the call chain
-      next(var.unify(res));
-    }
-    void print(std::ostream& os) const override final
-    {
-      os << var << " == " << fun;
-    }
-  };
-
   friend class thunk_base;
   template<typename Fun>
   thunk(const char *desc, Fun&& fun)
@@ -433,6 +410,8 @@ class thunk : public thunk_base {
   }
 
 public:
+  thunk(thunk&&) = default;
+
   Res apply() const { return fun(); }
 
   operator Rule::uhead()
@@ -445,11 +424,6 @@ public:
     static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
     return Query::allocate<guard>(std::move(*this));
-  }
-
-  Rule::ubody operator==(bound_t& var)
-  {
-    return Query::allocate<binder>(std::move(*this), var);
   }
 };
 
@@ -465,7 +439,7 @@ auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()
 template<typename S, typename T>
 Rule::ubody operator==(Var<S>& v, T&& getter)
 {
-  return getter == v;
+  return std::forward<T>(getter) == v;
 }
 
 }

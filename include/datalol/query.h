@@ -484,6 +484,42 @@ struct table : public Collection {
   }
 };
 
+template<typename Res, typename V>
+struct binder_base : public Rule::Body {
+  using bound_t = Var<typename std::decay<V>::type>;
+  using thunk_t = thunk<Res>;
+  thunk_t fun;
+  bound_t var;
+  binder_base(thunk_t&& fun, bound_t& var)
+    : Rule::Body({{}, fun.captured_vars(), nullptr})
+    , fun(std::move(fun))
+    , var(std::move(var))
+  {
+    meta.produce.set(var.get_id());
+    meta.produce &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+  }
+};
+
+template<typename Res>
+struct binder : public binder_base<Res, Res> {
+  using binder_base<Res, Res>::binder_base;
+  void eval() override final
+  {
+    auto&& res = this->fun.apply(); // `res` is now alive for the rest of the call chain
+    Rule::Body::next(this->var.unify(res));
+  }
+  void print(std::ostream& os) const override final
+  {
+    os << this->var << " == " << this->fun;
+  }
+};
+
+template<typename Res>
+Rule::ubody operator==(thunk<Res>&& t, typename binder<Res>::bound_t& var)
+{
+  return Query::allocate<binder<Res>>(std::move(t), var);
+}
+
 }
 
 template<typename Coll>
