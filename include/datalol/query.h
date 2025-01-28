@@ -515,6 +515,69 @@ struct binder : public binder_base<Res, Res> {
 };
 
 template<typename Res>
+struct iterate_ {
+  using element_t = decltype(*std::begin(std::declval<Res>()));
+  using binder_t = binder_base<Res, element_t>;
+  struct body : public binder_t {
+    using binder_t::binder_base;
+    void eval() override final
+    {
+      auto&& coll = this->fun.apply(); // `coll` is now alive for the rest of the call chain
+      for (auto&& val : coll)
+        Rule::Body::next(this->var.set(val));
+    }
+    void print(std::ostream& os) const override final
+    {
+      os << this->var << " == iterate(" << this->fun << ")";
+    }
+  };
+
+  using thunk_t = typename body::thunk_t;
+  thunk_t th;
+  iterate_(thunk_t&& th)
+    : th(std::move(th))
+  {}
+  Rule::ubody operator==(typename body::bound_t& var)
+  {
+    return Query::allocate<body>(std::move(th), var);
+  }
+};
+
+template<typename T, bool = std::is_integral<T>::value>
+struct step_iterator;
+
+template<typename T>
+struct step_iterator<T, false> {
+  T i;
+  ptrdiff_t step;
+  bool operator!=(const step_iterator& o) { return i != o.i; }
+  auto&& operator*() { return *i; }
+  step_iterator& operator++() { i += step; return *this; }
+};
+
+template<typename T>
+struct step_iterator<T, true> {
+  T i;
+  ptrdiff_t step;
+  bool operator!=(step_iterator o) { return i != o.i; }
+  auto operator*() { return i; }
+  step_iterator& operator++() { i += step; return *this; }
+};
+static ptrdiff_t sign_of(ptrdiff_t d) { return (d > 0) - (d < 0); }
+
+template<typename T>
+struct xrange_ {
+  T start, stop;
+  ptrdiff_t step;
+  using iterator = step_iterator<T>;
+  xrange_(T start, T stop, ptrdiff_t step)
+    : start(start), stop(stop), step(step)
+  {}
+  iterator begin() const { return iterator{start, step}; }
+  iterator end() const { return iterator{stop, step}; }
+};
+
+template<typename Res>
 Rule::ubody operator==(thunk<Res>&& t, typename binder<Res>::bound_t& var)
 {
   return Query::allocate<binder<Res>>(std::move(t), var);
@@ -541,6 +604,30 @@ external_<Coll> external(Coll&& coll, const char *name)
 {
   auto impl = Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
   return external_<Coll>(*impl);
+}
+template<typename Res>
+auto iterate(thunk<Res>&& t)
+{
+  return detail::iterate_<Res>(std::move(t));
+}
+
+template<typename T>
+auto xrange(T start, T stop, ptrdiff_t step = 0)
+{
+  ptrdiff_t len = stop - start;
+  if (!step)
+    step = detail::sign_of(len);
+  auto rem = len % step;
+  if (rem)
+    stop += (step-rem);
+  return detail::xrange_<T>(start, stop, step);
+}
+
+template<typename T>
+std::enable_if<std::is_integral<T>::value, detail::xrange_<T>>
+xrange(T stop)
+{
+  return xrange(0, stop, 1);
 }
 
 template<typename...>

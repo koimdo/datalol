@@ -232,12 +232,16 @@ public:
     }
   };
 
+  bool set(const T& t) const
+  {
+    Var_::set(&t);
+    return true;
+  }
   bool unify(const T& t) const
   {
     auto const& eq = static_cast<const Impl*>(impl)->eq;
     return get()
-      ? eq(*get(), t)
-      : (set(&t), true);
+      ? eq(*get(), t) : set(t);
   }
 
   const T *get() const noexcept

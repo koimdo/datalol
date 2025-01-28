@@ -84,6 +84,50 @@ TEST(Trivial, reachable) {
   ASSERT_EQ(answer, expected);
 }
 
+TEST(Trivial, iterate) {
+  std::vector<int> result, answer, input = {2, 3, 5};
+  DATALOL(squares) {
+    using namespace datalol;
+    Var<int> n, res;
+    auto N = external(input, "input");
+    $_(result.push_back(*res), &result) << N(n) & res == iterate($_(xrange(*n, (*n)*(1+*n), *n)));
+  }
+  answer = {2, 4, 3, 6, 9, 5, 10, 15, 20, 25};
+  ASSERT_EQ(result, answer);
+}
+
+TEST(Trivial, iterate_container) {
+  struct noncopy_list {
+    std::initializer_list<int> l;
+    auto begin() const { return l.begin(); }
+    auto end() const { return l.end(); }
+    noncopy_list(std::initializer_list<int> l): l(l) {}
+    noncopy_list(const noncopy_list&) = delete;
+    noncopy_list(noncopy_list&&) = default;
+  };
+  auto l1 = {2, 3, 5};
+  auto l2 = {7, 11};
+  auto l3 = {13, 17, 19, 23};
+  std::vector<noncopy_list> input;
+  input.push_back(l1);
+  input.push_back(l2);
+  input.push_back(l3);
+  std::vector<int> result, answer;
+  DATALOL(flatten) {
+    using namespace datalol;
+    Var<noncopy_list> l;
+    Var<int> n, res;
+    auto In = external(input, "input");
+    $_(result.push_back(*res), &result) <<
+      // Backward iteration on iterator-like objects
+      (l == iterate($_(xrange(input.data()+input.size()-1, input.data()-1, -1), &input)))
+      & n == iterate($_(*l))
+      & res == $_((*n)*2);
+  }
+  answer = {26, 34, 38, 46, 14, 22, 4, 6, 10  };
+  ASSERT_EQ(result, answer);
+}
+
 class TriangleTest : public ::testing::Test {
 protected:
   static flat::set<int> nodes;
