@@ -360,11 +360,7 @@ struct table : public Collection {
     // TODO: hold multiple `stable` relations, defer merges?
     // FIXME: indices
     stable.merge_from(std::move(recent));
-    to_add.erase(std::remove_if(to_add.begin(), to_add.end(),
-                                [this](const T& x) {
-                                  return stable.contains(x);
-                                }),
-                 to_add.end());
+    stable.erase_from(to_add);
     recent.assign(std::move(to_add));
     to_add.clear();
     return !recent.empty();

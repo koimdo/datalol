@@ -35,7 +35,7 @@ struct relation {
     : elements(std::move(src))
     , cmp(cmp)
   {
-    do_dedup(cmp);
+    do_dedup();
   }
 
   void do_dedup()
@@ -43,9 +43,10 @@ struct relation {
     std::sort(elements.begin(), elements.end(), cmp);
     elements.erase(std::unique(elements.begin(), elements.end(), [this](const T& l, const T& r) { return !cmp(l, r) && !cmp(r, l); }), elements.end());    
   }
+
   void assign(elems_t&& src)
   {
-    elements.assign(std::make_move_iterator(src.begin()), std::make_move_iterator(src.end()));
+    elements = std::move(src);
     do_dedup();
   }
 
@@ -92,6 +93,15 @@ struct relation {
   void merge_from(relation&& o)
   {
     elements = merge(std::move(elements), std::move(o.elements), cmp);
+  }
+
+  void erase_from(elems_t& to_add)
+  {
+    to_add.erase(std::remove_if(to_add.begin(), to_add.end(),
+                                [this](const T& x) {
+                                  return contains(x);
+                                }),
+                 to_add.end());
   }
 };
 
