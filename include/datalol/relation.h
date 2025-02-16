@@ -27,10 +27,18 @@ struct relation {
   using elems_t = std::vector<T>;
   elems_t elements;
   Compare cmp; // FIXME: move `cmp` to the owning table instead of every `relation`?
-  relation() = default;
-  relation(const Compare& cmp)
+  relation(const Compare& cmp = Compare{})
     : cmp(cmp)
   {}
+
+  template<typename Iter>
+  relation(Iter first, Iter last, const Compare& cmp)
+    : elements(first, last)
+    , cmp(cmp)
+  {
+    do_dedup();
+  }
+
   relation(elems_t&& src, const Compare& cmp)
     : elements(std::move(src))
     , cmp(cmp)
@@ -55,7 +63,8 @@ struct relation {
   auto begin() const { return elements.begin(); }
   auto end() const { return elements.end(); }
 
-  bool contains(const T& t) const
+  template<typename K>
+  bool contains(const K& t) const
   {
     auto pos = std::lower_bound(begin(), end(), t, cmp);
     return end() != pos && !cmp(t, *pos);

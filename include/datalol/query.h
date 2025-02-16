@@ -362,8 +362,8 @@ struct table : public Collection {
     stable.merge_from(std::move(recent));
     stable.erase_from(to_add);
     recent.assign(std::move(to_add));
-    to_add.clear();
-    return !recent.empty();
+    assert(to_add.empty());
+    return recent.size();
   }
 
   void print(std::ostream& os) const override final

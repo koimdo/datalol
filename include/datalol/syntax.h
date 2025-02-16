@@ -51,7 +51,7 @@ std::ostream& operator<<(std::ostream& os, const ident& id);
 
 class dependency : public IPrint {
   friend class Query;
-  virtual size_t merge(bool recursive = true) = 0;
+  virtual size_t merge(bool recursive) = 0;
 };
 
 class Collection : public dependency {
@@ -450,7 +450,7 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
 
 #define THUNK(expr,...)                                                 \
   ::datalol::thunk_base::capture(#expr, [&]() {                         \
-    return ([=,##__VA_ARGS__]() -> decltype(expr) { return (expr); } ); \
+    return ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); } ); \
   })
 
 #define DATALOL(query, ...) for (auto query : ::datalol::Query(DEBUG_INFO(), #query))

@@ -308,7 +308,7 @@ struct dummy_dep : dependency {
   const Rule::Elem *e;
   dummy_dep(const Rule::Elem *e): e(e) {}
   void print(std::ostream& os) const override { e->print(os); }
-  size_t merge(bool) override final { assert(false && "unreachable"); }
+  size_t merge(bool) override final { assert(false && "unreachable"); return 0; }
 };
 void Query::stratify()
 {
@@ -491,7 +491,7 @@ void Query::run()
       }
       changed = 0;
       for (auto c : to_merge)
-        changed += c->merge();
+        changed += c->merge(true);
     }
   }
   DEBUG_PROBE(BREAK_END);
