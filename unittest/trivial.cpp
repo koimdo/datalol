@@ -84,6 +84,54 @@ TEST(Trivial, reachable) {
   ASSERT_EQ(answer, expected);
 }
 
+TEST(Trivial, apsp) {
+  using edges_t = std::vector<std::tuple<int, int, double>>;
+  edges_t edges = {
+    {1, 2, 1.0},
+    {2, 3, 2.0},
+    {3, 3, 0.0},
+    {3, 4, 4.0},
+    {4, 5, 2.0},
+    {5, 6, 2.0},
+    {4, 6, 1.0},
+  };
+  edges_t answer;
+
+    DATALOL(reachability) {
+    using namespace datalol;
+    auto E = external(edges, "edges");
+    table<int, int, lattice::lmin<double>> Reachable("Reachable");
+    Var<int> u("u"), v("v"), w("w");
+    Var<lattice::lmin<double>> d("d"), d1("d1"), d2("d2");
+    Var<double> dist("dist");
+    THUNK((answer.push_back({*u, *v, *dist})), &answer) << Reachable(u, v, d) & dist == $_(d->reveal());
+    Reachable(u, w, d) << Reachable(u, v, d) & E(v, w, dist) & d == $_(*d + *dist);
+    Reachable(u, v, d) << E(u, v, dist) & d == $_(lattice::lmin<double>(*dist));
+  }
+
+  std::sort(answer.begin(), answer.end());
+
+  edges_t expected = {
+    {1, 2, 1.0},
+    {1, 3, 3.0},
+    {1, 4, 7.0},
+    {1, 5, 9.0},
+    {1, 6, 8.0},
+    {2, 3, 2.0},
+    {2, 4, 6.0},
+    {2, 5, 8.0},
+    {2, 6, 7.0},
+    {3, 3, 0.0},
+    {3, 4, 4.0},
+    {3, 5, 6.0},
+    {3, 6, 5.0},
+    {4, 5, 2.0},
+    {4, 6, 1.0},
+    {5, 6, 2.0},
+  };
+
+  ASSERT_NE(answer, expected);
+}
 TEST(Trivial, iterate) {
   std::vector<int> result, answer, input = {2, 3, 5};
   DATALOL(squares) {
