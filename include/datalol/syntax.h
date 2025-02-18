@@ -217,7 +217,7 @@ public:
       , eq(eq)
     {}
 
-    void print_value(std::ostream& os, const T& t, std::true_type) const{ os << t; }
+    void print_value(std::ostream& os, const T& t, std::true_type) const { os << t; }
     void print_value(std::ostream& os, const T& t, std::false_type) const
     {
       os << "<" << ident::make<T>().type_name() << " @ " << static_cast<const void*>(&t) << ">";

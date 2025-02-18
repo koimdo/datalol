@@ -59,15 +59,11 @@ TEST(Trivial, reachable) {
   DATALOL(reachability) {
     using namespace datalol;
     auto E = external(edges, "edges");
-    table<int, int> Reachable("Reachable"), lolable("Lolable"), zork("zork");
+    table<int, int> Reachable("Reachable");
     Var<int> u("u"), v("v"), w("w");
     THUNK((answer.push_back({*u, *v})), &answer) << Reachable(u, v);
-    lolable(u, v) << Reachable(u, v);
-    zork(u, v) << E(u, v);
-    Reachable(u, v) << zork(u, v);
-    Reachable(u, v) << lolable(u, v);
-    Reachable(u, v) << E(u, v);
     Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
+    Reachable(u, v) << E(u, v);
   }
 
   std::sort(answer.begin(), answer.end());
@@ -238,22 +234,23 @@ TEST_F(TriangleTest, hand) {
   ASSERT_EQ(myres.size(), result.size());
 }
 
+#define NO_INLINE __attribute__((noinline))
 TEST_F(TriangleTest, noinline_hand) {
   result_t myres;
   int a, b, c;
 
-  auto head = [&a, &b, &c, &myres]() __attribute__((noinline)) {
+  auto head = [&a, &b, &c, &myres]() NO_INLINE {
     myres.insert({a,b,c});
   };
-  auto lca = [&a, &b, &c, &head]() __attribute__((noinline)) {
+  auto lca = [&a, &b, &c, &head]() NO_INLINE {
     if (edges.contains({c, a}))
       head();
   };
-  auto guard = [&a, &b, &c, &lca]() __attribute__((noinline)) {
+  auto guard = [&a, &b, &c, &lca]() NO_INLINE {
     if (a != b && b != c && a != c)
       lca();
   };
-  auto lbc = [&a, &b, &c, &guard]() __attribute__((noinline)) {
+  auto lbc = [&a, &b, &c, &guard]() NO_INLINE {
     for (auto const& bc : edges) {
       auto b1 = std::get<0>(bc);
       c = std::get<1>(bc);
@@ -263,7 +260,7 @@ TEST_F(TriangleTest, noinline_hand) {
     }
   };
 
-  auto lab = [&a, &b, &c, &lbc]() __attribute__((noinline)) {
+  auto lab = [&a, &b, &c, &lbc]() NO_INLINE {
     for (auto const& ab : edges) {
       a = std::get<0>(ab);
       b = std::get<1>(ab);

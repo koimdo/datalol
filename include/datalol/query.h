@@ -626,16 +626,13 @@ xrange(T stop)
   return xrange(0, stop, 1);
 }
 
-template<typename...>
-class table;
-
-template<typename T>
-class table<T> {
+template<typename T, typename Compare = std::less<void>>
+class table_base {
   detail::table<T>& impl;
 
 public:
-  table(const char *name)
-    : impl(*Query::allocate<detail::table<T>>(name))
+  table_base(const char *name)
+    : impl(*Query::allocate<detail::table<T, Compare>>(name))
   {}
 
   template<typename... SelectArgs>
@@ -644,11 +641,10 @@ public:
   }
 };
 
-template<typename T0, typename T1, typename... Rest>
-struct table<T0, T1, Rest...> : public table<std::tuple<T0, T1, Rest...>> {
-  using table<std::tuple<T0, T1, Rest...>>::table;
+template<typename T0, typename... Rest>
+struct table : public table_base<std::tuple<T0, Rest...>> {
+  using table_base<std::tuple<T0, Rest...>>::table_base;
   static_assert(!std::is_base_of<Var_, T0>::value, "Cannot have var type!");
-  static_assert(!std::is_base_of<Var_, T1>::value, "Cannot have var type!");
   static_assert(!detail::any<std::is_base_of<Var_, Rest>::value...>::value, "Cannot have var type");
 };
 
