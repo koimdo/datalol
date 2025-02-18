@@ -3,7 +3,7 @@
 
 #include "syntax.h"
 #include "query.h"
-#include "lattice.h"
+#include "aggregate.h"
 
 #ifdef DATALOL_SHORT_THUNK
 #define $_(expr, ...) THUNK(expr, ##__VA_ARGS__)

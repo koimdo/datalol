@@ -84,6 +84,7 @@ TEST(Trivial, apsp) {
   using edges_t = std::vector<std::tuple<int, int, double>>;
   edges_t edges = {
     {1, 2, 1.0},
+    {1, 2, 4.0},
     {2, 3, 2.0},
     {3, 3, 0.0},
     {3, 4, 4.0},
@@ -93,16 +94,19 @@ TEST(Trivial, apsp) {
   };
   edges_t answer;
 
-    DATALOL(reachability) {
+  DATALOL(apsp) {
     using namespace datalol;
     auto E = external(edges, "edges");
-    table<int, int, lattice::lmin<double>> Reachable("Reachable");
+    table<int, int, double> Reachable("Reachable");
+    table<int, int, double> Shortest("shortest");
     Var<int> u("u"), v("v"), w("w");
-    Var<lattice::lmin<double>> d("d"), d1("d1"), d2("d2");
-    Var<double> dist("dist");
-    THUNK((answer.push_back({*u, *v, *dist})), &answer) << Reachable(u, v, d) & dist == $_(d->reveal());
-    Reachable(u, w, d) << Reachable(u, v, d) & E(v, w, dist) & d == $_(*d + *dist);
-    Reachable(u, v, d) << E(u, v, dist) & d == $_(lattice::lmin<double>(*dist));
+    Var<double> d("d"), d1("d1"), d2("d2");
+    THUNK((answer.push_back({*u, *v, *d})), &answer) << Shortest(u, v, d);
+
+    Reachable(u, w, d) << Reachable(u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
+    Reachable(u, v, d) << E(u, v, d);
+
+    Shortest(u, v, d) << Reachable(u, v, d1) & d == aggregate(min($_(*d1)), u, v);
   }
 
   std::sort(answer.begin(), answer.end());
@@ -126,7 +130,7 @@ TEST(Trivial, apsp) {
     {5, 6, 2.0},
   };
 
-  ASSERT_NE(answer, expected);
+  ASSERT_EQ(answer, expected);
 }
 TEST(Trivial, iterate) {
   std::vector<int> result, answer, input = {2, 3, 5};

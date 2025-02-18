@@ -126,6 +126,7 @@ public:
     friend class Query;
     Rule *rule_;
   protected:
+    Elem *next_ = nullptr;
     int idx;
     elem_meta meta;
     Elem(const elem_meta& m);
@@ -147,9 +148,8 @@ public:
   };
   class Body : public Elem {
     using Elem::Elem;
-    Elem *next_ = nullptr;
     friend class Query;
-
+    virtual void flush();
   protected:
     undo_pack undo;
     void next(bool doit) {

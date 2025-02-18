@@ -142,7 +142,7 @@ struct Matcher_base : public Rule::Body {
 
   Matcher_base(Sel&& sel, Origin& origin)
     : Rule::Body(&origin)
-    , selector(std::forward<Sel>(sel))
+    , selector(std::move(sel))
     , origin(origin)
   {
     sel.mark_vars(meta);

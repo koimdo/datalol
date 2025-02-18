@@ -25,6 +25,11 @@ Json::Value IPrint::to_json() const {
   return Json::Value(os.str());
 }
 
+void Rule::Body::flush()
+{
+
+}
+
 bool type_id_t::operator==(type_id_t o) const { return !strcmp(type, o.type); }
 bool type_id_t::operator!=(type_id_t o) const { return strcmp(type, o.type); }
 bool type_id_t::operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
@@ -236,7 +241,7 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
   // Chain rule body (and head) for execution
   auto next = &get_elem(r.head);
   for (auto it = order.end(), end = order.begin(); it != end; --it) {
-    auto& e = static_cast<Rule::Body&>(get_elem(r.head+it[-1]));
+    auto& e = get_elem(r.head+it[-1]);
     e.next_ = next;
     next = &e;
   }
@@ -447,7 +452,11 @@ void Query::run_rule(Rule& r, size_t current_delta)
 {
   r.seminaive_current = current_delta;
   switch (policy) {
-  case NESTED: return get_elem(r.start).eval();
+  case NESTED:
+    get_elem(r.start).eval();
+    for (auto e = &get_elem(r.start); e->next_; e = e->next_)
+      static_cast<Rule::Body*>(e)->flush();
+    break;
   }
 }
 
