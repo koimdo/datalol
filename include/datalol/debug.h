@@ -17,6 +17,7 @@ enum debug_flags {
 };
 
 struct alignas(INFO_ALIGNMENT) debug_info {
+  const char *name;
   const char *file;
   const char *function;
   const int line;
@@ -24,11 +25,11 @@ struct alignas(INFO_ALIGNMENT) debug_info {
   unsigned tripcount;
 };
 
-#define DEBUG_INFO()                                              \
+#define DEBUG_INFO(name)                                          \
   ({                                                              \
     static struct debug_info here                                 \
       __attribute__((__used__, __section__("info")))              \
-      = { __FILE__, __PRETTY_FUNCTION__, __LINE__ };               \
+      = { #name, __FILE__, __PRETTY_FUNCTION__, __LINE__ };        \
     &here;                                                        \
   })
 

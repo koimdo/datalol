@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "pool.h"
 #include "type_traits.h"
+#include "fluid.h"
 
 namespace datalol {
 
@@ -84,7 +85,7 @@ protected:
   Var_(Impl *impl): impl(impl) {}
 
   friend class thunk_base;
-  static vars_t *current_vars;
+  static fluid_var<vars_t> current_vars;
 
   static
   void register_var(const Impl*);
@@ -114,11 +115,7 @@ public:
     elem_meta(dependency *dep);
     elem_meta(const vars_t& produce, const vars_t& consume,
               dependency *dep = nullptr,
-              bool negative = false)
-      : produce(produce), consume(consume)
-      , dep(dep)
-      , negative(negative)
-    {}
+              bool negative = false);
     void negate_vars();
   };
 
@@ -273,11 +270,9 @@ public:
   };
 
 private:
-  static Query *current;
+  static fluid_var<Query> current;
 
-  const char *name;
   debug_info *dbg;
-  Query *old_current;
   execution_policy policy = NESTED;
   std::vector<Rule::Elem*> elems;
   std::vector<Rule> rules;
@@ -346,13 +341,13 @@ public:
   static
   auto allocate(Args&&... args) { return current->pool.template allocate<T>(std::forward<Args>(args)...); }
 
-  Query(debug_info *dbg, const char *name);
-  ~Query();
+  Query(debug_info *dbg);
 
   template<typename Q>
   auto operator=(Q&& qf)
   {
     control ctrl(this);
+    auto _ = current.assign(*this);
     auto res = runit(std::forward<Q>(qf), ctrl, std::is_void<decltype(qf(ctrl))>{});
     configure();
     run();
@@ -448,8 +443,7 @@ template<typename Make>
 auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()())>
 {
   Rule::vars_t vars;
-  assert(!Var_::current_vars);        // No nested lambdas
-  Var_::current_vars = &vars;
+  auto _ = Var_::current_vars.assign(vars);
   return { desc, make() };
 }
 
@@ -466,4 +460,4 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
     return ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); } ); \
   })
 
-#define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(), #query) = [&](::datalol::Query::control& query)
+#define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(query)) = [&](::datalol::Query::control& query)

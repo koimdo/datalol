@@ -199,7 +199,7 @@ struct Stubs {
 
   JVal show_query(const JVal&)
   {
-    auto q = Query::current;
+    auto q = Query::current.get();
     Json::Value res;
     res["qid"] = get_qid(q->dbg);
     {

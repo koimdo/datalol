@@ -16,8 +16,8 @@ struct compile_error : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-Query *Query::current = nullptr;
-Var_::vars_t *Var_::current_vars = nullptr;
+fluid_var<Query> Query::current;
+fluid_var<Var_::vars_t> Var_::current_vars;
 
 Json::Value IPrint::to_json() const {
   std::ostringstream os;
@@ -55,9 +55,16 @@ Collection::Collection(const ident& id)
   Query::current->db.push_back(this);
 }
 
+Rule::elem_meta::elem_meta(const vars_t& produce, const vars_t& consume,
+                           dependency *dep,
+                           bool negative)
+  : produce(produce), consume(consume)
+  , dep(dep)
+  , negative(negative)
+{
+}
 Rule::elem_meta::elem_meta(dependency *dep)
-  : dep(dep)
-  , negative(false)
+  : elem_meta({}, {}, dep, false)
 {}
 
 void Rule::elem_meta::negate_vars()
@@ -69,7 +76,7 @@ void Rule::elem_meta::negate_vars()
 
 Rule::cursor::cursor(uhead&& hh, ubody&& bb)
 {
-  auto q = Query::current;
+  auto q = Query::current.get();
 
   r = q->start_rule();
   q->add_elem(hh.get());
@@ -121,17 +128,9 @@ void Query::end_rule(Rule *r)
   r->last = elems.size();
 }
 
-Query::Query(debug_info *dbg, const char *name)
-  : name(name)
-  , dbg(dbg)
-  , old_current(current)
+Query::Query(debug_info *dbg)
+  : dbg(dbg)
 {
-  current = this;
-}
-
-Query::~Query()
-{
-  current = old_current;
 }
 
 void Query::print_rule(std::ostream& os, const Rule& r) const
@@ -198,7 +197,6 @@ thunk_base::thunk_base(const char *desc)
   : desc(desc)
   , vars(*Var_::current_vars)
 {
-  Var_::current_vars = nullptr;
 }
 
 std::ostream& operator<<(std::ostream& os, const thunk_base& t)
