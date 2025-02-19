@@ -139,21 +139,39 @@ void Query::print_rule(std::ostream& os, const Rule& r) const
   os << *elems[r.head];
   os << " << ";
   int count = 0;
-  for (int j = r.head+1; j < r.last; j++) {
-    os << (count++ ? " & " : "");
-    os << *elems[j];
+  for (int j = 1; j < r.size(); j++) {
+    os << (count++ ? " & " : "") << (r.recursive.test(j) ? "^":"");
+    os << *elems[r.head+j];
   }
+}
+
+void Query::print_stratum(std::ostream& os, const stratum& s) const
+{
+  os << "[";
+  size_t i=0;
+  for (auto const& r : s.extent) {
+    if (i++) os << ";\n";
+    print_rule(os, r);
+  }
+  os << "]";
+  if (!s.to_merge.empty()) {
+    os << " merge";
+    for (auto d : s.to_merge)
+      os << " " << *d;
+  }
+  os << "\n";
 }
 
 void Query::print(std::ostream& os) const
 {
   os << "Query: {";
   size_t i=0;
-  for (auto const& r : rules) {
-    if (i) os << "\n";
-    print_rule(os, r);
-    os << ";";
-    i++;
+  if (strata.empty()) {
+    stratum all{{const_cast<Rule*>(rules.data()), rules.size()}, {}};
+    print_stratum(os, all);
+  } else {
+    for (auto const& s : strata)
+      print_stratum(os, s);
   }
   os <<"}";
 }

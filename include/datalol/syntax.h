@@ -315,6 +315,7 @@ private:
   Query(Query&&) = delete;
   void run();
   void print_rule(std::ostream& os, const Rule&) const;
+  void print_stratum(std::ostream& os, const stratum& s) const;
   void print(std::ostream& os) const;
 
   void add_elem(Rule::Elem *e);
