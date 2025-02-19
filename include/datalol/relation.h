@@ -112,6 +112,8 @@ struct relation {
                                 }),
                  to_add.end());
   }
+
+  const elems_t& data() const noexcept { return elements; }
 };
 
 }

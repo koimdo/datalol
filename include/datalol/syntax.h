@@ -317,13 +317,6 @@ private:
   void print_rule(std::ostream& os, const Rule&) const;
   void print(std::ostream& os) const;
 
-  struct iter : public control {
-    using control::control;
-    bool operator!=(const iter& o) const { return q != o.q; }
-    control operator*() { return *this; }
-    void operator++();
-  };
-
   void add_elem(Rule::Elem *e);
   Rule *start_rule();
   void end_rule(Rule *r);
@@ -336,6 +329,17 @@ private:
     vars.push_back(Var_(impl));
     return impl;
   }
+
+  struct nothing {
+    void externalize() const {}
+  };
+
+  template<typename Q>
+  auto runit(Q&& q, control& ctrl, std::true_type) { return q(ctrl), nothing{}; }
+
+  template<typename Q>
+  auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
+
 public:
   template<typename T, typename... Args>
   static
@@ -343,8 +347,16 @@ public:
 
   Query(debug_info *dbg, const char *name);
   ~Query();
-  iter begin() { return iter{this}; }
-  iter end() const { return iter{nullptr}; }
+
+  template<typename Q>
+  auto operator=(Q&& qf)
+  {
+    control ctrl(this);
+    auto res = runit(std::forward<Q>(qf), ctrl, std::is_void<decltype(qf(ctrl))>{});
+    configure();
+    run();
+    return std::move(res).externalize();
+  }
 };
 
 template<typename T, typename Cmp>
@@ -453,4 +465,4 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
     return ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); } ); \
   })
 
-#define DATALOL(query, ...) for (auto query : ::datalol::Query(DEBUG_INFO(), #query))
+#define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(), #query) = [&](::datalol::Query::control& query)

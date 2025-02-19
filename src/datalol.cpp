@@ -134,13 +134,6 @@ Query::~Query()
   current = old_current;
 }
 
-void Query::iter::operator++()
-{
-  q->configure();
-  q->run();
-  q = nullptr;
-}
-
 void Query::print_rule(std::ostream& os, const Rule& r) const
 {
   os << *elems[r.head];
@@ -320,7 +313,6 @@ void Query::stratify()
   sccmap<dependency*> sccMap_;
   depwrap<decltype(sccMap_)> sccMap(sccMap_);
 
-  std::vector<std::tuple<int, size_t, const Rule*, bool>> times;
   auto get_dep = [this](const Rule::Elem* e)
   {
     auto& meta = const_cast<Rule::elem_meta&>(e->meta);
@@ -329,7 +321,7 @@ void Query::stratify()
     auto d = pool.template allocate<dummy_dep>(e).get();
     return meta.dep = d;
   };
-  DATALOL(stratifier) {
+  auto times = DATALOL(stratifier) {
     auto Rules = external(rules, "rules");
     auto Elem = external(elems, "elems");
 
@@ -337,8 +329,8 @@ void Query::stratify()
     table<dependency*, dependency*> reach("reach"); // transitive closure of `deps`
     table<int, dependency*> whenAll("whenAll");
 
-    table<int, size_t, bool, reference<const Rule>> when("when"); // time, minSCC representitive, rule
-    Var<Rule> r("rule");
+    table<int, size_t, bool, const Rule*> when("when"); // time, minSCC representitive, rule
+    Var<Rule*> r("rule");
     Var<Rule::Elem*> e("elem");
     Var<dependency*> body("body"), head("head"), d("d");
     Var<bool> is_recursive("is_recursive");
@@ -369,11 +361,11 @@ void Query::stratify()
     when(s, maxSCC, is_recursive, r) << whenAll(s, head) & t == $_(*s+1) & !whenAll(t, head)
       & deps(d, head, e)
       & maxSCC == $_(sccMap->get(*head))
-      & r == $_((*e)->rule())
-      & is_recursive == $_(r->recursive.any()); // Sort non-recursive before recursive
+      & r == $_(&((*e)->rule()))
+      & is_recursive == $_((*r)->recursive.any()); // Sort non-recursive before recursive
 
-    // TODO: mutable lambda directly in query?
-    $_(times.emplace_back(*t, *maxSCC, r.get(), *is_recursive), &times) << when(t, maxSCC, is_recursive, r);
+    // // TODO: mutable lambda directly in query?
+    // $_(times.emplace_back(*t, *maxSCC, r.get(), *is_recursive), &times) << when(t, maxSCC, is_recursive, r);
 
     stratifier.manual_stratify({
         1, // deps
@@ -385,10 +377,9 @@ void Query::stratify()
         2, // whenAll
 
         2, // set recursive, when
-
-        1, // times
       });
-  }
+    return when;
+  };
   assert(times.size() == rules.size());
 
   // TODO: index-sort the rules in-place while adding strata.
@@ -400,9 +391,9 @@ void Query::stratify()
   const Rule* rule;
   bool is_recursive;
   auto last = nrules.data();
-  std::tie(last_time, last_scc, std::ignore, std::ignore) = times[0];
-  for (size_t i = 0; i<times.size(); i++) {
-    std::tie(time, scc, rule, is_recursive) = times[i];
+  std::tie(last_time, last_scc, std::ignore, std::ignore) = *times.begin();
+  for (auto const& ti : times) {
+    std::tie(time, scc, is_recursive, rule) = ti;
     if (last_time != time || last_scc != scc) {
       auto nend = std::addressof(*nrules.end());
       add_stratum({last, nend});

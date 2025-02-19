@@ -639,6 +639,7 @@ public:
   auto operator()(SelectArgs&&... args) {
     return impl(std::forward<SelectArgs>(args)...);
   }
+  detail::relation<T, Compare> externalize() && { return std::move(impl.stable); }
 };
 
 template<typename T0, typename... Rest>

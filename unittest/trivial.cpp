@@ -41,7 +41,7 @@ TEST(Trivial, test0) {
     Var<A> a("a");
     Var<int> i("i"), k("k");
     THUNK((results.emplace_back(*i, *k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
-  }
+  };
   //std::cout << qo.to_json();
   ASSERT_EQ(results.size(), 4);
 }
@@ -64,7 +64,7 @@ TEST(Trivial, reachable) {
     THUNK((answer.push_back({*u, *v})), &answer) << Reachable(u, v);
     Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
     Reachable(u, v) << E(u, v);
-  }
+  };
 
   std::sort(answer.begin(), answer.end());
   edges_t expected = {
@@ -92,24 +92,22 @@ TEST(Trivial, apsp) {
     {5, 6, 2.0},
     {4, 6, 1.0},
   };
-  edges_t answer;
 
-  DATALOL(apsp) {
+  auto answer = DATALOL(apsp) {
     using namespace datalol;
     auto E = external(edges, "edges");
     table<int, int, double> Reachable("Reachable");
     table<int, int, double> Shortest("shortest");
     Var<int> u("u"), v("v"), w("w");
     Var<double> d("d"), d1("d1"), d2("d2");
-    THUNK((answer.push_back({*u, *v, *d})), &answer) << Shortest(u, v, d);
 
     Reachable(u, w, d) << Reachable(u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
     Reachable(u, v, d) << E(u, v, d);
 
     Shortest(u, v, d) << Reachable(u, v, d1) & d == aggregate(min($_(*d1)), u, v);
-  }
 
-  std::sort(answer.begin(), answer.end());
+    return Shortest;
+  };
 
   edges_t expected = {
     {1, 2, 1.0},
@@ -130,7 +128,7 @@ TEST(Trivial, apsp) {
     {5, 6, 2.0},
   };
 
-  ASSERT_EQ(answer, expected);
+  ASSERT_EQ(answer.data(), expected);
 }
 TEST(Trivial, iterate) {
   std::vector<int> result, answer, input = {2, 3, 5};
@@ -139,7 +137,7 @@ TEST(Trivial, iterate) {
     Var<int> n, res;
     auto N = external(input, "input");
     $_(result.push_back(*res), &result) << N(n) & res == iterate($_(xrange(*n, (*n)*(1+*n), *n)));
-  }
+  };
   answer = {2, 4, 3, 6, 9, 5, 10, 15, 20, 25};
   ASSERT_EQ(result, answer);
 }
@@ -171,7 +169,7 @@ TEST(Trivial, iterate_container) {
       (l == iterate($_(xrange(input.data()+input.size()-1, input.data()-1, -1), &input)))
       & n == iterate($_(*l))
       & res == $_((*n)*2);
-  }
+  };
   answer = {26, 34, 38, 46, 14, 22, 4, 6, 10  };
   ASSERT_EQ(result, answer);
 }
@@ -288,7 +286,7 @@ TEST_F(TriangleTest, nested) {
   DATALOL(triangles) {
     TRIANGLE_QUERY();
     triangles.set_policy(Query::NESTED);
-  }
+  };
   ASSERT_EQ(myres.size(), result.size());
 }
 
@@ -300,7 +298,7 @@ TEST_F(TriangleTest, almost_triangle) {
     auto E = external(edges, "edges");
 
     THUNK((myres.insert({*a, *b, *c})), &myres) << E(a, b) & E(b, c) & $_(*a != *b && *b != *c && *a != *c) & !E(c, a);
-  }
+  };
   ASSERT_EQ(myres.size(), almost.size());
 }
 
@@ -315,7 +313,7 @@ TEST_F(TriangleTest, reachable) {
     Reachable(u, w) << Reachable(u, v) & E(v, w);
 
     $_(answer.push_back({*u, *v}), &answer) << Reachable(u, v);
-  }
+  };
   ASSERT_GT(answer.size(), 5000);
 }
 
@@ -324,6 +322,6 @@ TEST_F(TriangleTest, DISABLED_wcoj) {
   DATALOL(triangles) {
     TRIANGLE_QUERY();
     //triangles.set_policy(Query::WCOJ);
-  }
+  };
   ASSERT_EQ(myres.size(), result.size());
 }
