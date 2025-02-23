@@ -21,7 +21,12 @@ struct span {
   size_t size() const { return end_ - beg_; }
 };
 
-template<typename T, typename Compare>
+struct trivial_combine {
+  template<typename L, typename R>
+  void operator()(L&, R&&) const {}
+};
+
+template<typename T, typename Compare, typename Combine = trivial_combine>
 struct relation {
   using value_type = T;
   using elems_t = std::vector<T>;
@@ -32,12 +37,12 @@ struct relation {
   {}
 
   template<typename Iter>
-  relation(Iter first, Iter last, const Compare& cmp)
+  relation(Iter first, Iter last, const Compare& cmp = {})
     : relation(elems_t(first, last), cmp)
   {
   }
 
-  relation(elems_t&& src, const Compare& cmp)
+  relation(elems_t&& src, const Compare& cmp = {})
     : elements(std::move(src))
     , cmp(cmp)
   {
@@ -63,12 +68,29 @@ struct relation {
   }
 
   static
-  void deduplicate(elems_t& elements, const Compare& cmp = {})
+  void deduplicate(elems_t& elements, const Compare& cmp = {}, const Combine& combine = Combine{})
   {
-    std::sort(elements.begin(), elements.end(), cmp);
-    elements.erase(std::unique(elements.begin(), elements.end(),
-                               [&cmp](const T& l, const T& r) { return !cmp(l, r); }),
-                   elements.end());
+    if (elements.empty())
+      return;
+
+    auto first = elements.begin(), last = elements.end();
+    std::sort(first, last, cmp);
+    first = std::adjacent_find(first, last, [&cmp](const T& l, const T& r) { return !cmp(l, r); });
+
+    if (first == last)
+      return;
+
+    auto out = first;
+    ++first;
+    while (++first != last)
+      if (cmp(*out, *first))
+        *++out = std::move(*first);
+      else
+        // since the range is sorted, l≤r, then if l≮r then l=r. merge equivalents.
+        combine(*out, std::move(*first));
+
+    ++out;
+    elements.erase(out, last);
   }
 
   static
@@ -78,7 +100,7 @@ struct relation {
   }
 
   static
-  elems_t merge(elems_t&& l, elems_t&& r, const Compare& cmp)
+  elems_t merge(elems_t&& l, elems_t&& r, const Compare& cmp, const Combine& combine = Combine{})
   {
     if (l.empty()) return std::move(r);
     if (r.empty()) return std::move(l);
@@ -94,10 +116,26 @@ struct relation {
 
     elems_t res;
     res.reserve(l.size() + r.size());
-    std::set_union(std::make_move_iterator(l.begin()), std::make_move_iterator(l.end()),
-                   std::make_move_iterator(r.begin()), std::make_move_iterator(r.end()),
-                   std::back_inserter(res),
-                   cmp);
+    auto lbeg = std::make_move_iterator(l.begin()), lend = std::make_move_iterator(l.end());
+    auto rbeg = std::make_move_iterator(r.begin()), rend = std::make_move_iterator(r.end());
+    while (lbeg != lend) {
+      if (rbeg == rend) {
+        res.insert(res.end(), lbeg, lend);
+        return res;
+      }
+      if (cmp(*lbeg, *rbeg)) {
+        // l_i < r_j
+        res.push_back(*lbeg++);
+      } else {
+        res.push_back(*rbeg);
+        if (!cmp(*rbeg, *lbeg)) {
+          // equivalent keys
+          combine(res.back(), *lbeg++);
+        }
+        ++rbeg;
+      }
+    }
+    res.insert(res.end(), rbeg, rend);
     return res;
   }
   void merge_from(relation&& o)
