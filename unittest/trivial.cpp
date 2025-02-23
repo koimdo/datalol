@@ -97,19 +97,20 @@ TEST(Trivial, apsp) {
     using namespace datalol;
     auto E = external(edges, "edges");
     table<int, int, double> Reachable("Reachable");
-    table<int, int, double> Shortest("shortest");
+    table<int, int, lattice::lmin<double>> Shortest("shortest");
     Var<int> u("u"), v("v"), w("w");
     Var<double> d("d"), d1("d1"), d2("d2");
+    Var<lattice::lmin<double>> vd("vd");
 
     Reachable(u, w, d) << Reachable(u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
     Reachable(u, v, d) << E(u, v, d);
 
-    Shortest(u, v, d) << Reachable(u, v, d1) & d == aggregate(min($_(*d1)), u, v);
+    Shortest(u, v, d) << Reachable(u, v, d);
 
     return Shortest;
   };
 
-  edges_t expected = {
+  std::vector<std::tuple<int, int, datalol::lattice::lmin<double>>> expected = {
     {1, 2, 1.0},
     {1, 3, 3.0},
     {1, 4, 7.0},

@@ -2,8 +2,8 @@
 #pragma once
 
 #include "syntax.h"
+#include "lattice.h"
 #include "query.h"
-#include "aggregate.h"
 
 #ifdef DATALOL_SHORT_THUNK
 #define $_(expr, ...) THUNK(expr, ##__VA_ARGS__)

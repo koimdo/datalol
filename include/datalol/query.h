@@ -3,6 +3,7 @@
 #include "syntax.h"
 #include "relation.h"
 #include "selector.h"
+#include "lattice.h"
 #include "debug.h"
 
 #include <cstddef>
@@ -222,7 +223,10 @@ struct combine_ {
     out.merge(std::move(in));
   }
 
-  void operator()(T& out, T&& in) const { do_combine(out, std::move(in), std::is_base_of<agg_tag_t, T>{}); }
+  void operator()(T& out, T&& in) const
+  {
+    do_combine(out, std::move(in), std::is_base_of<datalol::lattice_tag_t, T>{});
+  }
 };
 
 template<typename... Types>
@@ -270,7 +274,7 @@ struct table : public Collection {
     // TODO: hold multiple `stable` relations, defer merges?
     // FIXME: indices
     stable.merge_from(std::move(recent));
-    stable.erase_from(to_add);
+    stable.erase_from(to_add);  // FIXME: erase_from should check lattice bound conditions
     recent.assign(std::move(to_add));
     assert(to_add.empty());
     return recent.size();
