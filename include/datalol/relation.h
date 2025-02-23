@@ -33,29 +33,21 @@ struct relation {
 
   template<typename Iter>
   relation(Iter first, Iter last, const Compare& cmp)
-    : elements(first, last)
-    , cmp(cmp)
+    : relation(elems_t(first, last), cmp)
   {
-    do_dedup();
   }
 
   relation(elems_t&& src, const Compare& cmp)
     : elements(std::move(src))
     , cmp(cmp)
   {
-    do_dedup();
-  }
-
-  void do_dedup()
-  {
-    std::sort(elements.begin(), elements.end(), cmp);
-    elements.erase(std::unique(elements.begin(), elements.end(), [this](const T& l, const T& r) { return !cmp(l, r) && !cmp(r, l); }), elements.end());    
+    deduplicate(elements, cmp);
   }
 
   void assign(elems_t&& src)
   {
     elements = std::move(src);
-    do_dedup();
+    deduplicate(elements, cmp);
   }
 
   bool empty() const { return elements.empty(); }
@@ -68,6 +60,15 @@ struct relation {
   {
     auto pos = std::lower_bound(begin(), end(), t, cmp);
     return end() != pos && !cmp(t, *pos);
+  }
+
+  static
+  void deduplicate(elems_t& elements, const Compare& cmp = {})
+  {
+    std::sort(elements.begin(), elements.end(), cmp);
+    elements.erase(std::unique(elements.begin(), elements.end(),
+                               [&cmp](const T& l, const T& r) { return !cmp(l, r); }),
+                   elements.end());
   }
 
   static

@@ -450,8 +450,7 @@ void Query::add_stratum(detail::span<Rule> extent)
     if (c && !dynamic_cast<dummy_dep*>(c))
       to_merge.push_back(c);
   }
-  std::sort(to_merge.begin(), to_merge.end());
-  to_merge.erase(std::unique(to_merge.begin(), to_merge.end()), to_merge.end());
+  detail::relation<dependency*, std::less<>>::deduplicate(to_merge);
   strata.push_back(stratum{extent, std::move(to_merge)});
 }
 
