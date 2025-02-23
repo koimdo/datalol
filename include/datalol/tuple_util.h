@@ -12,7 +12,7 @@ namespace detail
 {
 
   template<typename T, typename = void>
-  struct tuple_lift {
+  struct tuple_lift_ {
     static constexpr size_t size = 1;
 
     template<size_t>
@@ -28,7 +28,7 @@ namespace detail
   };
 
   template<typename T>
-  struct tuple_lift<T, decltype(void(std::tuple_size<T>::value))> {
+  struct tuple_lift_<T, decltype(void(std::tuple_size<T>::value))> {
     static constexpr size_t size = std::tuple_size<T>::value;
 
     template<size_t I>
@@ -36,8 +36,19 @@ namespace detail
 
     template<size_t I>
     static
-    auto get(const T& t) -> decltype(std::get<I>(t)) { return std::get<I>(t); }
+    element_type<I>&& get(T&& t) { return std::get<I>(std::move(t)); }
+
+    template<size_t I>
+    static
+    const element_type<I>& get(const T& t) { return std::get<I>(t); }
+
+    template<size_t I>
+    static
+    element_type<I>& get(T& t) { return std::get<I>(t); }
   };
+
+template<typename T>
+using tuple_lift = tuple_lift_<std::decay_t<T>>;
 
   template <class F, typename Tuple, size_t... Is>
   auto transform_each_impl(const Tuple& t, F&& f, std::index_sequence<Is...>)
@@ -46,17 +57,17 @@ namespace detail
   }
 
   template <size_t Is, class F, typename T0, typename... Ts>
-  bool for_each_impl(F&& f, const T0& t0, const Ts&... ts)
+  bool for_each_impl(F&& f, T0&& t0, Ts&&... ts)
   {
-    return std::forward<F>(f)(Is, tuple_lift<T0>::template get<Is>(t0), tuple_lift<Ts>::template get<Is>(ts)...);
+    return f(Is, tuple_lift<T0>::template get<Is>(std::forward<T0>(t0)), tuple_lift<Ts>::template get<Is>(std::forward<Ts>(ts))...);
   }
 
   template <class F, typename T0, typename... Ts, size_t... Is>
-  bool for_each_impl(F&& f, std::index_sequence<Is...>, const T0& t0, const Ts&... ts)
+  bool for_each_impl(F&& f, std::index_sequence<Is...>, T0&& t0, Ts&&... ts)
   {
     bool res = true;
     using unused = int[];
-    (void)unused{0, (res = res && for_each_impl<Is>(std::forward<F>(f), t0, ts...), 0)...};
+    (void)unused{0, (res = res && for_each_impl<Is>(std::forward<F>(f), std::forward<T0>(t0), std::forward<Ts>(ts)...), 0)...};
 
     return res;
   }
@@ -81,11 +92,11 @@ auto transform_each(const std::tuple<Args...>& t, F&& f)
 
 template<typename F, typename T0, typename... Ts>
 bool
-for_each_in_tuple(F&& f, const T0& t0, const Ts&... ts)
+for_each_in_tuple(F&& f, T0&& t0, Ts&&... ts)
 {
   static constexpr size_t arity = detail::tuple_lift<T0>::size;
   static_assert(detail::all<(arity == detail::tuple_lift<Ts>::size)...>::value, "All tuples must have the same arity");
-  return detail::for_each_impl(std::forward<F>(f), std::make_index_sequence<arity>{}, t0, ts...);
+  return detail::for_each_impl(std::forward<F>(f), std::make_index_sequence<arity>{}, std::forward<T0>(t0), std::forward<Ts>(ts)...);
 }
 
 } // namespace datalol

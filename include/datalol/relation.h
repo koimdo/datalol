@@ -32,27 +32,29 @@ struct relation {
   using elems_t = std::vector<T>;
   elems_t elements;
   Compare cmp; // FIXME: move `cmp` to the owning table instead of every `relation`?
-  relation(const Compare& cmp = Compare{})
+  Combine comb;
+  relation(const Compare& cmp = {}, const Combine& comb = {})
     : cmp(cmp)
+    , comb(comb)
   {}
 
   template<typename Iter>
-  relation(Iter first, Iter last, const Compare& cmp = {})
-    : relation(elems_t(first, last), cmp)
+  relation(Iter first, Iter last, const Compare& cmp = {}, const Combine& comb = {})
+    : relation(elems_t(first, last), cmp, comb)
   {
   }
 
-  relation(elems_t&& src, const Compare& cmp = {})
+  relation(elems_t&& src, const Compare& cmp = {}, const Combine& comb = {})
     : elements(std::move(src))
     , cmp(cmp)
   {
-    deduplicate(elements, cmp);
+    deduplicate(elements, cmp, comb);
   }
 
   void assign(elems_t&& src)
   {
     elements = std::move(src);
-    deduplicate(elements, cmp);
+    deduplicate(elements, cmp, comb);
   }
 
   bool empty() const { return elements.empty(); }
@@ -75,13 +77,13 @@ struct relation {
 
     auto first = elements.begin(), last = elements.end();
     std::sort(first, last, cmp);
+
     first = std::adjacent_find(first, last, [&cmp](const T& l, const T& r) { return !cmp(l, r); });
 
     if (first == last)
       return;
 
     auto out = first;
-    ++first;
     while (++first != last)
       if (cmp(*out, *first))
         *++out = std::move(*first);
@@ -140,7 +142,7 @@ struct relation {
   }
   void merge_from(relation&& o)
   {
-    elements = merge(std::move(elements), std::move(o.elements), cmp);
+    elements = merge(std::move(elements), std::move(o.elements), cmp, comb);
   }
 
   void erase_from(elems_t& to_add)

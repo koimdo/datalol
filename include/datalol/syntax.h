@@ -146,7 +146,6 @@ public:
   class Body : public Elem {
     using Elem::Elem;
     friend class Query;
-    virtual void flush();
   protected:
     undo_pack undo;
     void next(bool doit) {
@@ -452,6 +451,8 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
 {
   return std::forward<T>(getter) == v;
 }
+
+struct agg_tag_t {};
 
 }
 

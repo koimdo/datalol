@@ -214,6 +214,31 @@ struct external_ : public Collection {
   }
 };
 
+template<typename T>
+struct combine_ {
+  void do_combine(T&, T&&, std::false_type) const {}
+  void do_combine(T& out, T&& in, std::true_type) const
+  {
+    out.merge(std::move(in));
+  }
+
+  void operator()(T& out, T&& in) const { do_combine(out, std::move(in), std::is_base_of<agg_tag_t, T>{}); }
+};
+
+template<typename... Types>
+struct combine_<std::tuple<Types...>> {
+  using tuple_t = std::tuple<Types...>;
+  void operator()(tuple_t& tout, tuple_t&& tin) const
+  {
+    for_each_in_tuple([](size_t, auto& out, auto&& in)
+    {
+      combine_<typename std::decay<decltype(in)>::type> comb{};
+      comb(out, std::move(in));
+      return true;
+    }, tout, std::move(tin));
+  }
+};
+
 template<typename T, typename Compare = std::less<void>>
 struct table : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
@@ -225,9 +250,15 @@ struct table : public Collection {
     , recent(cmp)
   {}
 
-  relation<T, Compare> stable;
-  relation<T, Compare> recent;
+  using relation_t = relation<T, Compare, combine_<T>>;
+  relation_t stable;
+  relation_t recent;
   std::vector<T> to_add;
+
+  void insert(T&& t)
+  {
+    to_add.push_back(std::move(t));
+  }
 
   size_t merge(bool recursive) override final
   {
@@ -295,7 +326,7 @@ struct table : public Collection {
       }
       void eval() override final
       {
-        rel.to_add.push_back(value_type(selector.get_value()));
+        rel.insert(value_type(selector.get_value()));
       }
       void print(std::ostream& os) const override final
       {
@@ -305,7 +336,7 @@ struct table : public Collection {
 
     struct Body : detail::Matcher_base<Body, Sel, table> {
       using detail::Matcher_base<Body, Sel, table>::Matcher_base;
-      span<relation<T, Compare>> get_coll() noexcept
+      span<relation_t> get_coll() noexcept
       {
         if (this->is_negative())
           return {&this->origin.stable, 1};
@@ -518,7 +549,7 @@ public:
   auto operator()(SelectArgs&&... args) {
     return impl(std::forward<SelectArgs>(args)...);
   }
-  detail::relation<T, Compare> externalize() && { return std::move(impl.stable); }
+  auto externalize() && { return std::move(impl.stable); }
 };
 
 template<typename T0, typename... Rest>

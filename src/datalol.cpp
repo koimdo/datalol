@@ -25,11 +25,6 @@ Json::Value IPrint::to_json() const {
   return Json::Value(os.str());
 }
 
-void Rule::Body::flush()
-{
-
-}
-
 bool type_id_t::operator==(type_id_t o) const { return !strcmp(type, o.type); }
 bool type_id_t::operator!=(type_id_t o) const { return strcmp(type, o.type); }
 bool type_id_t::operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
@@ -460,8 +455,6 @@ void Query::run_rule(Rule& r, size_t current_delta)
   switch (policy) {
   case NESTED:
     get_elem(r.start).eval();
-    for (auto e = &get_elem(r.start); e->next_; e = e->next_)
-      static_cast<Rule::Body*>(e)->flush();
     break;
   }
 }
