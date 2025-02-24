@@ -394,10 +394,11 @@ struct table : public Collection {
   }
 };
 
-template<typename Res, typename V>
+template<typename Fun, typename V>
 struct binder_base : public Rule::Body {
+  static_assert(std::is_base_of<thunk_tag_t, Fun>::value, "Must be a proper thunk");
   using bound_t = Var<typename std::decay<V>::type>;
-  using thunk_t = thunk<Res>;
+  using thunk_t = Fun;
   thunk_t fun;
   bound_t var;
   binder_base(thunk_t&& fun, bound_t& var)
@@ -410,9 +411,9 @@ struct binder_base : public Rule::Body {
   }
 };
 
-template<typename Res>
-struct binder : public binder_base<Res, Res> {
-  using binder_base<Res, Res>::binder_base;
+template<typename Fun>
+struct binder : public binder_base<Fun, typename Fun::result_t> {
+  using binder_base<Fun, typename Fun::result_t>::binder_base;
   void eval() override final
   {
     auto&& res = this->fun.apply(); // `res` is now alive for the rest of the call chain
@@ -427,7 +428,7 @@ struct binder : public binder_base<Res, Res> {
 template<typename Res>
 struct iterate_ {
   using element_t = decltype(*std::begin(std::declval<Res>()));
-  using binder_t = binder_base<Res, element_t>;
+  using binder_t = binder_base<thunk<Res>, element_t>;
   struct body : public binder_t {
     using binder_t::binder_base;
     void eval() override final
@@ -487,10 +488,10 @@ struct xrange_ {
   iterator end() const { return iterator{stop, step}; }
 };
 
-template<typename Res>
-Rule::ubody operator==(thunk<Res>&& t, typename binder<Res>::bound_t& var)
+template<typename Fun, typename std::enable_if<std::is_base_of<thunk_tag_t, Fun>::value>::type* = nullptr>
+Rule::ubody operator==(Fun&& t, typename binder<Fun>::bound_t& var)
 {
-  return Query::allocate<binder<Res>>(std::move(t), var);
+  return Query::allocate<binder<Fun>>(std::forward<Fun>(t), var);
 }
 
 }

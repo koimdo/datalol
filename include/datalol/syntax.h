@@ -374,6 +374,7 @@ protected:
     return { {}, vars };
   }
   explicit thunk_base(const char *desc);
+  thunk_base(const char *desc, const Rule::vars_t& vars);
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
 
 public:
@@ -383,8 +384,10 @@ public:
   auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
 };
 
+struct thunk_tag_t {}; // FIXME: dispatch only on thunk_base?
+
 template<typename Res>
-class thunk : public thunk_base {
+class thunk : public thunk_base, public thunk_tag_t {
   thunk(const thunk&) = delete;
   using fun_t = std::function<Res()>;
   fun_t fun;
@@ -421,6 +424,8 @@ class thunk : public thunk_base {
   }
 
 public:
+  using result_t = Res;
+
   thunk(thunk&&) = default;
 
   Res apply() const { return fun(); }
