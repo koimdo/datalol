@@ -84,9 +84,6 @@ protected:
   friend std::ostream& operator<<(std::ostream& os, const Var_& v) { return os << *v.impl; }
   Var_(Impl *impl): impl(impl) {}
 
-  friend class thunk_base;
-  static fluid_var<vars_t> current_vars;
-
   static
   void register_var(const Impl*);
 
@@ -268,13 +265,16 @@ public:
     }
   };
 
-private:
   static fluid_var<Query> current;
+private:
 
   debug_info *dbg;
   execution_policy policy = NESTED;
   std::vector<Rule::Elem*> elems;
   std::vector<Rule> rules;
+  Rule::vars_t current_vars;
+  friend class thunk_base;
+  friend class Var_;
 
   struct stratum {
     detail::span<Rule> extent;
@@ -379,9 +379,9 @@ protected:
 
 public:
   const Rule::vars_t& captured_vars() const { return vars; }
-  template<typename Make>
+  template<typename Fun>
   static
-  auto capture(const char *desc, Make&& make) -> thunk<decltype(make()())>;
+  auto capture(const char *desc, Fun&& f) -> thunk<decltype(f())>;
 };
 
 struct thunk_tag_t {}; // FIXME: dispatch only on thunk_base?
@@ -443,12 +443,10 @@ public:
   }
 };
 
-template<typename Make>
-auto thunk_base::capture(const char *desc, Make&& make) -> thunk<decltype(make()())>
+template<typename Fun>
+auto thunk_base::capture(const char *desc, Fun&& f) -> thunk<decltype(f())>
 {
-  Rule::vars_t vars;
-  auto _ = Var_::current_vars.assign(vars);
-  return { desc, make() };
+  return { desc, std::forward<Fun>(f) };
 }
 
 template<typename S, typename T>
@@ -457,13 +455,9 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
   return std::forward<T>(getter) == v;
 }
 
-struct agg_tag_t {};
-
 }
 
 #define THUNK(expr,...)                                                 \
-  ::datalol::thunk_base::capture(#expr, [&]() {                         \
-    return ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); } ); \
-  })
+  ::datalol::thunk_base::capture(#expr, ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); }))
 
 #define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(query)) = [&](::datalol::Query::control& query)

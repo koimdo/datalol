@@ -17,7 +17,6 @@ struct compile_error : public std::runtime_error {
 };
 
 fluid_var<Query> Query::current;
-fluid_var<Var_::vars_t> Var_::current_vars;
 
 Json::Value IPrint::to_json() const {
   std::ostringstream os;
@@ -176,7 +175,7 @@ Var_::Impl::Impl(ident id)
 
 void Var_::register_var(const Var_::Impl* v)
 {
-  current_vars->set(v->nvar);
+  Query::current->current_vars.set(v->nvar);
 }
 
 Rule::Elem::Elem(const elem_meta& m)
@@ -190,8 +189,9 @@ void Rule::Elem::configure()
 
 thunk_base::thunk_base(const char *desc)
   : desc(desc)
-  , vars(*Var_::current_vars)
+  , vars(Query::current->current_vars)
 {
+  Query::current->current_vars.reset();
 }
 
 std::ostream& operator<<(std::ostream& os, const thunk_base& t)
