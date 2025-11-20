@@ -141,9 +141,15 @@ public:
     }
   };
   class Body : public Elem {
+  public:
+    enum delta_t {
+      RECENT,
+      STABLE,
+      BOTH,
+    };
+  protected:
     using Elem::Elem;
     friend class Query;
-  protected:
     undo_pack undo;
     void next(bool doit) {
       if (doit) {
@@ -151,11 +157,6 @@ public:
       }
       undo.zap();
     }
-    enum delta_t {
-      RECENT,
-      STABLE,
-      BOTH,
-    };
     delta_t use_delta() const noexcept {
       int d = rule().seminaive_current - idx;
       if (d < 0) return STABLE;
@@ -259,6 +260,10 @@ public:
     control(Query *q): q(q) {}
   public:
     void manual_stratify(std::initializer_list<unsigned> counts);
+    void print(std::ostream& os)
+    {
+      q->print(os);
+    }
     void set_policy(execution_policy p)
     {
       q->policy = p;
