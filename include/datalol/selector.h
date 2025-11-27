@@ -5,7 +5,10 @@
 
 namespace datalol {
 
-struct ignore_t {};
+struct ignore_t {
+  template<typename T>
+  operator const T&() const { return *static_cast<const T*>(nullptr); }
+};
 static constexpr ignore_t ignore{};
 
 namespace detail {

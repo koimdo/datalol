@@ -28,48 +28,10 @@ struct remove_cvref {
   using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 
-template<typename Sel, bool has_value = true>
-struct eval_helper {
-  decltype(std::declval<Sel>().get_value()) value;
-  eval_helper(const Sel& sel)
-    : value(sel.get_value())
-  {}
-
-  template<typename T>
-  static
-  const T& get_elem(const T& t) { return t; }
-  template<typename T>
-  static
-  const T& get_elem(const std::tuple<const T&>& t) { return std::get<0>(t); }
-
-  // // TODO: SFINAE-generalize it according to support of coll.count(value)
-  // template<typename T>
-  // bool find_in(const std::vector<T>& vec) const
-  // {
-  //   return std::find(vec.begin(), vec.end(), get_elem(value)) != vec.end();
-  // }
-  template<typename Coll>
-  bool find_in(const Coll& coll) const
-  {
-    return coll.contains(get_elem(value));
-  }
-};
-
-template<typename Sel>
-struct eval_helper<Sel, false> {
-  const Sel& sel;
-  eval_helper(const Sel& sel)
-    : sel(sel)
-  {}
-  template<typename Coll>
-  bool find_in(const Coll& coll) const
-  {
-    for (auto it = coll.iterator(); it; ++it)
-      if (sel.unify(*it))
-        return true;
-    return false;
-  }
-};
+template<typename T>
+const T& get_elem(const T& t) { return t; }
+template<typename T>
+const T& get_elem(const std::tuple<const T&>& t) { return std::get<0>(t); }
 
 template<typename Sel>
 struct Matcher : public Rule::Body {
@@ -96,42 +58,52 @@ struct Matcher : public Rule::Body {
     FULL,
     POINT,
     NEGATIVE,
+    NEGASCAN,
   } config = FULL;
 
   void set_negative()
   {
     if (is_negative())
       return;
-    config = NEGATIVE;
     meta.negate_vars();
     meta.negative = true;
   }
 
-  bool is_negative() const { return NEGATIVE == config; }
+  bool is_negative() const { return meta.negative; }
   void configure() override final
   {
-    if (is_negative())
+    if (is_negative()) {
+      if (Sel::has_value)
+        config = NEGATIVE;
+      else
+        config = NEGASCAN;
       return;
-    if (!undo.count) {
+    }
+    if (!undo.count && Sel::has_value) {
       config = POINT;
     } else {
       config = FULL;
     }
   }
 
-  using helper_t = eval_helper<Sel, Sel::has_value>;
   void eval_neg()
   {
-    helper_t aux{selector};
-    if (aux.find_in(origin))
+    if (origin.contains(get_elem(selector.get_value())))
       return;
+    next(true);
+  }
+
+  void eval_negascan()
+  {
+    for (auto it = origin.iterator(); it; ++it)
+      if (selector.unify(*it))
+        return;
     next(true);
   }
 
   void eval_point()
   {
-    helper_t aux{selector};
-    next(aux.find_in(origin));
+    next(origin.contains(get_elem(selector.get_value())));
   }
 
   void eval_full()
@@ -146,6 +118,7 @@ struct Matcher : public Rule::Body {
     case POINT: return eval_point();
     case FULL: return eval_full();
     case NEGATIVE: return eval_neg();
+    case NEGASCAN: return eval_negascan();
     }
   }
 };
