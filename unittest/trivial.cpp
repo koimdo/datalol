@@ -151,6 +151,10 @@ TEST(Trivial, iterate_container) {
     noncopy_list(std::initializer_list<int> l): l(l) {}
     noncopy_list(const noncopy_list&) = delete;
     noncopy_list(noncopy_list&&) = default;
+    bool operator==(const noncopy_list& o) const
+    {
+      return l.size() == o.l.size() && std::equal(l.begin(), l.end(), o.l.begin());
+    }
   };
   auto l1 = {2, 3, 5};
   auto l2 = {7, 11};

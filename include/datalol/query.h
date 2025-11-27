@@ -4,6 +4,7 @@
 #include "relation.h"
 #include "selector.h"
 #include "lattice.h"
+#include "itertools.h"
 #include "debug.h"
 
 #include <cstddef>
@@ -13,6 +14,14 @@ namespace datalol {
 
 namespace detail {
 
+template<typename Coll, typename T>
+bool do_contains(const Coll& coll, const T& t) { return coll.contains(t); }
+
+template<typename T>
+bool do_contains(const std::vector<T>& vec, const T& t)
+{
+  return std::find_if(vec.begin(), vec.end(), [&t](const T& s) { return equal_to<T>{}(s, t); }) != vec.end();
+}
 // Backported from C++20
 template<typename T>
 struct remove_cvref {
@@ -33,12 +42,12 @@ struct eval_helper {
   static
   const T& get_elem(const std::tuple<const T&>& t) { return std::get<0>(t); }
 
-  // TODO: SFINAE-generalize it according to support of coll.count(value)
-  template<typename T>
-  bool find_in(const std::vector<T>& vec) const
-  {
-    return std::find(vec.begin(), vec.end(), get_elem(value)) != vec.end();
-  }
+  // // TODO: SFINAE-generalize it according to support of coll.count(value)
+  // template<typename T>
+  // bool find_in(const std::vector<T>& vec) const
+  // {
+  //   return std::find(vec.begin(), vec.end(), get_elem(value)) != vec.end();
+  // }
   template<typename Coll>
   bool find_in(const Coll& coll) const
   {
@@ -55,32 +64,32 @@ struct eval_helper<Sel, false> {
   template<typename Coll>
   bool find_in(const Coll& coll) const
   {
-    for (auto const& row : coll) {
-      if (sel.unify(row))
+    for (auto it = coll.iterator(); it; ++it)
+      if (sel.unify(*it))
         return true;
-    }
     return false;
   }
 };
 
-template<typename Derived, typename Sel, typename Origin>
-struct Matcher_base : public Rule::Body {
+template<typename Sel>
+struct Matcher : public Rule::Body {
+  using iterable_t = iterable<typename Sel::value_type>;
   Sel selector;
-  Origin& origin;
+  iterable_t& origin;
+  Collection& dep;
 
-  using value_type = typename Origin::value_type;
-
-  Matcher_base(Sel&& sel, Origin& origin)
-    : Rule::Body(&origin)
+  Matcher(Sel&& sel, iterable_t& origin, Collection& dep_)
+    : Rule::Body(&dep_)
     , selector(std::move(sel))
     , origin(origin)
+    , dep(dep_)
   {
     sel.mark_vars(meta);
   }
 
-  void print_impl(std::ostream& os) const
+  void print(std::ostream& os) const override
   {
-    os << (is_negative() ? "!" : "") << origin.get_name() << "(" << selector << ")";
+    os << (is_negative() ? "!" : "") << dep.get_name() << "(" << selector << ")";
   }
 
   enum query_type {
@@ -99,7 +108,7 @@ struct Matcher_base : public Rule::Body {
   }
 
   bool is_negative() const { return NEGATIVE == config; }
-  void config_impl()
+  void configure() override final
   {
     if (is_negative())
       return;
@@ -114,34 +123,24 @@ struct Matcher_base : public Rule::Body {
   void eval_neg()
   {
     helper_t aux{selector};
-    auto& self = static_cast<Derived&>(*this);
-    for (auto& coll : self.get_coll()) {
-      if (aux.find_in(coll)) {
-        return;
-      }
-    }
+    if (aux.find_in(origin))
+      return;
     next(true);
   }
 
   void eval_point()
   {
     helper_t aux{selector};
-    auto& self = static_cast<Derived&>(*this);
-    for (auto& coll : self.get_coll()) {
-      next(aux.find_in(coll));
-    }
+    next(aux.find_in(origin));
   }
 
   void eval_full()
   {
-    auto& self = static_cast<Derived&>(*this);
-    for (auto& coll : self.get_coll()) {
-      for (auto const& row : coll)
-        next(selector.unify(row));
-    }
+    for (auto it = origin.iterator(); it; ++it)
+      next(selector.unify(*it));
   }
 
-  void eval_impl()
+  void eval() override final
   {
     switch (config) {
     case POINT: return eval_point();
@@ -159,7 +158,7 @@ Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>
 }
 
 template<typename Coll>
-struct external_ : public Collection {
+struct external_ : public Collection, iterable<typename remove_cvref<Coll>::type::value_type> {
   Coll coll;
 
   Json::Value to_json() const override final
@@ -181,29 +180,26 @@ struct external_ : public Collection {
     : Collection(id)
     , coll(coll_) {}
 
+  stream<value_type> iterator() const override final { return generic_iterator(coll); }
+
+  bool contains(const value_type& t) const override final { return do_contains(coll, t); }
+
   template<typename Sel>
   struct susp {
     external_& rel;
     Sel selector;
 
-    struct Body : Matcher_base<Body, Sel, external_> {
-      using Matcher_base<Body, Sel, external_>::Matcher_base;
-
-      span<typename std::remove_reference<Coll>::type>
-      get_coll() const noexcept { return {&this->origin.coll, 1}; }
-
-      void configure() override final { this->config_impl(); }
-      void eval() override final { this->eval_impl(); }
-      void print(std::ostream& os) const override final { this->print_impl(os); }
+    struct Body : Matcher<Sel> {
+      using Matcher<Sel>::Matcher;
     };
 
     operator Rule::ubody()
     {
-      return Query::allocate<Body>(std::move(selector), rel);
+      return Query::allocate<Body>(std::move(selector), rel, rel);
     }
 
     Rule::ubody operator!() {
-      auto b = Query::allocate<Body>(std::move(selector), rel);
+      auto b = Query::allocate<Body>(std::move(selector), rel, rel);
       b->set_negative();
       return b;
     }
@@ -338,25 +334,51 @@ struct table : public Collection {
       }
     };
 
-    struct Body : detail::Matcher_base<Body, Sel, table> {
-      using detail::Matcher_base<Body, Sel, table>::Matcher_base;
-      span<relation_t> get_coll() noexcept
+    struct Body : detail::Matcher<Sel>, iterable<T> {
+      table& tab;
+      Body(Sel&& sel, table& rel)
+        : Matcher<Sel>(std::move(sel), *this, rel)
+        , tab(rel)
+      {}
+
+      stream<T> iterator() const override final
       {
+        span<const relation_t> rels{nullptr, nullptr};
         if (this->is_negative())
-          return {&this->origin.stable, 1};
-        switch (this->use_delta()) {
-        case Rule::Body::RECENT: return {&this->origin.recent, 1};
-        case Rule::Body::STABLE: return {&this->origin.stable, 1};
-        case Rule::Body::BOTH:
+          rels = {&tab.stable, 1};
+        else
+          switch (this->use_delta()) {
+          case Rule::Body::RECENT: rels = {&tab.recent, 1}; break;
+          case Rule::Body::STABLE: rels = {&tab.stable, 1}; break;
+          case Rule::Body::BOTH:
           // contiguous members with same access specifier are contiguous in memory.
           // This returns both `stable` and `recent`.
-          return {&this->origin.stable, 2};
+            rels = {&tab.stable, 2}; break;
+          }
+                
+        return stream<T>([rels]() mutable -> buf_t {
+          while (!rels.empty()) {
+            const relation_t *tab = rels.begin();
+            ++rels;
+            if (tab->data().size())
+              return {tab->data().data(), tab->data().size()};
+          }
+          return {};
+        });
+      }
+      bool contains(const T& t) const override final
+      {
+        if (this->is_negative())
+          return tab.stable.contains(t);
+        switch (this->use_delta()) {
+        case Rule::Body::RECENT: return tab.recent.contains(t);
+        case Rule::Body::STABLE: return tab.stable.contains(t);
+        case Rule::Body::BOTH:
+          return tab.stable.contains(t) || tab.recent.contains(t);
         }
-        return {nullptr, nullptr};
+        assert(false);
       }
 
-      void configure() override final { this->config_impl(); }
-      void eval() override final { this->eval_impl(); }
       void print(std::ostream& os) const override final
       {
         if (!this->is_negative()) {
@@ -366,7 +388,7 @@ struct table : public Collection {
           case Rule::Body::BOTH:   os << "δ⁺"; break;
           }
         }
-        this->print_impl(os);
+        Matcher<Sel>::print(os);
       }
     };
 
