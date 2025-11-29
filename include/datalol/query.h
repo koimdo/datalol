@@ -28,11 +28,6 @@ struct remove_cvref {
   using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 
-template<typename T>
-const T& get_elem(const T& t) { return t; }
-template<typename T>
-const T& get_elem(const std::tuple<const T&>& t) { return std::get<0>(t); }
-
 template<typename Sel>
 struct Matcher : public Rule::Body {
   using iterable_t = iterable<typename Sel::value_type>;
@@ -88,7 +83,7 @@ struct Matcher : public Rule::Body {
 
   void eval_neg()
   {
-    if (origin.contains(get_elem(selector.get_value())))
+    if (origin.contains(get_selector_value(selector)))
       return;
     next(true);
   }
@@ -96,20 +91,20 @@ struct Matcher : public Rule::Body {
   void eval_negascan()
   {
     for (auto it = origin.iterator(); it; ++it)
-      if (selector.unify(*it))
+      if (unify(selector, *it))
         return;
     next(true);
   }
 
   void eval_point()
   {
-    next(origin.contains(get_elem(selector.get_value())));
+    next(origin.contains(get_selector_value(selector)));
   }
 
   void eval_full()
   {
     for (auto it = origin.iterator(); it; ++it)
-      next(selector.unify(*it));
+      next(unify(selector, *it));
   }
 
   void eval() override final
@@ -299,7 +294,7 @@ struct table : public Collection {
       }
       void eval() override final
       {
-        rel.insert(value_type(selector.get_value()));
+        rel.insert(value_type(get_selector_value(selector)));
       }
       void print(std::ostream& os) const override final
       {

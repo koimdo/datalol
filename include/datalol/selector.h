@@ -11,6 +11,9 @@ struct ignore_t {
 };
 static constexpr ignore_t ignore{};
 
+struct with_elements_t {};
+static constexpr with_elements_t with_elements{};
+
 namespace detail {
 
 struct unify_ {
@@ -40,9 +43,9 @@ struct mark_vars_ {
 
 struct get_value {
   template<typename T>
-  const T& operator()(const Var<T>& v) const { return *v.get(); }
+  auto operator()(const Var<T>& v) const { return std::cref(*v); }
   template<typename T>
-  constexpr const T& operator()(const T& t) const { return t; }
+  auto operator()(const T& t) const { return std::cref(t); }
 };
 
 struct generic_print {
@@ -82,42 +85,63 @@ struct print_tuple {
   }
 };
 
-template<typename T, typename... Sel>
+template<typename T, typename All, typename... Sel>
 struct Selector {
   using value_type = T;
 
-  static_assert(sizeof...(Sel) == detail::tuple_lift<value_type>::size, "Inconsistent lengths");
-  static constexpr bool has_value = !any<std::is_same<Sel, ignore_t>::value...>::value;
+  static constexpr bool has_full = std::is_same<All, Var<T>>::value;
+  static_assert(sizeof...(Sel) == detail::tuple_size<T>::value || (has_full && sizeof...(Sel) == 0), "Inconsistent lengths");
+  static constexpr bool has_value = has_full || !any<std::is_same<Sel, ignore_t>::value...>::value;
 
+  All all;
   std::tuple<Sel...> sel;
-  Selector(Sel&&... sel)
-    : sel(std::forward<Sel>(sel)...)
+  template<typename... Args>
+  Selector(All&& all, Args&&... sel)
+    : all(std::move(all))
+    , sel(std::forward<Sel>(sel)...)
   {}
 
   void mark_vars(Rule::elem_meta& meta) const
   {
     mark_vars_ mv{meta};
     for_each_in_tuple(mv, sel);
+    mv(0, all);
   }
 
   inline friend
   std::ostream& operator<<(std::ostream& os, const Selector& s)
   {
+    if constexpr (has_full)
+      os << s.all;
     return os << print_tuple<decltype(s.sel)>(s.sel);
   }
-
-  bool unify(const value_type& row) const
-  {
-    unify_ u;
-    return for_each_in_tuple(u, sel, row);
-  }
-
-  // TODO: return tuple of const references, suitable for comparison or construction
-  auto get_value() const
-  {
-    return transform_each(sel, detail::get_value{});
-  }
 };
+
+template<typename T, typename... Sel>
+auto get_selector_value(const Selector<T, ignore_t, Sel...>& s)
+{
+  return transform_each(s.sel, get_value{});
+}
+
+template<typename T, typename... Sel>
+const T& get_selector_value(const Selector<T, Var<T>, Sel...>& s)
+{
+  return *s.all;
+}
+
+template<typename T, typename All>
+bool unify(const Selector<T, All>& s, const T& row)
+{
+  unify_ u;
+  return u(0, s.all, row);
+}
+
+template<typename T, typename All, typename S0, typename... Sel>
+bool unify(const Selector<T, All, S0, Sel...>& s, const T& row)
+{
+  unify_ u;
+  return u(0, s.all, row) && for_each_in_tuple(u, s.sel, row);
+}
 
 template<typename T>
 auto sel_unwrap(T&& s) { return std::forward<T>(s); }
@@ -129,7 +153,22 @@ auto
 build_selector(Sel&&... sel)
 {
   // Unlike std::make_tuple, we want to preserve std::reference_wrapper as-is
-  return Selector<T, typename std::decay<Sel>::type...>(sel_unwrap(sel)...);
+  return Selector<T, ignore_t, typename std::decay<Sel>::type...>(ignore_t{}, sel_unwrap(sel)...);
+}
+
+template<typename T, typename... Sel>
+auto
+build_selector(Var<T>& all, with_elements_t, Sel&&... sel)
+{
+  // Unlike std::make_tuple, we want to preserve std::reference_wrapper as-is
+  return Selector<T, Var<T>, typename std::decay<Sel>::type...>(std::move(all), sel_unwrap(sel)...);
+}
+
+template<typename T>
+auto
+build_selector(Var<T>& all)
+{
+  return Selector<T, Var<T>>(std::move(all));
 }
 
 }
