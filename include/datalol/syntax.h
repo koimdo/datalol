@@ -89,15 +89,16 @@ protected:
 
   friend class Query;
 
-  void set(const void *p) const { impl->p = p; }
+  void set(const void *p) const noexcept { impl->p = p; }
 
 public:
   void zap() const { impl->p = nullptr; }
   Var_(const Var_&) = default;
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
-  const void *get() const { return impl->p; }
+  const void *get() const noexcept { return impl->p; }
   int get_id() const noexcept { return impl->nvar; }
+  static vars_t get_captured();
 };
 
 class Rule {
@@ -231,11 +232,15 @@ public:
     Var_::set(&t);
     return true;
   }
-  bool unify(const T& t) const
+  bool match(const T& t) const
   {
     auto const& eq = static_cast<const Impl*>(impl)->eq;
+    return !get() || eq(*get(), t);
+  }
+  bool unify(const T& t) const
+  {
     return get()
-      ? eq(*get(), t) : set(t);
+      ? match(t) : set(t);
   }
 
   const T *get() const noexcept

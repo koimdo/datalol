@@ -178,6 +178,14 @@ void Var_::register_var(const Var_::Impl* v)
   Query::current->current_vars.set(v->nvar);
 }
 
+Rule::vars_t Var_::get_captured()
+{
+  vars_t& current_vars = Query::current->current_vars;
+  auto res = current_vars;
+  current_vars.reset();
+  return res;
+}
+
 Rule::Elem::Elem(const elem_meta& m)
   : meta(m)
 {
@@ -189,9 +197,8 @@ void Rule::Elem::configure()
 
 thunk_base::thunk_base(const char *desc)
   : desc(desc)
-  , vars(Query::current->current_vars)
+  , vars(Var_::get_captured())
 {
-  Query::current->current_vars.reset();
 }
 
 std::ostream& operator<<(std::ostream& os, const thunk_base& t)
