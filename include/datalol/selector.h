@@ -22,6 +22,10 @@ struct unify_ {
   template<typename R> constexpr bool operator()(size_t, ignore_t, const R&) const { return true; }
   template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<R> r) const { return s.unify(r.get()); }
   template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<const R> r) const { return s.unify(r.get()); }
+
+  template<typename Lattice>
+  constexpr bool operator()(size_t, const Var<typename Lattice::lattice_reveal>& s, const Lattice& r) const { return s.unify(r.reveal()); }
+
   template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
   template<typename S, typename R>
   constexpr bool operator()(size_t, const S& s, const R& r) const

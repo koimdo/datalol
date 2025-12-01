@@ -96,17 +96,13 @@ TEST(Trivial, apsp) {
   auto answer = DATALOL(apsp) {
     using namespace datalol;
     auto E = external(edges, "edges");
-    table<int, int, double> Reachable("Reachable");
     table<int, int, lattice::lmin<double>> Shortest("shortest");
     Var<int> u("u"), v("v"), w("w");
     Var<double> d("d"), d1("d1"), d2("d2");
-    Var<std::tuple<int, int, double>> fulledge("edge");
-    Var<lattice::lmin<double>> vd("vd");
+    Var<std::tuple<int, int, lattice::lmin<double>>> fulledge("edge");
 
-    Reachable(u, w, d) << Reachable(fulledge, with_elements, u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
-    Reachable(u, v, d) << E(u, v, d);
-
-    Shortest(u, v, d) << Reachable(u, v, d);
+    Shortest(u, w, d) << Shortest(fulledge, with_elements, u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
+    Shortest(u, v, d) << E(u, v, d);
 
     return Shortest;
   };

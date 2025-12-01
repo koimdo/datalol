@@ -5,12 +5,14 @@
 
 namespace datalol {
 
-struct lattice_tag_t {};
+struct lattice_tag_base {};
+template<typename Value>
+struct lattice_tag_t : public lattice_tag_base { using lattice_reveal = Value; };
 
 namespace lattice {
 
 template<typename T>
-class lmin : public datalol::lattice_tag_t {
+class lmin : public datalol::lattice_tag_t<T> {
   T t;
 public:
   lmin(T t = std::numeric_limits<T>::max())
