@@ -7,7 +7,8 @@ namespace datalol {
 
 struct ignore_t {
   template<typename T>
-  operator const T&() const { return *static_cast<const T*>(nullptr); }
+  bool operator==(T) const { return true; }
+  friend std::ostream& operator<<(std::ostream& os, ignore_t) { return os << "ignore"; }
 };
 static constexpr ignore_t ignore{};
 
@@ -19,9 +20,6 @@ namespace detail {
 struct unify_ {
   // Elementwise cases
   template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
-  template<typename R> constexpr bool operator()(size_t, ignore_t, const R&) const { return true; }
-  template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<R> r) const { return s.unify(r.get()); }
-  template<typename R> constexpr bool operator()(size_t, const Var<R>& s, reference<const R> r) const { return s.unify(r.get()); }
 
   template<typename Lattice>
   constexpr bool operator()(size_t, const Var<typename Lattice::lattice_reveal>& s, const Lattice& r) const { return s.unify(r.reveal()); }
@@ -50,6 +48,12 @@ struct get_value {
   auto operator()(const Var<T>& v) const { return std::cref(*v); }
   template<typename T>
   auto operator()(const T& t) const { return std::cref(t); }
+
+  struct panic {
+    template<typename T>
+    [[noreturn]] operator T() const { std::abort(); /* never reached */ }
+  };
+  panic operator()(ignore_t) const { return panic{}; }
 };
 
 struct generic_print {
@@ -63,14 +67,10 @@ struct generic_print {
     return true;
   }
   template<typename T>
-  bool operator () (size_t, reference<T> v)
+  bool operator () (size_t, std::reference_wrapper<T> v)
   {
-    os << prefix() << "<" << ident::make<T>().type_name() << " @ " << static_cast<const void*>(&v.get()) << ">";
-    return true;
-  }
-  bool operator () (size_t, ignore_t)
-  {
-    os << prefix() << "ignore";
+    const void *addr = std::addressof(v.get());
+    os << prefix() << "<" << ident::make<T>().type_name() << " @ " << addr << ">";
     return true;
   }
 };
