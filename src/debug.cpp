@@ -14,13 +14,17 @@
 #include "datalol/syntax.h"
 #include "datalol/relation.h" // for detail::span
 
-extern __attribute__((weak)) struct debug_info  __start_info[];
-extern __attribute__((weak)) struct debug_info  __stop_info[];
-static datalol::detail::span<debug_info> all_queries = {__start_info,  __stop_info};
+extern struct debug_info  *__start_query_info;
+extern struct debug_info  *__stop_query_info;
+
+datalol::detail::span<debug_info*> all_queries = {&__start_query_info,  &__stop_query_info};
+
 static
 int get_qid(const debug_info *dbg)
 {
-  return dbg - __start_info;
+  auto it = std::find(all_queries.begin(), all_queries.end(), dbg);
+  assert(all_queries.end() != it);
+  return it - &__start_query_info;
 }
 
 #define DEBUG_ENV_VAR "LOLBERT_FD"
@@ -164,14 +168,14 @@ struct Stubs {
   {
     Json::Value all;
     for (auto const& d : all_queries) {
-      all << getQuery_(d);
+      all << getQuery_(*d);
     }
     return all;
   }
 
   JVal loadSingle(const JVal& id)
   {
-    return getQuery_(all_queries[id[0].asInt()]);
+    return getQuery_(*all_queries[id[0].asInt()]);
   }
 
   JVal listMethods(const JVal&)
@@ -191,9 +195,9 @@ struct Stubs {
   {
     int id = v["qid"].asInt();
     int flags = v["flags"].asInt();
-    all_queries[id].flags = flags;
+    all_queries[id]->flags = flags;
     JVal res(v);
-    res["flags"] = all_queries[id].flags;
+    res["flags"] = all_queries[id]->flags;
     return res;
   }
 

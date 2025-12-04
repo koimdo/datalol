@@ -2,21 +2,13 @@
 
 #include <json/json.h>
 
-#ifndef  INFO_ALIGNMENT
-#if defined(__LP64__)
-#define  INFO_ALIGNMENT  16
-#else
-#define  INFO_ALIGNMENT  8
-#endif
-#endif
-
 enum debug_flags {
   BREAK_CONFIGURE = 1<<0,
   BREAK_FIXPOINT  = 1<<1,
   BREAK_END       = 1<<2,
 };
 
-struct alignas(INFO_ALIGNMENT) debug_info {
+struct debug_info {
   const char *name;
   const char *file;
   const char *function;
@@ -25,12 +17,14 @@ struct alignas(INFO_ALIGNMENT) debug_info {
   unsigned tripcount;
 };
 
-#define DEBUG_INFO(name)                                          \
-  ({                                                              \
-    static struct debug_info here                                 \
-      __attribute__((__used__, __section__("info")))              \
-      = { #name, __FILE__, __PRETTY_FUNCTION__, __LINE__ };        \
-    &here;                                                        \
+#define DEBUG_INFO(name)                                                \
+  ({                                                                    \
+    static struct debug_info dbg                                        \
+      = { #name, __FILE__, __PRETTY_FUNCTION__, __LINE__ };             \
+    static struct debug_info *here                                      \
+      __attribute__((__used__, __section__("query_info")))              \
+      = &dbg;                                                           \
+    here;                                                               \
   })
 
 #define DEBUG_PROBE(dflags) if (this->dbg->flags) debug_break(this->dbg, dflags)
