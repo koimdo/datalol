@@ -207,6 +207,8 @@ public:
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
     Equal eq;
+    alignas(T) unsigned char buf[sizeof(T)];
+
     Impl(ident id, const Equal& eq)
       : Var_::Impl(id)
       , eq(eq)
@@ -232,6 +234,13 @@ public:
     Var_::set(&t);
     return true;
   }
+  bool set(T&& t) const
+  {
+    unsigned char *buf = static_cast<Impl*>(impl)->buf;
+    ::new ((void*)buf) T(t);
+    Var_::set(buf);
+    return true;
+  }
   bool match(const T& t) const
   {
     auto const& eq = static_cast<const Impl*>(impl)->eq;
@@ -241,6 +250,14 @@ public:
   {
     return get()
       ? match(t) : set(t);
+  }
+
+  bool unify(T&& t) const
+  {
+    static_assert(std::is_trivially_destructible<T>::value, "Unification with complex rvalues not yet supported");
+    // Will be supported in the glorious WCOJ future, though.
+    return get()
+      ? match(t) : set(std::move(t));
   }
 
   const T *get() const noexcept

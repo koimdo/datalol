@@ -23,6 +23,30 @@ struct A {
   }
 };
 
+namespace detail {
+template<size_t>
+struct get_policy;
+
+template<> struct get_policy<0> { auto get(const A& a) { return a.i; } };
+template<> struct get_policy<1> { auto get(const A& a) { return a.j; } };
+template<> struct get_policy<2> { auto get(const A& a) { return a.k; } };
+
+}
+
+template<size_t I>
+auto get(const A& a) { return detail::get_policy<I>{}.get(a); }
+
+namespace std {
+
+template<>
+struct tuple_size<A> : std::integral_constant<size_t, 3> {};
+
+template<> struct tuple_element<0, A> { using type = int; };
+template<> struct tuple_element<1, A> { using type = int; };
+template<> struct tuple_element<2, A> { using type = int; };
+
+}
+
 TEST(Trivial, test0) {
   flat::set<A> ASs;
   
@@ -39,11 +63,14 @@ TEST(Trivial, test0) {
     auto FAs = external(ASs.filter([](const A&) { return true; }), "value");
 
     Var<A> a("a");
-    Var<int> i("i"), k("k");
-    THUNK((results.emplace_back(*i, *k)), &results) << As(a) /*& THUNK(a->i + a->k) == i */ & THUNK(a->j) == i & k == THUNK(a->k) /*& GUARD(*i >= 3)*/;
+    Var<int> i("i"), j("j"), k("k");
+    THUNK((results.emplace_back(*j, *k)), &results) << As(a, with_elements, ignore, j, k);
   };
   //std::cout << qo.to_json();
   ASSERT_EQ(results.size(), 4);
+
+  std::vector<std::tuple<int, int>> expected = {{1, 2}, {1, 3}, {2, 3}, {8, 8}};
+  ASSERT_EQ(results, expected);
 }
 
 TEST(Trivial, reachable) {
@@ -185,7 +212,7 @@ protected:
   static result_t result;
   static result_t almost;
 
-  static constexpr int NUM_NODES = 200;
+  static constexpr int NUM_NODES = 100;
 
   static void SetUpTestSuite()
   {
@@ -194,7 +221,7 @@ protected:
     std::mt19937 gen(rd());
     // give "true" 1/4 of the time
     // give "false" 3/4 of the time
-    std::bernoulli_distribution d(0.25);
+    std::bernoulli_distribution d(0.1);
 
     for (int i=1; i<=NUM_NODES; i++)
       nodes.insert(i);

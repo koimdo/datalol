@@ -27,13 +27,15 @@ namespace detail
   template <class F, typename Tuple, size_t... Is>
   auto transform_each_impl(const Tuple& t, F&& f, std::index_sequence<Is...>)
   {
-    return std::make_tuple(f(std::get<Is>(t) )...);
+    using std::get;
+    return std::make_tuple(f(get<Is>(t) )...);
   }
 
   template <size_t Is, class F, typename T0, typename... Ts>
   bool for_each_impl(F&& f, T0&& t0, Ts&&... ts)
   {
-    return f(Is, std::get<Is>(std::forward<T0>(t0)), std::get<Is>(std::forward<Ts>(ts))...);
+    using std::get;
+    return f(Is, get<Is>(std::forward<T0>(t0)), get<Is>(std::forward<Ts>(ts))...);
   }
 
   template <class F, typename T0, typename... Ts, size_t... Is>

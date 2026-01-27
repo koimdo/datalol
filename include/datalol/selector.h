@@ -25,6 +25,7 @@ struct unify_ {
   constexpr bool operator()(size_t, const Var<typename Lattice::lattice_reveal>& s, const Lattice& r) const { return s.unify(r.reveal()); }
 
   template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
+  template<typename R> constexpr bool operator()(size_t, const Var<R>& s, R&& r) const { return s.unify(std::move(r)); }
   template<typename S, typename R>
   constexpr bool operator()(size_t, const S& s, const R& r) const
   {
@@ -95,7 +96,8 @@ struct Selector {
 
   static constexpr bool has_full = std::is_same<All, Var<T>>::value;
   static_assert(sizeof...(Sel) == detail::tuple_size<T>::value || (has_full && sizeof...(Sel) == 0), "Inconsistent lengths");
-  static constexpr bool has_value = has_full || !any<std::is_same<Sel, ignore_t>::value...>::value;
+  static constexpr bool can_construct = std::is_constructible<T, decltype(transform_each(std::declval<std::tuple<Sel...>>(), std::declval<get_value>()))>::value;
+  static constexpr bool has_value = has_full || (!any<std::is_same<Sel, ignore_t>::value...>::value && can_construct);
 
   All all;
   std::tuple<Sel...> sel;
@@ -115,16 +117,22 @@ struct Selector {
   inline friend
   std::ostream& operator<<(std::ostream& os, const Selector& s)
   {
-    if constexpr (has_full)
+    if (has_full)
       os << s.all;
     return os << print_tuple<decltype(s.sel)>(s.sel);
   }
 };
 
-template<typename T, typename... Sel>
+template<typename T, typename... Sel, typename std::enable_if<Selector<T, ignore_t, Sel...>::has_value>::type* = nullptr>
 auto get_selector_value(const Selector<T, ignore_t, Sel...>& s)
 {
   return transform_each(s.sel, get_value{});
+}
+
+template<typename T, typename... Sel, typename std::enable_if<!Selector<T, ignore_t, Sel...>::has_value>::type* = nullptr>
+auto get_selector_value(const Selector<T, ignore_t, Sel...>&)
+{
+  return get_value::panic{};
 }
 
 template<typename T, typename... Sel>
