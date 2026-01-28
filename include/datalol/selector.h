@@ -138,7 +138,7 @@ auto get_selector_value(const Selector<T, ignore_t, Sel...>&)
 template<typename T, typename... Sel>
 const T& get_selector_value(const Selector<T, Var<T>, Sel...>& s)
 {
-  return *s.all;
+  return *s.all.get();
 }
 
 template<typename T, typename All>

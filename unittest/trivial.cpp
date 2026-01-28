@@ -23,6 +23,29 @@ struct A {
   }
 };
 
+template<typename T>
+struct smarty {
+  const T *a;
+  smarty(const T* a): a(a) {}
+  const T *operator->() const { return a; }
+  const T& operator*() const { return *a; }
+  bool operator==(const smarty& o) const { return *a == *o.a; }
+  bool operator<(const smarty& o) const { return *a < *o.a; }
+};
+
+struct smarty_prox : public smarty<A> {
+  using smarty<A>::smarty;
+  struct arrow_proxy {
+    struct lol {
+      int jolly;
+    };
+    lol mylol;
+    explicit arrow_proxy(int j) { mylol.jolly = 2*j+1; }
+    lol *operator->() { return &mylol; }
+  };
+  arrow_proxy operator->() const { return arrow_proxy{a->j}; }
+};
+
 namespace detail {
 template<size_t>
 struct get_policy;
@@ -71,6 +94,45 @@ TEST(Trivial, test0) {
 
   std::vector<std::tuple<int, int>> expected = {{1, 2}, {1, 3}, {2, 3}, {8, 8}};
   ASSERT_EQ(results, expected);
+}
+
+TEST(Trivial, deref) {
+  A a0 = A{0, 1, 2};
+  A a1 = A{1, 2, 3};
+  A a2 = A{1, 1, 3};
+  A a3 = A{1, 8};
+
+  flat::set<smarty<A>> ASs = {&a0, &a1, &a2, &a3};
+  int sum_j = 0;
+  DATALOL (deref) {
+    using namespace datalol;
+    auto As = external(ASs, "ref");
+    Var<smarty<A>> a("a");
+    Var<int> j("j");
+    THUNK((sum_j += *j), &sum_j) << As(a) & j == THUNK(a->j);
+  };
+  ASSERT_EQ(sum_j, 12);
+}
+
+TEST(Trivial, deref_proxy) {
+  A a0 = A{0, 1, 2};
+  A a1 = A{1, 2, 3};
+  A a2 = A{1, 1, 3};
+  A a3 = A{1, 8};
+
+  flat::set<smarty_prox> ASs = {&a0, &a1, &a2, &a3};
+  int sum_j = 0;
+  int sum_k = 0;
+  DATALOL (deref_proxy) {
+    using namespace datalol;
+    auto As = external(ASs, "ref");
+    Var<smarty_prox> a("a");
+    Var<int> j("j"), k("k");
+    THUNK((sum_j += *j), &sum_j) << As(a) & j == THUNK(a->jolly);
+    THUNK((sum_k += *k), &sum_k) << As(a) & k == THUNK((*a).k);
+  };
+  ASSERT_EQ(sum_j, 28);
+  ASSERT_EQ(sum_k, 16);
 }
 
 TEST(Trivial, reachable) {

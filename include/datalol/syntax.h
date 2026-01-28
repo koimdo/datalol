@@ -260,13 +260,9 @@ public:
       ? match(t) : set(std::move(t));
   }
 
-  const T *get() const noexcept
-  {
-    const T *res = static_cast<const T*>(Var_::get());
-    return res;
-  }
-  const T *operator->() const noexcept { return get(); }
-  const T& operator*() const noexcept { return *get(); }
+  const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
+  decltype(auto) operator->() const noexcept { return detail::pointer_helper<T>{}.arrow(get()); }
+  decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
 };
 
 class Query {
