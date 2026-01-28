@@ -268,6 +268,8 @@ public:
   }
 
   const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
+  const T& value() const noexcept { return *get(); }
+  operator T const&() const noexcept { return value(); }
   decltype(auto) operator->() const noexcept { return detail::pointer_helper<T>{}.arrow(get()); }
   decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
 };

@@ -381,7 +381,7 @@ void Query::stratify()
     Var<size_t> maxSCC("maxSCC");
 
     deps(body, head, e)  << Elem(e) & $_(dynamic_cast<Rule::Body*>(*e))
-      & body == $_(get_dep(*e))
+      & body == $_(get_dep(e))
       & head == $_(get_dep(&this->get_elem((*e)->rule_->head)))
       ;
 
@@ -391,19 +391,19 @@ void Query::stratify()
     // Kludge due to current lack of max-semilattice aggregation
     // Possible enhancement for SCC once we get WCOJ:
     // https://www3.cs.stonybrook.edu/~warren/xsbbook/node18.html
-    $_(sccMap->unify(*head, *body)) << reach(head, body) & reach(body, head);
+    $_(sccMap->unify(head, body)) << reach(head, body) & reach(body, head);
 
-    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & $_(sccMap->same(*head, *body)) & $_((*e)->meta.negative);
+    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & $_(sccMap->same(head, body)) & $_((*e)->meta.negative);
 
     // Topological sorting in datalog,
     // from https://lmeyerov.blogspot.com/2011/04/topological-sort-in-datalog.html
-    whenAll(0, d) << Elem(e) & d == $_(get_dep(*e)) & !deps(ignore, d, ignore);
-    whenAll(t, head) << whenAll(s, body) & reach(body, head) & t == $_(*s + !sccMap->same(*head, *body));
+    whenAll(0, d) << Elem(e) & d == $_(get_dep(e)) & !deps(ignore, d, ignore);
+    whenAll(t, head) << whenAll(s, body) & reach(body, head) & t == $_(s + !sccMap->same(head, body));
 
-    $_((*e)->rule_->recursive.set(((*e)->idx))) << deps(body, head, e) & $_(sccMap->same(*body, *head));
-    when(s, maxSCC, is_recursive, r) << whenAll(s, head) & t == $_(*s+1) & !whenAll(t, head)
+    $_((*e)->rule_->recursive.set(((*e)->idx))) << deps(body, head, e) & $_(sccMap->same(body, head));
+    when(s, maxSCC, is_recursive, r) << whenAll(s, head) & t == $_(s+1) & !whenAll(t, head)
       & deps(d, head, e)
-      & maxSCC == $_(sccMap->get(*head))
+      & maxSCC == $_(sccMap->get(head))
       & r == $_(&((*e)->rule()))
       & is_recursive == $_((*r)->recursive.any()); // Sort non-recursive before recursive
 
