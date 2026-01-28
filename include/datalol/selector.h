@@ -39,7 +39,7 @@ struct mark_vars_ {
   template<typename T> bool operator()(size_t, const T&) { return true; }
   template<typename T> bool operator()(size_t, const Var<T>& v)
   {
-    res.produce.set(v.get_id());
+    res.produce += v;
     return true;
   }
 };

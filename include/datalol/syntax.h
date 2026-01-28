@@ -69,7 +69,16 @@ public:
 class Var_ {
 public:
   static constexpr size_t MAX_VARS = 64;
-  typedef std::bitset<MAX_VARS> vars_t;
+  class vars_t {
+    std::bitset<MAX_VARS> vars;
+  public:
+    vars_t& operator|=(const vars_t& o) noexcept;
+    vars_t& operator+=(const Var_& v) noexcept;
+    vars_t& operator-=(const vars_t& o) noexcept;
+    void reset() noexcept;
+    bool test(const Var_& v) const noexcept;
+    bool empty() const noexcept;
+  };
 protected:
   struct Impl : public IPrint {
     Impl(ident id);
@@ -84,8 +93,7 @@ protected:
   friend std::ostream& operator<<(std::ostream& os, const Var_& v) { return os << *v.impl; }
   Var_(Impl *impl): impl(impl) {}
 
-  static
-  void register_var(const Impl*);
+  void register_var() const;
 
   friend class Query;
 
@@ -97,7 +105,6 @@ public:
   Var_(Var_&&) = default;
   Var_& operator=(const Var_&) = delete;
   const void *get() const noexcept { return impl->p; }
-  int get_id() const noexcept { return impl->nvar; }
   static vars_t get_captured();
 };
 
@@ -201,7 +208,7 @@ template<typename T, typename Equal = detail::equal_to<T>>
 class Var : public Var_ {
 public:
   Var(const char *name = nullptr);
-  Var(const Var& v): Var_(v) { register_var(impl); }
+  Var(const Var& v): Var_(v) { register_var(); }
   Var(Var&&) = default;
 
   struct Impl : public Var_::Impl {

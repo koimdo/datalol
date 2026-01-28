@@ -396,8 +396,8 @@ struct binder_base : public Rule::Body {
     , fun(std::move(fun))
     , var(std::move(var))
   {
-    meta.produce.set(var.get_id());
-    meta.produce &= ~meta.negative;     // In `i == $_(i->lol)`, we don't actually bind `i`
+    meta.produce += var;
+    meta.produce -= meta.consume;     // In `i == $_(i->lol)`, we don't actually bind `i`
   }
 };
 

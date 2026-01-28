@@ -169,13 +169,38 @@ void Query::print(std::ostream& os) const
   os <<"}";
 }
 
+Var_::vars_t& Var_::vars_t::operator|=(const vars_t& o) noexcept
+{
+  return vars |= o.vars, *this;
+}
+Var_::vars_t& Var_::vars_t::operator+=(const Var_& v) noexcept
+{
+  return vars.set(v.impl->nvar), *this;
+}
+Var_::vars_t& Var_::vars_t::operator-=(const vars_t& o) noexcept
+{
+  return vars &= ~o.vars, *this;
+}
+void Var_::vars_t::reset() noexcept
+{
+  vars.reset();
+}
+bool Var_::vars_t::test(const Var_& v) const noexcept
+{
+  return vars.test(v.impl->nvar);
+}
+bool Var_::vars_t::empty() const noexcept
+{
+  return vars.none();
+}
+
 Var_::Impl::Impl(ident id)
   : id(id)
 {}
 
-void Var_::register_var(const Var_::Impl* v)
+void Var_::register_var() const
 {
-  Query::current->current_vars.set(v->nvar);
+  Query::current->current_vars += *this;
 }
 
 Rule::vars_t Var_::get_captured()
@@ -209,12 +234,12 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
 void Query::verify_neg(const Rule::vars_t& bound, const Rule::Elem& e)
 {
   auto neg = e.meta.consume;
-  neg &= ~bound;
-  if (!neg.none()) {
+  neg -= bound;
+  if (!neg.empty()) {
     std::ostringstream error;
     error << "Unbound variables [";
     for (auto v : vars)
-      if (neg.test(v.get_id()))
+      if (neg.test(v))
         error << " " << v;
     error << " ] at element " << e << " in rule ";
     print_rule(error, *e.rule_);
@@ -237,10 +262,10 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
     auto pos = elem.meta.produce;
     verify_neg(bound, elem);
 
-    pos &= ~bound;
+    pos -= bound;
     elem.undo.vars = stack.data() + stack.size();
     for (auto v : vars)
-      if (pos.test(v.get_id()))
+      if (pos.test(v))
         stack.push_back(v);
     elem.undo.count = (stack.data() + stack.size()) - elem.undo.vars;
 
