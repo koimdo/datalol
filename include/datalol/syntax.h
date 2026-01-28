@@ -111,17 +111,21 @@ public:
 class Rule {
 public:
   using vars_t = Var_::vars_t;
+  enum elem_flags {
+    FLAG_NEGATIVE = 1<<0,
+  };
   struct elem_meta {
     vars_t produce;
     vars_t consume;
     dependency *dep;
-    bool negative;
+    unsigned long flags = 0;
     elem_meta(const elem_meta&) = default;
     elem_meta(dependency *dep);
     elem_meta(const vars_t& produce, const vars_t& consume,
-              dependency *dep = nullptr,
-              bool negative = false);
+              dependency *dep = nullptr);
     void negate_vars();
+    void set_flags(elem_flags f) { flags |= f; }
+    bool has_flags(elem_flags f) const { return flags & f; }
   };
 
   class Elem : public IPrint {

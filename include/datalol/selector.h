@@ -46,7 +46,7 @@ struct mark_vars_ {
 
 struct get_value {
   template<typename T>
-  auto operator()(const Var<T>& v) const { return std::cref(*v); }
+  auto operator()(const Var<T>& v) const { return std::cref(v.value()); }
   template<typename T>
   auto operator()(const T& t) const { return std::cref(t); }
 

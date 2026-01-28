@@ -61,10 +61,10 @@ struct Matcher : public Rule::Body {
     if (is_negative())
       return;
     meta.negate_vars();
-    meta.negative = true;
+    meta.set_flags(Rule::FLAG_NEGATIVE);
   }
 
-  bool is_negative() const { return meta.negative; }
+  bool is_negative() const { return meta.has_flags(Rule::FLAG_NEGATIVE); }
   void configure() override final
   {
     if (is_negative()) {

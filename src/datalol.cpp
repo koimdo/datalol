@@ -50,15 +50,13 @@ Collection::Collection(const ident& id)
 }
 
 Rule::elem_meta::elem_meta(const vars_t& produce, const vars_t& consume,
-                           dependency *dep,
-                           bool negative)
+                           dependency *dep)
   : produce(produce), consume(consume)
   , dep(dep)
-  , negative(negative)
 {
 }
 Rule::elem_meta::elem_meta(dependency *dep)
-  : elem_meta({}, {}, dep, false)
+  : elem_meta({}, {}, dep)
 {}
 
 void Rule::elem_meta::negate_vars()
@@ -393,7 +391,7 @@ void Query::stratify()
     // https://www3.cs.stonybrook.edu/~warren/xsbbook/node18.html
     $_(sccMap->unify(head, body)) << reach(head, body) & reach(body, head);
 
-    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & $_(sccMap->same(head, body)) & $_((*e)->meta.negative);
+    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & $_(sccMap->same(head, body)) & $_((*e)->meta.has_flags(Rule::FLAG_NEGATIVE));
 
     // Topological sorting in datalog,
     // from https://lmeyerov.blogspot.com/2011/04/topological-sort-in-datalog.html

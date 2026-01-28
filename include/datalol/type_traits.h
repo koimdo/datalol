@@ -28,6 +28,7 @@ struct pointer_helper<T, false> {
   const T& star(const T* p) const { return *p; }
 };
 
+// A type is considered "smart pointer" if it has operator->() and operator*()
 template<typename T>
 struct pointer_helper<T, true> {
   decltype(auto) arrow(const T *p) const { return (*p).operator->(); }
