@@ -9,12 +9,19 @@
 #include <json/json.h>
 
 #include "relation.h"
-#include "debug.h"
 #include "pool.h"
 #include "type_traits.h"
 #include "fluid.h"
 
 namespace datalol {
+
+template<typename> class Var;
+enum class execution_policy {
+  NESTED,
+  // TODO: WCOJ
+};
+
+namespace detail {
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
@@ -209,8 +216,119 @@ private:
 
 Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
+class debug_info;
+class Query {
+public:
+  class control {
+    friend class Query;
+  protected:
+    Query* q;
+    control(Query *q): q(q) {}
+  public:
+    void manual_stratify(std::initializer_list<unsigned> counts);
+    void print(std::ostream& os)
+    {
+      q->print(os);
+    }
+    void set_policy(execution_policy p)
+    {
+      q->policy = p;
+    }
+  };
+
+  static fluid_var<Query> current;
+private:
+
+  debug_info *dbg;
+  execution_policy policy = execution_policy::NESTED;
+  std::vector<Rule::Elem*> elems;
+  std::vector<Rule> rules;
+  vars_t current_vars;
+  friend class thunk_base;
+  friend class Var_;
+
+  struct stratum {
+    detail::span<Rule> extent;
+    std::vector<dependency*> to_merge;
+  };
+  std::vector<stratum> strata;
+
+  std::vector<Var_> vars;
+  std::vector<Collection*> db;
+
+  Rule::elem_meta& get_meta(unsigned i);
+  Rule::Elem& get_elem(unsigned i);
+
+  void run_rule(Rule& r, size_t current_delta);
+
+  detail::pool pool;
+
+  friend class Stubs;
+  friend class Rule::cursor;
+  template<typename T>
+  friend class ::datalol::Var;
+  friend class Collection;
+
+  void verify_neg(const vars_t& bound, const Rule::Elem& e);
+  void add_stratum(detail::span<Rule> extent);
+  void stratify();
+  void configure_rule(Rule& r, detail::span<int> order);
+  void configure();
+  void explain(const std::string& coll, const void *target);
+
+  Query(const Query&) = delete;
+  Query(Query&&) = delete;
+  void run();
+  void print_rule(std::ostream& os, const Rule&) const;
+  void print_stratum(std::ostream& os, const stratum& s) const;
+  void print(std::ostream& os) const;
+
+  void add_elem(Rule::Elem *e);
+  Rule *start_rule();
+  void end_rule(Rule *r);
+
+  template<typename Impl>
+  Var_ mkvar(const ident& id)
+  {
+    Var_::Impl *impl = pool.allocate<Impl>(id).get();
+    impl->nvar = vars.size();
+    vars.push_back(Var_(impl));
+    return impl;
+  }
+
+  struct nothing {
+    void externalize() const {}
+  };
+
+  template<typename Q>
+  auto runit(Q&& q, control& ctrl, std::true_type) { return q(ctrl), nothing{}; }
+
+  template<typename Q>
+  auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
+
+public:
+  template<typename T, typename... Args>
+  static
+  auto allocate(Args&&... args) { return current->pool.template allocate<T>(std::forward<Args>(args)...); }
+
+  Query(debug_info *dbg);
+
+  template<typename Q>
+  auto operator=(Q&& qf)
+  {
+    control ctrl(this);
+    auto _ = current.assign(*this);
+    auto res = runit(std::forward<Q>(qf), ctrl, std::is_void<decltype(qf(ctrl))>{});
+    configure();
+    run();
+    return std::move(res).externalize();
+  }
+};
+
+}
+
 template<typename T>
-class Var : public Var_ {
+class Var : public detail::Var_ {
 public:
   Var(const char *name = nullptr);
   Var(const Var& v): Var_(v) { register_var(); }
@@ -220,14 +338,10 @@ public:
     using Var_::Impl::Impl;
     alignas(T) unsigned char buf[sizeof(T)];
 
-    Impl(ident id)
-      : Var_::Impl(id)
-    {}
-
     void print_value(std::ostream& os, const T& t, std::true_type) const { os << t; }
     void print_value(std::ostream& os, const T& t, std::false_type) const
     {
-      os << "<" << ident::make<T>().type_name() << " @ " << static_cast<const void*>(&t) << ">";
+      os << "<" << detail::ident::make<T>().type_name() << " @ " << static_cast<const void*>(&t) << ">";
     }
     void print(std::ostream& os) const override
     {
@@ -277,132 +391,20 @@ public:
   decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
 };
 
-class Query {
-public:
-  enum execution_policy {
-    NESTED,
-    // TODO: WCOJ
-  };
-  class control {
-    friend class Query;
-  protected:
-    Query* q;
-    control(Query *q): q(q) {}
-  public:
-    void manual_stratify(std::initializer_list<unsigned> counts);
-    void print(std::ostream& os)
-    {
-      q->print(os);
-    }
-    void set_policy(execution_policy p)
-    {
-      q->policy = p;
-    }
-  };
-
-  static fluid_var<Query> current;
-private:
-
-  debug_info *dbg;
-  execution_policy policy = NESTED;
-  std::vector<Rule::Elem*> elems;
-  std::vector<Rule> rules;
-  vars_t current_vars;
-  friend class thunk_base;
-  friend class Var_;
-
-  struct stratum {
-    detail::span<Rule> extent;
-    std::vector<dependency*> to_merge;
-  };
-  std::vector<stratum> strata;
-
-  std::vector<Var_> vars;
-  std::vector<Collection*> db;
-
-  Rule::elem_meta& get_meta(unsigned i);
-  Rule::Elem& get_elem(unsigned i);
-
-  void run_rule(Rule& r, size_t current_delta);
-
-  detail::pool pool;
-
-  friend class Stubs;
-  friend class Rule::cursor;
-  template<typename T>
-  friend class Var;
-  friend class Collection;
-
-  void verify_neg(const vars_t& bound, const Rule::Elem& e);
-  void add_stratum(detail::span<Rule> extent);
-  void stratify();
-  void configure_rule(Rule& r, detail::span<int> order);
-  void configure();
-  void explain(const std::string& coll, const void *target);
-
-  Query(const Query&) = delete;
-  Query(Query&&) = delete;
-  void run();
-  void print_rule(std::ostream& os, const Rule&) const;
-  void print_stratum(std::ostream& os, const stratum& s) const;
-  void print(std::ostream& os) const;
-
-  void add_elem(Rule::Elem *e);
-  Rule *start_rule();
-  void end_rule(Rule *r);
-
-  template<typename T>
-  Var_ mkvar(const char *name)
-  {
-    Var_::Impl *impl = pool.allocate<typename Var<T>::Impl>(ident::make<T>(name)).get();
-    impl->nvar = vars.size();
-    vars.push_back(Var_(impl));
-    return impl;
-  }
-
-  struct nothing {
-    void externalize() const {}
-  };
-
-  template<typename Q>
-  auto runit(Q&& q, control& ctrl, std::true_type) { return q(ctrl), nothing{}; }
-
-  template<typename Q>
-  auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
-
-public:
-  template<typename T, typename... Args>
-  static
-  auto allocate(Args&&... args) { return current->pool.template allocate<T>(std::forward<Args>(args)...); }
-
-  Query(debug_info *dbg);
-
-  template<typename Q>
-  auto operator=(Q&& qf)
-  {
-    control ctrl(this);
-    auto _ = current.assign(*this);
-    auto res = runit(std::forward<Q>(qf), ctrl, std::is_void<decltype(qf(ctrl))>{});
-    configure();
-    run();
-    return std::move(res).externalize();
-  }
-};
-
 template<typename T>
 Var<T>::Var(const char *name)
-  : Var_(Query::current->mkvar<T>(name))
+  : Var_(detail::Query::current->mkvar<Impl>(detail::ident::make<T>(name)))
 {
   static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
 }
 
 
 template<typename S, typename T>
-Rule::ubody operator==(Var<S>& v, T&& getter)
+detail::Rule::ubody operator==(Var<S>& v, T&& getter)
 {
   return std::forward<T>(getter) == v;
 }
 
 }
 
-#define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(query)) = [&](::datalol::Query::control& query)
+#define DATALOL(query, ...) ::datalol::detail::Query(DEBUG_INFO(query)) = [&](::datalol::detail::Query::control& query)

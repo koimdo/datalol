@@ -11,6 +11,8 @@
 
 namespace datalol {
 
+namespace detail {
+
 struct compile_error : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -482,7 +484,7 @@ void Query::run_rule(Rule& r, size_t current_delta)
 {
   r.seminaive_current = current_delta;
   switch (policy) {
-  case NESTED:
+  case execution_policy::NESTED:
     get_elem(r.start).eval();
     break;
   }
@@ -534,5 +536,7 @@ void Query::run()
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;
 }
+
+} // namespace detail
 
 } // namespace datalol

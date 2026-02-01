@@ -376,7 +376,7 @@ TEST_F(TriangleTest, nested) {
   result_t myres;
   DATALOL(triangles) {
     TRIANGLE_QUERY();
-    triangles.set_policy(Query::NESTED);
+    triangles.set_policy(execution_policy::NESTED);
   };
   ASSERT_EQ(myres.size(), result.size());
 }

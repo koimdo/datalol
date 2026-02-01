@@ -208,12 +208,12 @@ struct combine_<std::tuple<Types...>> {
 };
 
 template<typename T, typename Compare = std::less<void>>
-struct table : public Collection {
+struct table_ : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
-  table(const char *name, const Compare& cmp = Compare{})
-    : Collection(ident::make<table>(name))
+  table_(const char *name, const Compare& cmp = Compare{})
+    : Collection(ident::make<table_>(name))
     , stable(cmp)
     , recent(cmp)
   {}
@@ -278,13 +278,13 @@ struct table : public Collection {
   // its in head or body position
   template<typename Sel>
   struct susp {
-    table& rel;
+    table_& rel;
     Sel selector;
 
     struct Head : Rule::Head {
       Sel selector;
-      table& rel;
-      Head(Sel&& selector, table& rel)
+      table_& rel;
+      Head(Sel&& selector, table_& rel)
         : Rule::Head(&rel)
         , selector(std::move(selector))
         , rel(rel)
@@ -303,8 +303,8 @@ struct table : public Collection {
     };
 
     struct Body : detail::Matcher<Sel>, iterable<T> {
-      table& tab;
-      Body(Sel&& sel, table& rel)
+      table_& tab;
+      Body(Sel&& sel, table_& rel)
         : Matcher<Sel>(std::move(sel), *this, rel)
         , tab(rel)
       {}
@@ -437,7 +437,8 @@ public:
 template<typename Coll>
 external_<Coll> external(Coll&& coll, const char *name)
 {
-  auto impl = Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
+  auto impl = detail::Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll),
+                                                               detail::ident::make<Coll>(name));
   return external_<Coll>(*impl);
 }
 
@@ -462,11 +463,11 @@ xrange(T stop)
 
 template<typename T, typename Compare = std::less<void>>
 class table_base {
-  detail::table<T>& impl;
+  detail::table_<T>& impl;
 
 public:
   table_base(const char *name)
-    : impl(*Query::allocate<detail::table<T, Compare>>(name))
+    : impl(*detail::Query::allocate<detail::table_<T, Compare>>(name))
   {}
 
   template<typename... SelectArgs>
@@ -479,8 +480,8 @@ public:
 template<typename T0, typename... Rest>
 struct table : public table_base<std::tuple<T0, Rest...>> {
   using table_base<std::tuple<T0, Rest...>>::table_base;
-  static_assert(!std::is_base_of<Var_, T0>::value, "Cannot have var type!");
-  static_assert(!detail::any<std::is_base_of<Var_, Rest>::value...>::value, "Cannot have var type");
+  static_assert(!std::is_base_of<detail::Var_, T0>::value, "Cannot have var type!");
+  static_assert(!detail::any<std::is_base_of<detail::Var_, Rest>::value...>::value, "Cannot have var type");
 };
 
 }

@@ -5,6 +5,8 @@ namespace datalol {
 
 template<typename L> class Var;
 
+namespace detail {
+
 template<typename Res>
 class thunk;
 
@@ -85,9 +87,6 @@ public:
   }
 
   Rule::ubody operator==(Var<typename std::decay_t<Res>>&) &&;
-
-  template<typename L>
-  Rule::ubody operator==(LVar<L>&) &&;
 };
 
 template<typename Fun>
@@ -162,13 +161,15 @@ Rule::ubody thunk<Res>::operator==(Var<typename std::decay_t<Res>>& var) &&
   return Query::allocate<binder<thunk<Res>>>(std::move(*this), var);
 }
 
+}
+
 template<typename Res>
-auto iterate(thunk<Res>&& t)
+auto iterate(detail::thunk<Res>&& t)
 {
-  return iterate_<Res>(std::move(t));
+  return detail::iterate_<Res>(std::move(t));
 }
 
 }
 
 #define THUNK(expr,...)                                                 \
-  ::datalol::thunk_base::capture(#expr, ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); }))
+  ::datalol::detail::thunk_base::capture(#expr, ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); }))
