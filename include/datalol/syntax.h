@@ -119,6 +119,15 @@ public:
   static vars_t get_captured() noexcept;
 };
 
+template<typename T>
+struct var_tag_t {
+  // Tag for variable that can be unified with elements of type `T`.
+  // Interface:
+  //
+  // bool unify(const T& t) const;
+  // bool unify(T&& t) const;
+};
+
 class Rule {
 public:
   enum elem_flags {
@@ -329,7 +338,7 @@ Var_ Var_::make(const ident& id)
 }
 
 template<typename T>
-class Var : public detail::Var_ {
+class Var : public detail::Var_, public detail::var_tag_t<T> {
 public:
   Var(const char *name = nullptr)
     : Var_(make<Impl>(detail::ident::make<T>(name)))

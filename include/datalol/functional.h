@@ -3,8 +3,6 @@
 
 namespace datalol {
 
-template<typename L> class Var;
-
 namespace detail {
 
 template<typename Res>
@@ -86,7 +84,8 @@ public:
     return Query::allocate<guard>(std::move(*this));
   }
 
-  Rule::ubody operator==(Var<typename std::decay_t<Res>>&) &&;
+  template<typename AVar>
+  Rule::ubody operator==(AVar&) &&;
 };
 
 template<typename Fun>
@@ -98,7 +97,7 @@ auto thunk_base::capture(const char *desc, Fun&& f) -> thunk<decltype(f())>
 template<typename Fun, typename V>
 struct binder_base : public Rule::Body {
   static_assert(std::is_base_of<thunk_base, Fun>::value, "Must be a proper thunk");
-  using bound_t = Var<typename std::decay<V>::type>;
+  using bound_t = V;
   using thunk_t = Fun;
   thunk_t fun;
   bound_t var;
@@ -112,9 +111,9 @@ struct binder_base : public Rule::Body {
   }
 };
 
-template<typename Fun>
-struct binder : public binder_base<Fun, typename Fun::result_t> {
-  using binder_base<Fun, typename Fun::result_t>::binder_base;
+template<typename Fun, typename V>
+struct binder : public binder_base<Fun, V> {
+  using binder_base<Fun, V>::binder_base;
   void eval() override final
   {
     auto&& res = this->fun.apply(); // `res` is now alive for the rest of the call chain
@@ -129,7 +128,7 @@ struct binder : public binder_base<Fun, typename Fun::result_t> {
 template<typename Res>
 struct iterate_ {
   using element_t = decltype(*std::begin(std::declval<Res>()));
-  using binder_t = binder_base<thunk<Res>, element_t>;
+  using binder_t = binder_base<thunk<Res>, Var<std::decay_t<element_t>>>;
   struct body : public binder_t {
     using binder_t::binder_base;
     void eval() override final
@@ -155,10 +154,11 @@ struct iterate_ {
   }
 };
 
-template<typename Res>
-Rule::ubody thunk<Res>::operator==(Var<typename std::decay_t<Res>>& var) &&
+template<typename Res> template<typename AVar>
+Rule::ubody thunk<Res>::operator==(AVar& var) &&
 {
-  return Query::allocate<binder<thunk<Res>>>(std::move(*this), var);
+  static_assert(std::is_base_of<var_tag_t<typename std::decay_t<Res>>, AVar>::value, "Must bind to variable");
+  return Query::allocate<binder<thunk<Res>, AVar>>(std::move(*this), var);
 }
 
 }
