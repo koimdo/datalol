@@ -1,0 +1,174 @@
+// -*- C++ -*-
+#pragma once
+
+namespace datalol {
+
+template<typename L> class Var;
+
+template<typename Res>
+class thunk;
+
+class thunk_base {
+  vars_t vars;
+  const char *desc;
+
+protected:
+  Rule::elem_meta get_meta() const noexcept
+  {
+    return { {}, vars };
+  }
+  explicit thunk_base(const char *desc);
+  thunk_base(const char *desc, const vars_t& vars);
+  friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
+
+public:
+  const vars_t& captured_vars() const { return vars; }
+  template<typename Fun>
+  static
+  auto capture(const char *desc, Fun&& f) -> thunk<decltype(f())>;
+};
+
+template<typename Res>
+class thunk : public thunk_base {
+  thunk(const thunk&) = delete;
+  using fun_t = std::function<Res()>;
+  fun_t fun;
+
+  struct head : Rule::Head {
+    thunk fun;
+    head(thunk&& th)
+      : Rule::Head(th.get_meta())
+      , fun(std::move(th))
+    {}
+    void eval() override final { (void)fun.apply(); }
+    void print(std::ostream& os) const override final { os << fun; }
+  };
+
+  struct guard : Rule::Body {
+    thunk fun;
+    guard(thunk&& th)
+      : Rule::Body(th.get_meta())
+      , fun(std::move(th))
+    {}
+    void eval() override final
+    {
+      next(fun.apply() ? true : false);
+    }
+    void print(std::ostream& os) const override final { os << fun;; }
+  };
+
+  friend class thunk_base;
+  template<typename Fun>
+  thunk(const char *desc, Fun&& fun)
+    : thunk_base(desc)
+    , fun(std::forward<Fun>(fun))
+  {
+  }
+
+public:
+  using result_t = Res;
+
+  thunk(thunk&&) = default;
+
+  Res apply() const { return fun(); }
+
+  operator Rule::uhead()
+  {
+    return Query::allocate<head>(std::move(*this));
+  }
+
+  operator Rule::ubody()
+  {
+    static_assert(detail::is_contextual_bool<Res>::value,
+                  "not contextually convertible to bool!");
+    return Query::allocate<guard>(std::move(*this));
+  }
+
+  Rule::ubody operator==(Var<typename std::decay_t<Res>>&) &&;
+
+  template<typename L>
+  Rule::ubody operator==(LVar<L>&) &&;
+};
+
+template<typename Fun>
+auto thunk_base::capture(const char *desc, Fun&& f) -> thunk<decltype(f())>
+{
+  return { desc, std::forward<Fun>(f) };
+}
+
+template<typename Fun, typename V>
+struct binder_base : public Rule::Body {
+  static_assert(std::is_base_of<thunk_base, Fun>::value, "Must be a proper thunk");
+  using bound_t = Var<typename std::decay<V>::type>;
+  using thunk_t = Fun;
+  thunk_t fun;
+  bound_t var;
+  binder_base(thunk_t&& fun, bound_t& var)
+    : Rule::Body({{}, fun.captured_vars(), nullptr})
+    , fun(std::move(fun))
+    , var(std::move(var))
+  {
+    meta.produce += var;
+    meta.produce -= meta.consume;     // In `i == $_(i->lol)`, we don't actually bind `i`
+  }
+};
+
+template<typename Fun>
+struct binder : public binder_base<Fun, typename Fun::result_t> {
+  using binder_base<Fun, typename Fun::result_t>::binder_base;
+  void eval() override final
+  {
+    auto&& res = this->fun.apply(); // `res` is now alive for the rest of the call chain
+    Rule::Body::next(this->var.unify(res));
+  }
+  void print(std::ostream& os) const override final
+  {
+    os << this->var << " == " << this->fun;
+  }
+};
+
+template<typename Res>
+struct iterate_ {
+  using element_t = decltype(*std::begin(std::declval<Res>()));
+  using binder_t = binder_base<thunk<Res>, element_t>;
+  struct body : public binder_t {
+    using binder_t::binder_base;
+    void eval() override final
+    {
+      auto&& coll = this->fun.apply(); // `coll` is now alive for the rest of the call chain
+      for (auto&& val : coll)
+        Rule::Body::next(this->var.set(val));
+    }
+    void print(std::ostream& os) const override final
+    {
+      os << this->var << " == iterate(" << this->fun << ")";
+    }
+  };
+
+  using thunk_t = typename body::thunk_t;
+  thunk_t th;
+  iterate_(thunk_t&& th)
+    : th(std::move(th))
+  {}
+  Rule::ubody operator==(typename body::bound_t& var)
+  {
+    return Query::allocate<body>(std::move(th), var);
+  }
+};
+
+template<typename Res>
+Rule::ubody thunk<Res>::operator==(Var<typename std::decay_t<Res>>& var) &&
+{
+  return Query::allocate<binder<thunk<Res>>>(std::move(*this), var);
+}
+
+template<typename Res>
+auto iterate(thunk<Res>&& t)
+{
+  return iterate_<Res>(std::move(t));
+}
+
+}
+
+#define THUNK(expr,...)                                                 \
+  ::datalol::thunk_base::capture(#expr, ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); }))

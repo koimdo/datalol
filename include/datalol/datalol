@@ -2,6 +2,7 @@
 #pragma once
 
 #include "syntax.h"
+#include "functional.h"
 #include "lattice.h"
 #include "query.h"
 

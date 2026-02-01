@@ -66,19 +66,21 @@ public:
   virtual Json::Value get_contents() const = 0;
 };
 
-class Var_ {
-public:
+class Var_;
+class vars_t {
   static constexpr size_t MAX_VARS = 64;
-  class vars_t {
-    std::bitset<MAX_VARS> vars;
-  public:
-    vars_t& operator|=(const vars_t& o) noexcept;
-    vars_t& operator+=(const Var_& v) noexcept;
-    vars_t& operator-=(const vars_t& o) noexcept;
-    void reset() noexcept;
-    bool test(const Var_& v) const noexcept;
-    bool empty() const noexcept;
-  };
+  std::bitset<MAX_VARS> vars;
+public:
+  vars_t& operator|=(const vars_t& o) noexcept;
+  vars_t& operator+=(const Var_& v) noexcept;
+  vars_t& operator-=(const vars_t& o) noexcept;
+  void reset() noexcept;
+  bool test(const Var_& v) const noexcept;
+  bool empty() const noexcept;
+};
+
+class Var_ {
+  friend class vars_t;
 protected:
   struct Impl : public IPrint {
     Impl(ident id);
@@ -110,7 +112,6 @@ public:
 
 class Rule {
 public:
-  using vars_t = Var_::vars_t;
   enum elem_flags {
     FLAG_NEGATIVE = 1<<0,
   };
@@ -208,7 +209,7 @@ private:
 
 Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
-template<typename T, typename Equal = detail::equal_to<T>>
+template<typename T>
 class Var : public Var_ {
 public:
   Var(const char *name = nullptr);
@@ -217,12 +218,10 @@ public:
 
   struct Impl : public Var_::Impl {
     using Var_::Impl::Impl;
-    Equal eq;
     alignas(T) unsigned char buf[sizeof(T)];
 
-    Impl(ident id, const Equal& eq)
+    Impl(ident id)
       : Var_::Impl(id)
-      , eq(eq)
     {}
 
     void print_value(std::ostream& os, const T& t, std::true_type) const { os << t; }
@@ -254,7 +253,7 @@ public:
   }
   bool match(const T& t) const
   {
-    auto const& eq = static_cast<const Impl*>(impl)->eq;
+    detail::equal_to<T> eq;
     return !get() || eq(*get(), t);
   }
   bool unify(const T& t) const
@@ -308,7 +307,7 @@ private:
   execution_policy policy = NESTED;
   std::vector<Rule::Elem*> elems;
   std::vector<Rule> rules;
-  Rule::vars_t current_vars;
+  vars_t current_vars;
   friend class thunk_base;
   friend class Var_;
 
@@ -330,11 +329,11 @@ private:
 
   friend class Stubs;
   friend class Rule::cursor;
-  template<typename T, typename Cmp>
+  template<typename T>
   friend class Var;
   friend class Collection;
 
-  void verify_neg(const Rule::vars_t& bound, const Rule::Elem& e);
+  void verify_neg(const vars_t& bound, const Rule::Elem& e);
   void add_stratum(detail::span<Rule> extent);
   void stratify();
   void configure_rule(Rule& r, detail::span<int> order);
@@ -390,98 +389,13 @@ public:
   }
 };
 
-template<typename T, typename Cmp>
-Var<T, Cmp>::Var(const char *name)
+template<typename T>
+Var<T>::Var(const char *name)
   : Var_(Query::current->mkvar<T>(name))
 {
-  static_assert(sizeof(Var<T, Cmp>) == sizeof(Var_), "Extra members?");
+  static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
 }
 
-template<typename Res>
-class thunk;
-
-class thunk_base {
-  Rule::vars_t vars;
-  const char *desc;
-
-protected:
-  Rule::elem_meta get_meta() const noexcept
-  {
-    return { {}, vars };
-  }
-  explicit thunk_base(const char *desc);
-  thunk_base(const char *desc, const Rule::vars_t& vars);
-  friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
-
-public:
-  const Rule::vars_t& captured_vars() const { return vars; }
-  template<typename Fun>
-  static
-  auto capture(const char *desc, Fun&& f) -> thunk<decltype(f())>;
-};
-
-template<typename Res>
-class thunk : public thunk_base {
-  thunk(const thunk&) = delete;
-  using fun_t = std::function<Res()>;
-  fun_t fun;
-
-  struct head : Rule::Head {
-    thunk fun;
-    head(thunk&& th)
-      : Rule::Head(th.get_meta())
-      , fun(std::move(th))
-    {}
-    void eval() override final { (void)fun.apply(); }
-    void print(std::ostream& os) const override final { os << fun; }
-  };
-
-  struct guard : Rule::Body {
-    thunk fun;
-    guard(thunk&& th)
-      : Rule::Body(th.get_meta())
-      , fun(std::move(th))
-    {}
-    void eval() override final
-    {
-      next(fun.apply() ? true : false);
-    }
-    void print(std::ostream& os) const override final { os << fun;; }
-  };
-
-  friend class thunk_base;
-  template<typename Fun>
-  thunk(const char *desc, Fun&& fun)
-    : thunk_base(desc)
-    , fun(std::forward<Fun>(fun))
-  {
-  }
-
-public:
-  using result_t = Res;
-
-  thunk(thunk&&) = default;
-
-  Res apply() const { return fun(); }
-
-  operator Rule::uhead()
-  {
-    return Query::allocate<head>(std::move(*this));
-  }
-
-  operator Rule::ubody()
-  {
-    static_assert(detail::is_contextual_bool<Res>::value,
-                  "not contextually convertible to bool!");
-    return Query::allocate<guard>(std::move(*this));
-  }
-};
-
-template<typename Fun>
-auto thunk_base::capture(const char *desc, Fun&& f) -> thunk<decltype(f())>
-{
-  return { desc, std::forward<Fun>(f) };
-}
 
 template<typename S, typename T>
 Rule::ubody operator==(Var<S>& v, T&& getter)
@@ -490,8 +404,5 @@ Rule::ubody operator==(Var<S>& v, T&& getter)
 }
 
 }
-
-#define THUNK(expr,...)                                                 \
-  ::datalol::thunk_base::capture(#expr, ([=,##__VA_ARGS__]() -> decltype(auto) { return (expr); }))
 
 #define DATALOL(query, ...) ::datalol::Query(DEBUG_INFO(query)) = [&](::datalol::Query::control& query)

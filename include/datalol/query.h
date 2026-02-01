@@ -384,66 +384,6 @@ struct table : public Collection {
   }
 };
 
-template<typename Fun, typename V>
-struct binder_base : public Rule::Body {
-  static_assert(std::is_base_of<thunk_base, Fun>::value, "Must be a proper thunk");
-  using bound_t = Var<typename std::decay<V>::type>;
-  using thunk_t = Fun;
-  thunk_t fun;
-  bound_t var;
-  binder_base(thunk_t&& fun, bound_t& var)
-    : Rule::Body({{}, fun.captured_vars(), nullptr})
-    , fun(std::move(fun))
-    , var(std::move(var))
-  {
-    meta.produce += var;
-    meta.produce -= meta.consume;     // In `i == $_(i->lol)`, we don't actually bind `i`
-  }
-};
-
-template<typename Fun>
-struct binder : public binder_base<Fun, typename Fun::result_t> {
-  using binder_base<Fun, typename Fun::result_t>::binder_base;
-  void eval() override final
-  {
-    auto&& res = this->fun.apply(); // `res` is now alive for the rest of the call chain
-    Rule::Body::next(this->var.unify(res));
-  }
-  void print(std::ostream& os) const override final
-  {
-    os << this->var << " == " << this->fun;
-  }
-};
-
-template<typename Res>
-struct iterate_ {
-  using element_t = decltype(*std::begin(std::declval<Res>()));
-  using binder_t = binder_base<thunk<Res>, element_t>;
-  struct body : public binder_t {
-    using binder_t::binder_base;
-    void eval() override final
-    {
-      auto&& coll = this->fun.apply(); // `coll` is now alive for the rest of the call chain
-      for (auto&& val : coll)
-        Rule::Body::next(this->var.set(val));
-    }
-    void print(std::ostream& os) const override final
-    {
-      os << this->var << " == iterate(" << this->fun << ")";
-    }
-  };
-
-  using thunk_t = typename body::thunk_t;
-  thunk_t th;
-  iterate_(thunk_t&& th)
-    : th(std::move(th))
-  {}
-  Rule::ubody operator==(typename body::bound_t& var)
-  {
-    return Query::allocate<body>(std::move(th), var);
-  }
-};
-
 template<typename T, bool = std::is_integral<T>::value>
 struct step_iterator;
 
@@ -478,12 +418,6 @@ struct xrange_ {
   iterator end() const { return iterator{stop, step}; }
 };
 
-template<typename Fun, typename std::enable_if<std::is_base_of<thunk_base, Fun>::value>::type* = nullptr>
-Rule::ubody operator==(Fun&& t, typename binder<Fun>::bound_t& var)
-{
-  return Query::allocate<binder<Fun>>(std::forward<Fun>(t), var);
-}
-
 }
 
 template<typename Coll>
@@ -505,11 +439,6 @@ external_<Coll> external(Coll&& coll, const char *name)
 {
   auto impl = Query::allocate<detail::external_<Coll>>(std::forward<Coll>(coll), ident::make<Coll>(name));
   return external_<Coll>(*impl);
-}
-template<typename Res>
-auto iterate(thunk<Res>&& t)
-{
-  return detail::iterate_<Res>(std::move(t));
 }
 
 template<typename T>

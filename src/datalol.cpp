@@ -4,8 +4,7 @@
 #include <cstring>
 #include <limits>
 
-#include <datalol/syntax.h>
-#include <datalol/query.h>
+#include <datalol/datalol>
 #include <datalol/debug.h>
 
 #define $_(expr, ...) THUNK(expr, ##__VA_ARGS__)
@@ -167,27 +166,27 @@ void Query::print(std::ostream& os) const
   os <<"}";
 }
 
-Var_::vars_t& Var_::vars_t::operator|=(const vars_t& o) noexcept
+vars_t& vars_t::operator|=(const vars_t& o) noexcept
 {
   return vars |= o.vars, *this;
 }
-Var_::vars_t& Var_::vars_t::operator+=(const Var_& v) noexcept
+vars_t& vars_t::operator+=(const Var_& v) noexcept
 {
   return vars.set(v.impl->nvar), *this;
 }
-Var_::vars_t& Var_::vars_t::operator-=(const vars_t& o) noexcept
+vars_t& vars_t::operator-=(const vars_t& o) noexcept
 {
   return vars &= ~o.vars, *this;
 }
-void Var_::vars_t::reset() noexcept
+void vars_t::reset() noexcept
 {
   vars.reset();
 }
-bool Var_::vars_t::test(const Var_& v) const noexcept
+bool vars_t::test(const Var_& v) const noexcept
 {
   return vars.test(v.impl->nvar);
 }
-bool Var_::vars_t::empty() const noexcept
+bool vars_t::empty() const noexcept
 {
   return vars.none();
 }
@@ -201,7 +200,7 @@ void Var_::register_var() const
   Query::current->current_vars += *this;
 }
 
-Rule::vars_t Var_::get_captured()
+vars_t Var_::get_captured()
 {
   vars_t& current_vars = Query::current->current_vars;
   auto res = current_vars;
@@ -229,7 +228,7 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
   return os << "THUNK(" << t.desc << ")";
 }
 
-void Query::verify_neg(const Rule::vars_t& bound, const Rule::Elem& e)
+void Query::verify_neg(const vars_t& bound, const Rule::Elem& e)
 {
   auto neg = e.meta.consume;
   neg -= bound;
@@ -252,7 +251,7 @@ Rule::Elem& Query::get_elem(unsigned i) { return *elems[i]; }
 void Query::configure_rule(Rule& r, detail::span<int> order)
 {
   // Step 3: set undo variables
-  Rule::vars_t bound;
+  vars_t bound;
   std::vector<Var_>& stack = r.undo_stack;
   stack.reserve(vars.size());
   for (auto ofs : order) {
