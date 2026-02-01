@@ -15,7 +15,6 @@
 
 namespace datalol {
 
-template<typename> class Var;
 enum class execution_policy {
   NESTED,
   // TODO: WCOJ
@@ -100,7 +99,10 @@ protected:
   Impl *impl;
 
   friend std::ostream& operator<<(std::ostream& os, const Var_& v) { return os << *v.impl; }
-  Var_(Impl *impl): impl(impl) {}
+  Var_(Impl *impl) noexcept: impl(impl) {}
+
+  template<typename SubImpl>
+  Var_ make(const ident& id);
 
   void register_var() const;
 
@@ -110,11 +112,11 @@ protected:
 
 public:
   void zap() const { impl->p = nullptr; }
-  Var_(const Var_&) = default;
-  Var_(Var_&&) = default;
+  Var_(const Var_&) noexcept = default;
+  Var_(Var_&&) noexcept = default;
   Var_& operator=(const Var_&) = delete;
   const void *get() const noexcept { return impl->p; }
-  static vars_t get_captured();
+  static vars_t get_captured() noexcept;
 };
 
 class Rule {
@@ -265,8 +267,6 @@ private:
 
   friend class Stubs;
   friend class Rule::cursor;
-  template<typename T>
-  friend class ::datalol::Var;
   friend class Collection;
 
   void verify_neg(const vars_t& bound, const Rule::Elem& e);
@@ -286,15 +286,6 @@ private:
   void add_elem(Rule::Elem *e);
   Rule *start_rule();
   void end_rule(Rule *r);
-
-  template<typename Impl>
-  Var_ mkvar(const ident& id)
-  {
-    Var_::Impl *impl = pool.allocate<Impl>(id).get();
-    impl->nvar = vars.size();
-    vars.push_back(Var_(impl));
-    return impl;
-  }
 
   struct nothing {
     void externalize() const {}
@@ -325,12 +316,27 @@ public:
   }
 };
 
+template<typename SubImpl>
+Var_ Var_::make(const ident& id)
+{
+  Query& q = *Query::current;
+  Impl *impl = q.pool.allocate<SubImpl>(id).get();
+  impl->nvar = q.vars.size();
+  q.vars.push_back(Var_(impl));
+  return impl;
+}
+
 }
 
 template<typename T>
 class Var : public detail::Var_ {
 public:
-  Var(const char *name = nullptr);
+  Var(const char *name = nullptr)
+    : Var_(make<Impl>(detail::ident::make<T>(name)))
+  {
+    static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
+  }
+
   Var(const Var& v): Var_(v) { register_var(); }
   Var(Var&&) = default;
 
@@ -390,14 +396,6 @@ public:
   decltype(auto) operator->() const noexcept { return detail::pointer_helper<T>{}.arrow(get()); }
   decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
 };
-
-template<typename T>
-Var<T>::Var(const char *name)
-  : Var_(detail::Query::current->mkvar<Impl>(detail::ident::make<T>(name)))
-{
-  static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
-}
-
 
 template<typename S, typename T>
 detail::Rule::ubody operator==(Var<S>& v, T&& getter)

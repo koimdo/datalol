@@ -202,7 +202,7 @@ void Var_::register_var() const
   Query::current->current_vars += *this;
 }
 
-vars_t Var_::get_captured()
+vars_t Var_::get_captured() noexcept
 {
   vars_t& current_vars = Query::current->current_vars;
   auto res = current_vars;
