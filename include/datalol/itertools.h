@@ -61,8 +61,8 @@ public:
 template<typename Coll>
 stream<typename Coll::value_type> generic_iterator(const Coll& coll)
 {
-  auto pos_ = std::begin(coll);
-  auto end_ = std::end(coll);
+  auto pos_ = begin(coll);
+  auto end_ = end(coll);
   return stream<typename Coll::value_type>([=]() mutable -> buf_t {
     if (pos_ != end_) {
       auto *t = std::addressof(*pos_);

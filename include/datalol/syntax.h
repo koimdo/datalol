@@ -420,10 +420,8 @@ public:
   auto capture(const char *desc, Fun&& f) -> thunk<decltype(f())>;
 };
 
-struct thunk_tag_t {}; // FIXME: dispatch only on thunk_base?
-
 template<typename Res>
-class thunk : public thunk_base, public thunk_tag_t {
+class thunk : public thunk_base {
   thunk(const thunk&) = delete;
   using fun_t = std::function<Res()>;
   fun_t fun;

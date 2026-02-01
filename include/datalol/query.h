@@ -386,7 +386,7 @@ struct table : public Collection {
 
 template<typename Fun, typename V>
 struct binder_base : public Rule::Body {
-  static_assert(std::is_base_of<thunk_tag_t, Fun>::value, "Must be a proper thunk");
+  static_assert(std::is_base_of<thunk_base, Fun>::value, "Must be a proper thunk");
   using bound_t = Var<typename std::decay<V>::type>;
   using thunk_t = Fun;
   thunk_t fun;
@@ -478,7 +478,7 @@ struct xrange_ {
   iterator end() const { return iterator{stop, step}; }
 };
 
-template<typename Fun, typename std::enable_if<std::is_base_of<thunk_tag_t, Fun>::value>::type* = nullptr>
+template<typename Fun, typename std::enable_if<std::is_base_of<thunk_base, Fun>::value>::type* = nullptr>
 Rule::ubody operator==(Fun&& t, typename binder<Fun>::bound_t& var)
 {
   return Query::allocate<binder<Fun>>(std::forward<Fun>(t), var);
