@@ -120,12 +120,18 @@ public:
 };
 
 template<typename T>
-struct var_tag_t {
+struct var_tag_base {
   // Tag for variable that can be unified with elements of type `T`.
   // Interface:
   //
   // bool unify(const T& t) const;
   // bool unify(T&& t) const;
+};
+
+template<typename T, typename Derived>
+struct var_tag_t : public var_tag_base<T> {
+  bool unify(const T& r) const { return static_cast<const Derived&>(*this).unify(r); }
+  bool unify(T&& r) const { return static_cast<const Derived&>(*this).unify(std::move(r)); }
 };
 
 class Rule {
@@ -338,7 +344,7 @@ Var_ Var_::make(const ident& id)
 }
 
 template<typename T>
-class Var : public detail::Var_, public detail::var_tag_t<T> {
+class Var : public detail::Var_, public detail::var_tag_t<T, Var<T>> {
 public:
   Var(const char *name = nullptr)
     : Var_(make<Impl>(detail::ident::make<T>(name)))
@@ -400,8 +406,7 @@ public:
   }
 
   const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
-  const T& value() const noexcept { return *get(); }
-  operator T const&() const noexcept { return value(); }
+  operator T const&() const noexcept { return *get(); }
   decltype(auto) operator->() const noexcept { return detail::pointer_helper<T>{}.arrow(get()); }
   decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
 };

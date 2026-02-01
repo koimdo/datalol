@@ -21,34 +21,32 @@ struct unify_ {
   // Elementwise cases
   template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
 
-  template<typename Lattice>
-  constexpr bool operator()(size_t, const Var<typename Lattice::lattice_reveal>& s, const Lattice& r) const { return s.unify(r.reveal()); }
-
-  template<typename R> constexpr bool operator()(size_t, const Var<R>& s, const R& r) const { return s.unify(r); }
-  template<typename R> constexpr bool operator()(size_t, const Var<R>& s, R&& r) const { return s.unify(std::move(r)); }
-  template<typename S, typename R>
-  constexpr bool operator()(size_t, const S& s, const R& r) const
-  {
-    static_assert(!std::is_base_of<Var_, S>::value, "Var type mismatch");
-    return s == r;
-  }
+  template<typename V, typename R> constexpr bool operator()(size_t, const var_tag_t<R, V>& s, const R& r) const { return s.unify(r); }
+  template<typename V, typename R> constexpr bool operator()(size_t, const var_tag_t<R, V>& s, R&& r) const { return s.unify(std::move(r)); }
+  template<typename R> constexpr bool operator()(size_t, ignore_t, R&& r) const { return true; }
 };
 
 struct mark_vars_ {
   Rule::elem_meta& res;
-  template<typename T> bool operator()(size_t, const T&) { return true; }
-  template<typename T> bool operator()(size_t, const Var<T>& v)
+  template<typename T> bool operator()(size_t, const T& v)
   {
-    res.produce += v;
+    if (std::is_base_of<Var_, T>::value)
+      res.produce += reinterpret_cast<const Var_&>(v);
     return true;
   }
 };
 
 struct get_value {
-  template<typename T>
-  auto operator()(const Var<T>& v) const { return std::cref(v.value()); }
-  template<typename T>
-  auto operator()(const T& t) const { return std::cref(t); }
+  template<typename T, typename V>
+  auto operator()(const var_tag_t<T, V>& v) const {
+    return std::cref(*(static_cast<const V&>(v).get()));
+  }
+  template<typename T, typename std::enable_if<!std::is_base_of<Var_, T>::value>::type* = nullptr>
+  auto operator()(const T& t) const
+  {
+    static_assert(!std::is_base_of<Var_, T>::value, "lolz");
+    return std::cref(t);
+  }
 
   struct panic {
     template<typename T>

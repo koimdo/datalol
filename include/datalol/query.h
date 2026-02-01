@@ -282,6 +282,7 @@ struct table_ : public Collection {
     Sel selector;
 
     struct Head : Rule::Head {
+      static_assert(Sel::has_value, "Cannot insert non-values");
       Sel selector;
       table_& rel;
       Head(Sel&& selector, table_& rel)
