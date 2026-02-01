@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <limits>
+#include "syntax.h"
 
 namespace datalol {
 
@@ -20,7 +21,7 @@ public:
   {
   }
 
-  void update(T&& v)
+  void update(const T& v)
   {
     this->t = std::min(this->t, v);
   }

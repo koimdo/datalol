@@ -341,10 +341,13 @@ Var_ Var_::make(const ident& id)
   return impl;
 }
 
+class get_value;
 }
 
 template<typename T>
 class Var : public detail::Var_, public detail::var_tag_t<T, Var<T>> {
+  friend class detail::get_value;
+  const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
 public:
   Var(const char *name = nullptr)
     : Var_(make<Impl>(detail::ident::make<T>(name)))
@@ -405,7 +408,6 @@ public:
       ? match(t) : set(std::move(t));
   }
 
-  const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
   operator T const&() const noexcept { return *get(); }
   decltype(auto) operator->() const noexcept { return detail::pointer_helper<T>{}.arrow(get()); }
   decltype(auto) operator*() const noexcept { return detail::pointer_helper<T>{}.star(get()); }
