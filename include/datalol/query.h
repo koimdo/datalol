@@ -212,8 +212,8 @@ struct table_ : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
 
-  table_(const char *name, const Compare& cmp = Compare{})
-    : Collection(ident::make<table_>(name))
+  table_(const ident& id, const Compare& cmp = Compare{})
+    : Collection(id)
     , stable(cmp)
     , recent(cmp)
   {}
@@ -466,8 +466,8 @@ class table_base {
   detail::table_<T>& impl;
 
 public:
-  table_base(const char *name)
-    : impl(*detail::Query::allocate<detail::table_<T, Compare>>(name))
+  table_base(const detail::ident& id)
+    : impl(*detail::Query::allocate<detail::table_<T, Compare>>(id))
   {}
 
   template<typename... SelectArgs>
@@ -479,7 +479,8 @@ public:
 
 template<typename T0, typename... Rest>
 struct table : public table_base<std::tuple<T0, Rest...>> {
-  using table_base<std::tuple<T0, Rest...>>::table_base;
+  using base_t = table_base<std::tuple<T0, Rest...>>;
+  table(const char *name): base_t(detail::ident::make<table>(name)) {}
   static_assert(!std::is_base_of<detail::Var_, T0>::value, "Cannot have var type!");
   static_assert(!detail::any<std::is_base_of<detail::Var_, Rest>::value...>::value, "Cannot have var type");
 };
