@@ -189,7 +189,7 @@ struct combine_ {
 
   void operator()(T& out, T&& in) const
   {
-    do_combine(out, std::move(in), std::is_base_of<datalol::lattice_tag_base, T>{});
+    do_combine(out, std::move(in), std::is_base_of<lattice::lattice_tag_base, T>{});
   }
 };
 

@@ -108,7 +108,8 @@ protected:
 
   friend class Query;
 
-  void set(const void *p) const noexcept { impl->p = p; }
+  bool set(const void *p) const noexcept { impl->p = p; return true; }
+  bool is_set() const noexcept { return impl->p; }
 
 public:
   void zap() const { impl->p = nullptr; }
@@ -364,24 +365,22 @@ public:
 
   bool set(const T& t) const
   {
-    Var_::set(&t);
-    return true;
+    return Var_::set(&t);
   }
   bool set(T&& t) const
   {
     unsigned char *buf = static_cast<Impl*>(impl)->buf;
-    ::new ((void*)buf) T(t);
-    Var_::set(buf);
-    return true;
+    ::new ((void*)buf) T(std::move(t));
+    return Var_::set(buf);
   }
   bool match(const T& t) const
   {
     detail::equal_to<T> eq;
-    return !get() || eq(*get(), t);
+    return eq(*get(), t);
   }
   bool unify(const T& t) const
   {
-    return get()
+    return is_set()
       ? match(t) : set(t);
   }
 
@@ -389,7 +388,7 @@ public:
   {
     static_assert(std::is_trivially_destructible<T>::value, "Unification with complex rvalues not yet supported");
     // Will be supported in the glorious WCOJ future, though.
-    return get()
+    return is_set()
       ? match(t) : set(std::move(t));
   }
 

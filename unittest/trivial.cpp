@@ -182,21 +182,21 @@ TEST(Trivial, apsp) {
     {4, 6, 1.0},
   };
 
+  using lmin = datalol::lattice::lmin<double>;
   auto answer = DATALOL(apsp) {
     using namespace datalol;
     auto E = external(edges, "edges");
-    table<int, int, lattice::lmin<double>> Shortest("shortest");
+    table<int, int, lmin> Shortest("shortest");
     Var<int> u("u"), v("v"), w("w");
-    Var<double> d("d"), d1("d1"), d2("d2");
-    Var<std::tuple<int, int, lattice::lmin<double>>> fulledge("edge");
+    LVar<lmin> d("d"), d1("d1"), d2("d2");
 
-    Shortest(u, w, d) << Shortest(fulledge, with_elements, u, v, d1) & E(v, w, d2) & d == $_(*d1 + *d2);
+    Shortest(u, w, d) << Shortest(u, v, d1) & E(v, w, d2) & d == d1 + d2;
     Shortest(u, v, d) << E(u, v, d);
 
     return Shortest;
   };
 
-  std::vector<std::tuple<int, int, datalol::lattice::lmin<double>>> expected = {
+  std::vector<std::tuple<int, int, lmin>> expected = {
     {1, 2, 1.0},
     {1, 3, 3.0},
     {1, 4, 7.0},
