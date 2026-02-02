@@ -9,23 +9,23 @@ template<typename Res>
 class thunk;
 
 class thunk_base {
+  std::string desc;
   vars_t vars;
-  const char *desc;
 
 protected:
   Rule::elem_meta get_meta() const noexcept
   {
     return { {}, vars };
   }
-  explicit thunk_base(const char *desc);
-  thunk_base(const char *desc, const vars_t& vars);
+  explicit thunk_base(std::string&& desc);
+  thunk_base(std::string&& desc, const vars_t& vars);
   friend std::ostream& operator<<(std::ostream& os, const thunk_base& t);
 
 public:
   const vars_t& captured_vars() const { return vars; }
   template<typename Fun>
   static
-  auto capture(const char *desc, Fun&& f) -> thunk<decltype(f())>;
+  auto capture(std::string&& desc, Fun&& f) -> thunk<decltype(f())>;
 };
 
 template<typename Res>
@@ -59,8 +59,8 @@ class thunk : public thunk_base {
 
   friend class thunk_base;
   template<typename Fun>
-  thunk(const char *desc, Fun&& fun)
-    : thunk_base(desc)
+  thunk(std::string&& desc, Fun&& fun)
+    : thunk_base(std::move(desc))
     , fun(std::forward<Fun>(fun))
   {
   }
@@ -89,9 +89,9 @@ public:
 };
 
 template<typename Fun>
-auto thunk_base::capture(const char *desc, Fun&& f) -> thunk<decltype(f())>
+auto thunk_base::capture(std::string&& desc, Fun&& f) -> thunk<decltype(f())>
 {
-  return { desc, std::forward<Fun>(f) };
+  return { std::move(desc), std::forward<Fun>(f) };
 }
 
 template<typename Fun, typename V>

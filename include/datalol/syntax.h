@@ -29,8 +29,8 @@ struct IPrint {
 };
 
 class type_id_t {
-  const char *type;
-  constexpr type_id_t(const char *type): type(type) {}
+  std::string type; // TODO: actually a `std::string_view`
+  type_id_t(const char *type);
 public:
   template<typename T>
   static type_id_t of() { return type_id_t{__PRETTY_FUNCTION__}; }
@@ -38,21 +38,21 @@ public:
   bool operator!=(type_id_t o) const;
   bool operator<(type_id_t o) const;
 
-  std::string type_name() const;
+  const std::string& type_name() const { return type; };
 };
 
 class ident {
   type_id_t type;
-  const char *name;             // May be null
-  constexpr ident(type_id_t type, const char *name): type(type), name(name) {}
+  std::string name;             // May be empty
+  ident(type_id_t type, std::string&& name): type(type), name(std::move(name)) {}
 public:
   template<typename T>
-  static ident make(const char *name = nullptr)
+  static ident make(std::string&& name = {})
   {
-    return ident{type_id_t::of<T>(), name};
+    return ident{type_id_t::of<T>(), std::move(name)};
   }
-  std::string type_name() const { return type.type_name(); }
-  std::string get_name() const;
+  const std::string& type_name() const { return type.type_name(); }
+  const std::string& get_name() const { return name; }
 };
 std::ostream& operator<<(std::ostream& os, const ident& id);
 
@@ -349,8 +349,8 @@ class Var : public detail::Var_, public detail::var_tag_t<T, Var<T>> {
   friend class detail::get_value;
   const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
 public:
-  Var(const char *name = nullptr)
-    : Var_(make<Impl>(detail::ident::make<T>(name)))
+  Var(std::string&& name = {})
+    : Var_(make<Impl>(detail::ident::make<T>(std::move(name))))
   {
     static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
   }
@@ -365,7 +365,7 @@ public:
     void print_value(std::ostream& os, const T& t, std::true_type) const { os << t; }
     void print_value(std::ostream& os, const T& t, std::false_type) const
     {
-      os << "<" << detail::ident::make<T>().type_name() << " @ " << static_cast<const void*>(&t) << ">";
+      os << "<" << id.type_name() << " @ " << static_cast<const void*>(&t) << ">";
     }
     void print(std::ostream& os) const override
     {

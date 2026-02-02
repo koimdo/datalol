@@ -25,23 +25,16 @@ Json::Value IPrint::to_json() const {
   return Json::Value(os.str());
 }
 
-bool type_id_t::operator==(type_id_t o) const { return !strcmp(type, o.type); }
-bool type_id_t::operator!=(type_id_t o) const { return strcmp(type, o.type); }
-bool type_id_t::operator<(type_id_t o) const { return strcmp(type, o.type) < 0; }
+bool type_id_t::operator==(type_id_t o) const { return type == o.type; }
+bool type_id_t::operator!=(type_id_t o) const { return type != o.type; }
+bool type_id_t::operator<(type_id_t o) const { return type < o.type < 0; }
 
 
-std::string type_id_t::type_name() const
+type_id_t::type_id_t(const char *type)
 {
   auto left = strchr(type, '=')+2;
   auto right = strrchr(left, ']');
-  return std::string(left, right-left);
-}
-
-std::string ident::get_name() const
-{
-  if (name)
-    return name;
-  return std::string();
+  this->type = std::string{left, (size_t)(right-left)};
 }
 
 Collection::Collection(const ident& id)
@@ -94,7 +87,7 @@ Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
 
 void Var_::Impl::print_common(std::ostream& os) const
 {
-  auto name = id.get_name();
+  auto const& name = id.get_name();
   if (name.empty())
     os << "?" << nvar << "[" << id.type_name() << "]";
   else
@@ -219,8 +212,8 @@ void Rule::Elem::configure()
 {
 }
 
-thunk_base::thunk_base(const char *desc)
-  : desc(desc)
+thunk_base::thunk_base(std::string&& desc)
+  : desc(std::move(desc))
   , vars(Var_::get_captured())
 {
 }
