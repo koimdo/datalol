@@ -101,8 +101,8 @@ protected:
   friend std::ostream& operator<<(std::ostream& os, const Var_& v) { return os << *v.impl; }
   Var_(Impl *impl) noexcept: impl(impl) {}
 
-  template<typename SubImpl>
-  Var_ make(const ident& id);
+  template<typename SubImpl, typename T>
+  Var_ make(std::string&& name);
 
   void register_var() const;
 
@@ -117,21 +117,6 @@ public:
   Var_& operator=(const Var_&) = delete;
   const void *get() const noexcept { return impl->p; }
   static vars_t get_captured() noexcept;
-};
-
-template<typename T>
-struct var_tag_base {
-  // Tag for variable that can be unified with elements of type `T`.
-  // Interface:
-  //
-  // bool unify(const T& t) const;
-  // bool unify(T&& t) const;
-};
-
-template<typename T, typename Derived>
-struct var_tag_t : public var_tag_base<T> {
-  bool unify(const T& r) const { return static_cast<const Derived&>(*this).unify(r); }
-  bool unify(T&& r) const { return static_cast<const Derived&>(*this).unify(std::move(r)); }
 };
 
 class Rule {
@@ -331,11 +316,11 @@ public:
   }
 };
 
-template<typename SubImpl>
-Var_ Var_::make(const ident& id)
+template<typename SubImpl, typename T>
+Var_ Var_::make(std::string&& name)
 {
   Query& q = *Query::current;
-  Impl *impl = q.pool.allocate<SubImpl>(id).get();
+  Impl *impl = q.pool.allocate<SubImpl>(ident::make<T>(std::move(name))).get();
   impl->nvar = q.vars.size();
   q.vars.push_back(Var_(impl));
   return impl;
@@ -345,12 +330,12 @@ class get_value;
 }
 
 template<typename T>
-class Var : public detail::Var_, public detail::var_tag_t<T, Var<T>> {
+class Var : public detail::Var_ {
   friend class detail::get_value;
   const T* get() const noexcept { return static_cast<const T*>(Var_::get()); }
 public:
   Var(std::string&& name = {})
-    : Var_(make<Impl>(detail::ident::make<T>(std::move(name))))
+    : Var_(make<Impl, T>(std::move(name)))
   {
     static_assert(sizeof(Var<T>) == sizeof(Var_), "Extra members?");
   }

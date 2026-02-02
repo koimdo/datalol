@@ -157,7 +157,7 @@ struct iterate_ {
 template<typename Res> template<typename AVar>
 Rule::ubody thunk<Res>::operator==(AVar& var) &&
 {
-  static_assert(std::is_base_of<var_tag_base<typename std::decay_t<Res>>, AVar>::value, "Must bind to variable");
+  static_assert(std::is_base_of<Var_, AVar>::value, "Must bind to variable");
   return Query::allocate<binder<thunk<Res>, AVar>>(std::move(*this), var);
 }
 

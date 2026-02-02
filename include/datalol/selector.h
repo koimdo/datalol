@@ -19,10 +19,14 @@ namespace detail {
 
 struct unify_ {
   // Elementwise cases
-  template<typename R> constexpr bool operator()(size_t, const R& s, const R& r) const { return s == r; }
-
-  template<typename V, typename R> constexpr bool operator()(size_t, const var_tag_t<R, V>& s, const R& r) const { return s.unify(r); }
-  template<typename V, typename R> constexpr bool operator()(size_t, const var_tag_t<R, V>& s, R&& r) const { return s.unify(std::move(r)); }
+  template<typename S, typename R>
+  static const S& convert(const R& r) { return r; }
+  template<typename S, typename R,
+           typename std::enable_if<!std::is_base_of<Var_, S>::value>::type* = nullptr>
+  constexpr bool operator()(size_t, const S& s, R&& r) const { return s == std::forward<R>(r); }
+  template<typename V, typename R,
+           typename std::enable_if<std::is_base_of<Var_, V>::value>::type* = nullptr>
+  constexpr bool operator()(size_t, const V& s, R&& r) const { return s.unify(std::forward<R>(r)); }
   template<typename R> constexpr bool operator()(size_t, ignore_t, R&& r) const { return true; }
 };
 
@@ -37,8 +41,8 @@ struct mark_vars_ {
 };
 
 struct get_value {
-  template<typename T, typename V>
-  auto operator()(const var_tag_t<T, V>& v) const {
+  template<typename V, typename std::enable_if<std::is_base_of<Var_, V>::value>::type* = nullptr>
+  auto operator()(const V& v) const {
     return std::cref(*(static_cast<const V&>(v).get()));
   }
   template<typename T, typename std::enable_if<!std::is_base_of<Var_, T>::value>::type* = nullptr>
