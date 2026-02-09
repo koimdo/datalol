@@ -11,7 +11,49 @@ namespace lattice {
 struct lattice_tag_base {};
 static inline bool operator<(lattice_tag_base, lattice_tag_base) { return false; }
 template<typename Value>
-struct lattice_tag_t : public lattice_tag_base { using lattice_reveal = Value; };
+struct lattice_tag_t : public lattice_tag_base {
+  using lattice_reveal = Value;
+  using lattice = lattice_tag_base;
+  // Lattice methods, exposition only
+  /**
+   * Join with un-encapsulated value
+   *
+   * After completion, the represented value is the LUB of previous value and r, so
+   * this->value ← this->value ∨ r
+   *
+   * @param r Raw underlying value to join with
+   */
+  void update(const lattice_reveal& r);
+
+  /**
+   * Join with encapsulated value
+   *
+   * After completion, the represented value is the LUB of previous value and r, so
+   * this->value ← this->value ∨ r.value
+   *
+   * @param r Lattice value to join with
+   */
+  void merge(const lattice& r);
+
+  /**
+   * Monus against a value
+   *
+   * For lattice elements a,b, the monus a∸b is a minimal element c such that a ≤ b∨c.
+   *
+   * For example, in the (semi-)lattice of sets, the monus is the set difference a\b.
+   *
+   * this->value ← this->value ∸ r.value
+   *
+   * A few algebraic properties:
+   *
+   * b∸a = ⊥ for all b≤a
+   * a∸⊥ = a
+   *
+   * @param r Lattice value to monus @return true if this∸r ≠ ⊥. In case the return value
+   * is false, it is permitted to leave this unchanged
+   */
+  bool monus(const lattice& r);
+};
 
 }
 
@@ -80,19 +122,26 @@ namespace lattice {
 template<typename T>
 class lmin : public lattice_tag_t<T> {
   T t;
+  static constexpr T bot = std::numeric_limits<T>::max();
 public:
-  lmin(T t = std::numeric_limits<T>::max())
+  lmin(T t = bot)
     : t(t)
   {
   }
 
   void update(const T& v)
   {
-    this->t = std::min(this->t, v);
+    t = std::min(t, v);
   }
 
-  void merge(const lmin& o) {
+  void merge(const lmin& o)
+  {
     t = std::min(t, o.t);
+  }
+
+  bool monus(const lmin& o)
+  {
+    return t < o.t;
   }
 
   inline friend
@@ -113,6 +162,76 @@ detail::thunk<lmin<T>> operator+(LVar<lmin<T>>& l, const T& r) { return THUNK(lm
 
 template<typename T>
 detail::thunk<lmin<T>> operator+(const T& l, LVar<lmin<T>>& r) { return THUNK(lmin<T>(l + *r)); }
+
+template<typename T>
+class lmax : public lattice_tag_t<T> {
+  T t;
+  static constexpr T bot = std::numeric_limits<T>::min();
+public:
+  lmax(T t = bot)
+    : t(t)
+  {
+  }
+
+  void update(const T& v)
+  {
+    t = std::max(t, v);
+  }
+
+  void merge(const lmax& o)
+  {
+    t = std::max(t, o.t);
+  }
+
+  bool monus(const lmax& o)
+  {
+    return t > o.t;
+  }
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const lmax& m)
+  {
+    return os << "lmax(" << m.t << ")";
+  }
+
+  inline friend bool operator==(const lmax& l, const lmax& r) { return l.t == r.t; }
+  const T& reveal() const { return t; }
+};
+
+template<typename T>
+class lbitset : public lattice_tag_t<T> {
+  T t;
+public:
+  lbitset(T t = {})
+    : t(t)
+  {
+  }
+
+  void update(const T& v)
+  {
+    t |= v;
+  }
+
+  void merge(const lbitset& o)
+  {
+    t |= o.t;
+  }
+
+  bool monus(const lbitset& o)
+  {
+    t &= ~o.t;
+    return t != 0;
+  }
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const lbitset& m)
+  {
+    return os << "lbitset(" << m.t << ")";
+  }
+
+  inline friend bool operator==(const lbitset& l, const lbitset& r) { return l.t == r.t; }
+  const T& reveal() const { return t; }
+};
 
 }
 }

@@ -55,6 +55,13 @@ struct relation {
     return end() != pos && !cmp(t, *pos);
   }
 
+  template<typename K>
+  const T *find(const K& t) const
+  {
+    auto pos = std::lower_bound(begin(), end(), t, cmp);
+    return end() != pos && !cmp(t, *pos) ? std::addressof(*pos) : nullptr;
+  }
+
   static
   void deduplicate(elems_t& elements, const Compare& cmp = {}, const Combine& combine = Combine{})
   {
@@ -112,14 +119,18 @@ struct relation {
         return res;
       }
       if (cmp(*lbeg, *rbeg)) {
-        // l_i < r_j
-        res.push_back(*lbeg++);
-      } else {
+        // lᵢ<rⱼ⇒ append lᵢ
+        res.push_back(*lbeg);
+        ++lbeg;
+      } else if (cmp(*rbeg, *lbeg)) {
+        // rⱼ<lᵢ⇒ append rᵢ
         res.push_back(*rbeg);
-        if (!cmp(*rbeg, *lbeg)) {
-          // equivalent keys
-          combine(res.back(), *lbeg++);
-        }
+        ++rbeg;
+      } else {
+        // lᵢ=rⱼ⇒ append combine(lᵢ, rⱼ)
+        res.push_back(*lbeg);
+        combine(res.back(), *rbeg);
+        ++lbeg;
         ++rbeg;
       }
     }
@@ -134,8 +145,9 @@ struct relation {
   void erase_from(elems_t& to_add)
   {
     to_add.erase(std::remove_if(to_add.begin(), to_add.end(),
-                                [this](const T& x) {
-                                  return contains(x);
+                                [this](T& x) {
+                                  auto o = find(x);
+                                  return o && !comb.monus(x, *o);
                                 }),
                  to_add.end());
   }

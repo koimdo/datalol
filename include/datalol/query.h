@@ -191,6 +191,17 @@ struct combine_ {
   {
     do_combine(out, std::move(in), std::is_base_of<lattice::lattice_tag_base, T>{});
   }
+
+  bool do_monus(T&, const T&, std::false_type) const { return false; }
+  bool do_monus(T& out, const T& in, std::true_type) const
+  {
+    return out.monus(in);
+  }
+
+  bool monus(T& out, const T& in) const
+  {
+    return do_monus(out, in, std::is_base_of<lattice::lattice_tag_base, T>{});
+  }
 };
 
 template<typename... Types>
@@ -204,6 +215,18 @@ struct combine_<std::tuple<Types...>> {
       comb(out, std::move(in));
       return true;
     }, tout, std::move(tin));
+  }
+
+  bool monus(tuple_t& tout, const tuple_t& tin) const
+  {
+    bool res = false;
+    for_each_in_tuple([&res](size_t, auto& out, auto const& in)
+    {
+      combine_<typename std::decay<decltype(in)>::type> comb{};
+      res |= comb.monus(out, in);
+      return true;
+    }, tout, tin);
+    return res;
   }
 };
 
@@ -236,9 +259,9 @@ struct table_ : public Collection {
       return 0;
     }
     // TODO: hold multiple `stable` relations, defer merges?
-    // FIXME: indices
     stable.merge_from(std::move(recent));
-    stable.erase_from(to_add);  // FIXME: erase_from should check lattice bound conditions
+    // TODO: convert `to_add` into relation first, single-pass combined merge and monus with `stable` and `recent`?
+    stable.erase_from(to_add);
     recent.assign(std::move(to_add));
     assert(to_add.empty());
     return recent.size();
@@ -254,7 +277,6 @@ struct table_ : public Collection {
       print_(os, this->recent, "recent: ");
       print_(os, this->to_add, "to_add: ");
     }
-    // TODO: indices?
   }
 
   Json::Value to_json() const override final
@@ -324,7 +346,6 @@ struct table_ : public Collection {
           // This returns both `stable` and `recent`.
             rels = {&tab.stable, 2}; break;
           }
-                
         return stream<T>([rels]() mutable -> buf_t {
           while (!rels.empty()) {
             const relation_t *tab = rels.begin();
@@ -442,6 +463,9 @@ external_<Coll> external(Coll&& coll, const char *name)
                                                                detail::ident::make<Coll>(name));
   return external_<Coll>(*impl);
 }
+
+template<typename Coll>
+using external_t = external_<Coll>;
 
 template<typename T>
 auto xrange(T start, T stop, ptrdiff_t step = 0)
