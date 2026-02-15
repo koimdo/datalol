@@ -23,6 +23,22 @@ struct A {
   }
 };
 
+
+
+TEST(Ident, names) {
+  using datalol::detail::ident;
+  ident i1 = ident::make<int>();
+  ident i2 = ident::make<int>("myInt");
+  ident i3 = ident::make<A>();
+  ident i4 = ident::make<std::pair<A, int>>("troll");
+
+  ASSERT_EQ(i1.type_name(), "int");
+  ASSERT_EQ(i2.type_name(), "int");
+  ASSERT_EQ(i3.type_name(), "A");
+  ASSERT_EQ(i4.type_name(), "std::pair<A, int>");
+  ASSERT_EQ(i4.get_name(), "troll");
+}
+
 template<typename T>
 struct smarty {
   const T *a;
@@ -192,6 +208,7 @@ TEST(Trivial, apsp) {
 
     Shortest(u, w, d) << Shortest(u, v, d1) & E(v, w, d2) & d == d1 + d2;
     Shortest(u, v, d) << E(u, v, d);
+    Shortest(u, v, lattice::bot) << E(u, v, ignore);
 
     return Shortest;
   };
@@ -217,6 +234,55 @@ TEST(Trivial, apsp) {
 
   ASSERT_EQ(answer.data(), expected);
 }
+
+TEST(Trivial, lset) {
+  using edges_t = std::vector<std::tuple<int, int, double>>;
+  edges_t edges = {
+    {1, 2, 1.0},
+    {1, 2, 4.0},
+    {2, 3, 2.0},
+    {3, 3, 0.0},
+    {3, 4, 4.0},
+    {4, 5, 2.0},
+    {5, 6, 2.0},
+    {4, 6, 1.0},
+  };
+
+  using lset = datalol::lattice::lset<flat::set<std::pair<int, double>>>;
+  auto answer = DATALOL(apsp) {
+    using namespace datalol;
+    auto E = external(edges, "edges");
+    table<int, lset> outgoing("shortest");
+    table<int, size_t, double> res("res"); // source node, #outgoing, AVG(distance)
+
+    Var<int> u("u"), v("v");
+    Var<double> d("d"), avg("avg");
+    LVar<lset> out("out");
+    Var<size_t> size("size");
+
+    outgoing(u, out) << E(u, v, d) & out == $_(std::make_pair(*v, *d));
+
+    res(u, size, avg) << outgoing(u, out) & size == $_(out.reveal().size()) & avg == $_(({
+          double asum = 0;
+          for (auto const& lol : out.reveal())
+            asum += lol.second;
+          asum / out.reveal().size();
+        }));
+
+    return res;
+  };
+
+  std::vector<std::tuple<int, size_t, double>> expected = {
+    {1, 2, 2.5},
+    {2, 1, 2.0},
+    {3, 2, 2.0},
+    {4, 2, 1.5},
+    {5, 1, 2.0},
+  };
+
+  ASSERT_EQ(answer.data(), expected);
+}
+
 TEST(Trivial, iterate) {
   std::vector<int> result, answer, input = {2, 3, 5};
   DATALOL(squares) {

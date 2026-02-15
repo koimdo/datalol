@@ -55,6 +55,11 @@ struct lattice_tag_t : public lattice_tag_base {
   bool monus(const lattice& r);
 };
 
+struct bot_t {
+  friend std::ostream& operator<<(std::ostream& os, bot_t) { return os << "⊥"; }
+};
+static constexpr bot_t bot{};
+
 }
 
 template<class L>
@@ -122,9 +127,9 @@ namespace lattice {
 template<typename T>
 class lmin : public lattice_tag_t<T> {
   T t;
-  static constexpr T bot = std::numeric_limits<T>::max();
 public:
-  lmin(T t = bot)
+  lmin(bot_t = bot): lmin(std::numeric_limits<T>::max()) {}
+  lmin(T t)
     : t(t)
   {
   }
@@ -166,9 +171,9 @@ detail::thunk<lmin<T>> operator+(const T& l, LVar<lmin<T>>& r) { return THUNK(lm
 template<typename T>
 class lmax : public lattice_tag_t<T> {
   T t;
-  static constexpr T bot = std::numeric_limits<T>::min();
 public:
-  lmax(T t = bot)
+  lmax(bot_t = bot): lmax(std::numeric_limits<T>::min()) {}
+  lmax(T t)
     : t(t)
   {
   }
@@ -202,7 +207,8 @@ template<typename T>
 class lbitset : public lattice_tag_t<T> {
   T t;
 public:
-  lbitset(T t = {})
+  lbitset(bot_t = bot): lbitset(T{}) {}
+  lbitset(T t)
     : t(t)
   {
   }
@@ -231,6 +237,36 @@ public:
 
   inline friend bool operator==(const lbitset& l, const lbitset& r) { return l.t == r.t; }
   const T& reveal() const { return t; }
+};
+
+template<typename Set>
+class lset : public lattice_tag_t<Set> {
+  Set set;
+public:
+  lset(bot_t = bot) {}
+  lset(const Set& set): set(set) {}
+  lset(typename Set::value_type const& x): set({x}) {}
+  void update(const Set& o)
+  {
+    set = set.set_union(o);
+  }
+  void merge(const lset& o)
+  {
+    set = set.set_union(o.set);
+  }
+  bool monus(const lset& o)
+  {
+    set = set.diff(o.set);
+    return !set.empty();
+  }
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const lset& m)
+  {
+    return os << "lset(" << m.set.size() << ")";
+  }
+
+  const Set& reveal() const noexcept { return set; }
 };
 
 }
