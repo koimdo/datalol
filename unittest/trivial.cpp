@@ -295,6 +295,17 @@ TEST(Trivial, iterate) {
   ASSERT_EQ(result, answer);
 }
 
+TEST(Trivial, enumerate) {
+  std::vector<int> result, answer, input = {2, 3, 5};
+  DATALOL(squares) {
+    using namespace datalol;
+    Var<int> n, i;
+    $_(result.push_back((*n)*(*n)+i), &result) << (tie(i, n) == enumerate($_(xrange(input.data(), input.data()+input.size()), &input)));
+  };
+  answer = {4, 10, 27};
+  ASSERT_EQ(result, answer);
+}
+
 TEST(Trivial, iterate_container) {
   struct noncopy_list {
     std::initializer_list<int> l;

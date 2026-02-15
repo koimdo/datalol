@@ -41,7 +41,7 @@ struct Matcher : public Rule::Body {
     , origin(origin)
     , dep(dep_)
   {
-    sel.mark_vars(meta);
+    sel.mark_vars(meta.produce);
   }
 
   void print(std::ostream& os) const override
@@ -312,8 +312,7 @@ struct table_ : public Collection {
         , selector(std::move(selector))
         , rel(rel)
       {
-        selector.mark_vars(meta);
-        meta.negate_vars();
+        selector.mark_vars(meta.consume);
       }
       void eval() override final
       {

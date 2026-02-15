@@ -7,7 +7,11 @@ namespace datalol {
 
 struct ignore_t {
   template<typename T>
-  bool operator==(T) const { return true; }
+  bool operator==(const T&) const noexcept { return true; }
+
+  template<typename T>
+  bool set(const T&) const noexcept { return true; }
+
   friend std::ostream& operator<<(std::ostream& os, ignore_t) { return os << "ignore"; }
 };
 static constexpr ignore_t ignore{};
@@ -31,11 +35,11 @@ struct unify_ {
 };
 
 struct mark_vars_ {
-  Rule::elem_meta& res;
+  vars_t& res;
   template<typename T> bool operator()(size_t, const T& v)
   {
     if (std::is_base_of<Var_, T>::value)
-      res.produce += reinterpret_cast<const Var_&>(v);
+      res += reinterpret_cast<const Var_&>(v);
     return true;
   }
 };
@@ -92,6 +96,53 @@ struct print_tuple {
   }
 };
 
+template<typename... Args>
+class tie_ {
+  static_assert(all<std::is_same<Args, ignore_t>::value || std::is_base_of<Var_, Args>::value...>::value, "Can only tie ignores and vars");
+  std::tuple<Args...> sel;
+
+public:
+  tie_(Args&... args)
+    : sel(std::move(args)...)
+  {}
+
+  template<typename T>
+  bool unify(const T& row) const noexcept
+  {
+    unify_ u;
+    return for_each_in_tuple(u, sel, row);
+  }
+
+  template<typename T>
+  bool set(const T& row)
+  {
+    for_each_in_tuple([](size_t, auto& s, auto&& r) { return s.set(std::forward<decltype(r)>(r)); },
+                      sel, row);
+    return true;
+  }
+
+  template<typename... Sel>
+  inline friend
+  vars_t& operator+=(vars_t& v, const tie_& t)
+  {
+    mark_vars_ mv{v};
+    for_each_in_tuple(mv, t.sel);
+    return v;
+  }
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const tie_& s)
+  {
+    return os << "tie(" << print_tuple<decltype(s.sel)>(s.sel) << ")";
+  }
+};
+
+template<typename F, typename... Sel>
+Rule::ubody operator==(tie_<Sel...>&& v, F&& getter)
+{
+  return std::forward<F>(getter) == v;
+}
+
 template<typename T, typename All, typename... Sel>
 struct Selector {
   using value_type = T;
@@ -109,9 +160,9 @@ struct Selector {
     , sel(std::forward<Sel>(sel)...)
   {}
 
-  void mark_vars(Rule::elem_meta& meta) const
+  void mark_vars(vars_t& vars) const
   {
-    mark_vars_ mv{meta};
+    mark_vars_ mv{vars};
     for_each_in_tuple(mv, sel);
     mv(0, all);
   }
@@ -186,5 +237,8 @@ build_selector(Var<T>& all)
 }
 
 }
+
+template<typename... Args>
+auto tie(Args&... args) { return detail::tie_<Args...>(args...); }
 
 }

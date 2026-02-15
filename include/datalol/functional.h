@@ -1,6 +1,8 @@
 // -*- C++ -*-
 #pragma once
 
+#include "selector.h"
+
 namespace datalol {
 
 namespace detail {
@@ -72,12 +74,12 @@ public:
 
   Res apply() const { return fun(); }
 
-  operator Rule::uhead()
+  operator Rule::uhead() &&
   {
     return Query::allocate<head>(std::move(*this));
   }
 
-  operator Rule::ubody()
+  operator Rule::ubody() &&
   {
     static_assert(detail::is_contextual_bool<Res>::value,
                   "not contextually convertible to bool!");
@@ -125,10 +127,17 @@ struct binder : public binder_base<Fun, V> {
   }
 };
 
+template<typename Coll>
+decltype(auto) get_first(const Coll& c)
+{
+  using std::begin;
+  return *begin(c);
+}
+
 template<typename Res>
 struct iterate_ {
-  using element_t = decltype(*std::begin(std::declval<Res>()));
-  using binder_t = binder_base<thunk<Res>, Var<std::decay_t<element_t>>>;
+  using element_t = std::decay_t<decltype(get_first(std::declval<Res>()))>;
+  using binder_t = binder_base<thunk<Res>, Var<element_t>>;
   struct body : public binder_t {
     using binder_t::binder_base;
     void eval() override final
@@ -146,6 +155,39 @@ struct iterate_ {
   using thunk_t = typename body::thunk_t;
   thunk_t th;
   iterate_(thunk_t&& th)
+    : th(std::move(th))
+  {}
+
+  Rule::ubody operator==(typename body::bound_t& var)
+  {
+    return Query::allocate<body>(std::move(th), var);
+  }
+};
+
+template<typename Res>
+struct enumerate_ {
+  using element_t = std::decay_t<decltype(get_first(std::declval<Res>()))>;
+  using binder_t = binder_base<thunk<Res>, tie_<Var<int>, Var<element_t>>>;
+  struct body : public binder_t {
+    using binder_t::binder_base;
+    void eval() override final
+    {
+      auto&& coll = this->fun.apply(); // `coll` is now alive for the rest of the call chain
+      int i=0;
+      for (auto&& val : coll) {
+        Rule::Body::next(this->var.set(std::tie(i, val)));
+        i++;
+      }
+    }
+    void print(std::ostream& os) const override final
+    {
+      os << this->var << " == enumerate(" << this->fun << ")";
+    }
+  };
+
+  using thunk_t = typename body::thunk_t;
+  thunk_t th;
+  enumerate_(thunk_t&& th)
     : th(std::move(th))
   {}
   Rule::ubody operator==(typename body::bound_t& var)
@@ -167,6 +209,12 @@ template<typename Res>
 auto iterate(detail::thunk<Res>&& t)
 {
   return detail::iterate_<Res>(std::move(t));
+}
+
+template<typename Res>
+auto enumerate(detail::thunk<Res>&& t)
+{
+  return detail::enumerate_<Res>(std::move(t));
 }
 
 }
