@@ -182,9 +182,8 @@ public:
       }
       undo.zap();
     }
-    Rule& rule() const noexcept { return *rule_; }
     delta_t use_delta() const noexcept {
-      int d = rule().seminaive_current - idx;
+      int d = rule_->seminaive_current - idx;
       if (d < 0) return STABLE;
       if (d > 0) return BOTH;
       return RECENT;

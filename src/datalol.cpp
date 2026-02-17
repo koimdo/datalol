@@ -403,7 +403,7 @@ void Query::stratify()
     when(s, maxSCC, is_recursive, r) << whenAll(s, head) & t == $_(s+1) & !whenAll(t, head)
       & deps(d, head, e)
       & maxSCC == $_(sccMap->get(head))
-      & r == $_(&((*e)->rule()))
+      & r == $_((*e)->rule_)
       & is_recursive == $_((*r)->recursive.any()); // Sort non-recursive before recursive
 
     // // TODO: mutable lambda directly in query?
