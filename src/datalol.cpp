@@ -65,8 +65,9 @@ Rule::cursor::cursor(uhead&& hh, ubody&& bb)
   auto q = Query::current.get();
 
   r = q->start_rule();
-  q->add_elem(hh.get());
-  q->add_elem(bb.get());
+  r->head = hh.get();
+  q->elems.push_back(bb.get());
+  bb->idx = 0;
 }
 
 Rule::cursor::~cursor()
@@ -81,7 +82,10 @@ Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b)
 
 Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
 {
-  Query::current->add_elem(b.get());
+  auto q = Query::current.get();
+
+  b->idx = q->elems.size() - r->body;
+  q->elems.push_back(b.get());
   return *this;
 }
 
@@ -94,16 +98,10 @@ void Var_::Impl::print_common(std::ostream& os) const
     os << "?" << name;
 }
 
-void Query::add_elem(Rule::Elem *me)
-{
-  me->idx = elems.size()-rules.back().head;
-  elems.push_back(me);
-}
-
 Rule *Query::start_rule()
 {
   Rule r;
-  r.head = elems.size();
+  r.body = elems.size();
   rules.push_back(r);
   return &rules.back();
 }
@@ -121,12 +119,16 @@ Query::Query(debug_info *dbg)
 
 void Query::print_rule(std::ostream& os, const Rule& r) const
 {
-  os << *elems[r.head];
+  auto body = r.get_body(const_cast<Query&>(*this));
+  os << *r.head;
   os << " << ";
-  int count = 0;
-  for (int j = 1; j < r.size(); j++) {
-    os << (count++ ? " & " : "") << (r.recursive.test(j) ? "^":"");
-    os << *elems[r.head+j];
+  int j=0;
+  for (auto b : body) {
+    if (j) os << " & ";
+    if (r.start == b) os << "@";
+    if (r.recursive.test(j)) os << "^";
+    os << *b;
+    j++;
   }
 }
 
@@ -223,7 +225,7 @@ std::ostream& operator<<(std::ostream& os, const thunk_base& t)
   return os << "THUNK(" << t.desc << ")";
 }
 
-void Query::verify_neg(const vars_t& bound, const Rule::Elem& e)
+void Query::verify_neg(const Rule& r, const vars_t& bound, const Rule::Elem& e)
 {
   auto neg = e.meta.consume;
   neg -= bound;
@@ -234,14 +236,10 @@ void Query::verify_neg(const vars_t& bound, const Rule::Elem& e)
       if (neg.test(v))
         error << " " << v;
     error << " ] at element " << e << " in rule ";
-    print_rule(error, *e.rule_);
+    print_rule(error, r);
     throw compile_error(error.str());
   }
 }
-
-Rule::elem_meta& Query::get_meta(unsigned i) { return elems[i]->meta; }
-Rule::Elem& Query::get_elem(unsigned i) { return *elems[i]; }
-
 
 void Query::configure_rule(Rule& r, detail::span<int> order)
 {
@@ -249,10 +247,12 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
   vars_t bound;
   std::vector<Var_>& stack = r.undo_stack;
   stack.reserve(vars.size());
+  auto body = r.get_body(*this);
+  auto head = r.head;
   for (auto ofs : order) {
-    auto& elem = static_cast<Rule::Body&>(get_elem(r.head+ofs));
+    auto& elem = *body[ofs];
     auto pos = elem.meta.produce;
-    verify_neg(bound, elem);
+    verify_neg(r, bound, elem);
 
     pos -= bound;
     elem.undo.vars = stack.data() + stack.size();
@@ -264,44 +264,51 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
     bound |= pos;
   }
 
-  verify_neg(bound, get_elem(r.head));
+  verify_neg(r, bound, *head);
 
   // Chain rule body (and head) for execution
-  auto next = &get_elem(r.head);
+  Rule::Elem *next = head;
   for (auto it = order.end(), end = order.begin(); it != end; --it) {
-    auto& e = get_elem(r.head+it[-1]);
+    auto& e = *body[it[-1]];
     e.next_ = next;
     next = &e;
   }
 
   // Now that bound vars and order are known, configure elements for e.g. index access
-  for (unsigned i=r.head; i != r.last; i++)
-    get_elem(i).configure();
+  head->configure();
+  for (auto b : body)
+    b->configure();
 
-  r.start = r.head+order[0];
+  r.start = body[order[0]];
+}
+
+detail::span<Rule::Body*> Rule::get_body(Query& q) const noexcept
+{
+  auto base = q.elems.data();
+  return {base+body, base+last};
 }
 
 void Query::configure()
 {
   // Step 0: associate elements to rules (now that the don't move anymore)
   for (auto& r : rules)
-    for (auto i=r.head; i<r.last; i++)
-      get_elem(i).rule_ = &r;
+    for (auto b : r.get_body(*this))
+      b->rule_ = &r;
 
   // Step 1: stratify (if not manually-stratified before)
   if (strata.empty()) {
     stratify();
     for (auto& r : rules)
-      for (auto i=r.head; i<r.last; i++)
-        get_elem(i).rule_ = &r;
+      for (auto b : r.get_body(*this))
+        b->rule_ = &r;
   }
 
   // Step 3: set undo variables
   for (auto& r : rules) {
     std::vector<int> order;
     // TODO: smarter ordering
-    for (int i=r.head+1; i<r.last; i++)
-      order.push_back(i-r.head);
+    for (int i=0; i<r.size(); i++)
+      order.push_back(i);
     configure_rule(r, {order.data(), order.size()});
   }
   DEBUG_PROBE(BREAK_CONFIGURE);
@@ -360,21 +367,21 @@ void Query::stratify()
     auto Rules = external(rules, "rules");
     auto Elem = external(elems, "elems");
 
-    table<dependency*, dependency*, Rule::Elem*> deps("deps"); // (body, head, e) if the rule containing `e` has head `h` and body `b`
+    table<dependency*, dependency*, Rule::Body*> deps("deps"); // (body, head, e) if the rule containing `e` has head `h` and body `b`
     table<dependency*, dependency*> reach("reach"); // transitive closure of `deps`
     table<int, dependency*> whenAll("whenAll");
 
     table<int, size_t, bool, const Rule*> when("when"); // time, minSCC representitive, rule
     Var<Rule*> r("rule");
-    Var<Rule::Elem*> e("elem");
+    Var<Rule::Body*> e("elem");
     Var<dependency*> body("body"), head("head"), d("d");
     Var<bool> is_recursive("is_recursive");
     Var<int> s("s"), t("t");
     Var<size_t> maxSCC("maxSCC");
 
-    deps(body, head, e)  << Elem(e) & $_(dynamic_cast<Rule::Body*>(*e))
+    deps(body, head, e)  << Elem(e)
       & body == $_(get_dep(e))
-      & head == $_(get_dep(&this->get_elem((*e)->rule_->head)))
+      & head == $_(get_dep((*e)->rule_->head))
       ;
 
     reach(body, head) << deps(body, head, ignore);
@@ -446,15 +453,16 @@ void Query::stratify()
 
 void Query::control::manual_stratify(std::initializer_list<unsigned> counts)
 {
+  assert(std::accumulate(counts.begin(), counts.end(), 0) == q->rules.size());
   Rule *last = q->rules.data();
   for (auto count : counts) {
     q->add_stratum({last, count});
     auto const& to_merge = q->strata.back().to_merge;
     for ( ; count; --count, ++last) {
-      for (auto i=1; i<last->size(); ++i) {
-        auto dep = q->get_meta(i+last->head).dep;
+      for (auto b : last->get_body(*q)) {
+        auto dep = b->meta.dep;
         if (dep && std::find(to_merge.begin(), to_merge.end(), dep) != to_merge.end())
-          last->recursive.set(i);
+          last->recursive.set(b->idx);
       }
     }
   }
@@ -465,7 +473,7 @@ void Query::add_stratum(detail::span<Rule> extent)
 {
   std::vector<dependency*> to_merge;
   for (auto const& r : extent) {
-    auto c = get_meta(r.head).dep;
+    auto c = r.head->meta.dep;
     if (c && !dynamic_cast<dummy_dep*>(c))
       to_merge.push_back(c);
   }
@@ -473,12 +481,12 @@ void Query::add_stratum(detail::span<Rule> extent)
   strata.push_back(stratum{extent, std::move(to_merge)});
 }
 
-void Query::run_rule(Rule& r, size_t current_delta)
+void Query::run_rule(Rule& r, int current_delta)
 {
   r.seminaive_current = current_delta;
   switch (policy) {
   case execution_policy::NESTED:
-    get_elem(r.start).eval();
+    r.start->eval();
     break;
   }
 }
@@ -499,7 +507,7 @@ void Query::run()
     for ( ; beg != end ; ++beg) {
       Rule& r = *beg;
       if (r.recursive.none())
-        run_rule(r, 0);
+        run_rule(r, -1);
       else
         break;
     }
@@ -516,7 +524,7 @@ void Query::run()
       for (auto it = beg; it != end; ++it) {
         Rule& r = *it;
         assert(r.recursive.any()); // Only recursive rules!
-        for (int i=1; i<r.size(); i++) {
+        for (int i=0; i<r.size(); i++) {
           if (r.recursive.test(i))
             run_rule(r, i);
         }

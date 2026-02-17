@@ -39,6 +39,42 @@ TEST(Ident, names) {
   ASSERT_EQ(i4.get_name(), "troll");
 }
 
+TEST(Trivial, reachable_manual) {
+  using edges_t = std::vector<std::tuple<int, int>>;
+  edges_t edges = {
+    {1, 2},
+    {2, 3},
+    {3, 3},
+    {3, 4},
+  };
+  edges_t answer;
+
+  DATALOL(reachability) {
+    using namespace datalol;
+    auto E = external(edges, "edges");
+    table<int, int> Reachable("Reachable");
+    Var<int> u("u"), v("v"), w("w");
+    Reachable(u, v) << E(u, v);
+    Reachable(u, w) << Reachable(u, v) & Reachable(v, w);
+
+    THUNK((answer.push_back({*u, *v})), &answer) << Reachable(u, v);
+    reachability.manual_stratify({2, 1});
+  };
+
+  std::sort(answer.begin(), answer.end());
+  edges_t expected = {
+    {1, 2},
+    {1, 3},
+    {1, 4},
+    {2, 3},
+    {2, 4},
+    {3, 3},
+    {3, 4},
+  };
+
+  ASSERT_EQ(answer, expected);
+}
+
 template<typename T>
 struct smarty {
   const T *a;

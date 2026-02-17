@@ -29,9 +29,12 @@ public:
     template<typename S>
     operator wrap<S>() { return p; }
 
-    T *get() { return p; }
-    T* operator->() { return p; }
-    T& operator*() { return *p; }
+    T *get() noexcept { return p; }
+    T* operator->() noexcept { return p; }
+    T& operator*() noexcept { return *p; }
+    const T *get() const noexcept { return p; }
+    const T* operator->() const noexcept { return p; }
+    const T& operator*() const noexcept { return *p; }
   };
 
   template<typename T, typename... Args>

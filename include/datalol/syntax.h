@@ -120,6 +120,7 @@ public:
   static vars_t get_captured() noexcept;
 };
 
+class Query;
 class Rule {
 public:
   enum elem_flags {
@@ -139,16 +140,13 @@ public:
     bool has_flags(elem_flags f) const { return flags & f; }
   };
 
+  class cursor;
   class Elem : public IPrint {
     friend class Query;
-    Rule *rule_;
   protected:
-    Elem *next_ = nullptr;
-    int idx;
     elem_meta meta;
     Elem(const elem_meta& m);
     Elem(const Elem&) = delete;
-    Rule& rule() const noexcept { return *rule_; }
   public:
     virtual void configure();
     virtual void eval() = 0;
@@ -173,13 +171,18 @@ public:
   protected:
     using Elem::Elem;
     friend class Query;
+    friend class cursor;
     undo_pack undo;
+    Rule *rule_;
+    Elem *next_ = nullptr;
+    int idx;
     void next(bool doit) {
       if (doit) {
         next_->eval();
       }
       undo.zap();
     }
+    Rule& rule() const noexcept { return *rule_; }
     delta_t use_delta() const noexcept {
       int d = rule().seminaive_current - idx;
       if (d < 0) return STABLE;
@@ -205,16 +208,26 @@ public:
     ~cursor();
   };
 
-  size_t size() const { return last-head; }
-  bool operator<(const Rule& o) const { return last < o.last; }
+  size_t size() const noexcept { return last-body; }
+  bool operator<(const Rule& o) const { return body < o.body; }
+
+  detail::span<Body*> get_body(Query&) const noexcept;
+
+  inline friend
+  std::ostream& operator<<(std::ostream& os, const Rule& r)
+  {
+    return os << "Rule(" << r.head << ")";
+  }
+
 private:
   friend class Query;
   friend class Stubs;
-  short head = 0, last = 0, start = 0;
-  short seminaive_current = 0;
   static constexpr size_t MAX_ELEMS = 64;
   std::bitset<MAX_ELEMS> recursive;
   std::vector<Var_> undo_stack;
+  Body *start = nullptr;
+  Head *head = nullptr;
+  short body = 0, last = 0, seminaive_current = 0;
 };
 
 Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
@@ -244,11 +257,12 @@ private:
 
   debug_info *dbg;
   execution_policy policy = execution_policy::NESTED;
-  std::vector<Rule::Elem*> elems;
+  std::vector<Rule::Body*> elems;
   std::vector<Rule> rules;
   vars_t current_vars;
   friend class thunk_base;
   friend class Var_;
+  friend class Rule;
 
   struct stratum {
     detail::span<Rule> extent;
@@ -259,10 +273,7 @@ private:
   std::vector<Var_> vars;
   std::vector<Collection*> db;
 
-  Rule::elem_meta& get_meta(unsigned i);
-  Rule::Elem& get_elem(unsigned i);
-
-  void run_rule(Rule& r, size_t current_delta);
+  void run_rule(Rule& r, int current_delta);
 
   detail::pool pool;
 
@@ -270,7 +281,7 @@ private:
   friend class Rule::cursor;
   friend class Collection;
 
-  void verify_neg(const vars_t& bound, const Rule::Elem& e);
+  void verify_neg(const Rule& r, const vars_t& bound, const Rule::Elem& e);
   void add_stratum(detail::span<Rule> extent);
   void stratify();
   void configure_rule(Rule& r, detail::span<int> order);
@@ -284,7 +295,6 @@ private:
   void print_stratum(std::ostream& os, const stratum& s) const;
   void print(std::ostream& os) const;
 
-  void add_elem(Rule::Elem *e);
   Rule *start_rule();
   void end_rule(Rule *r);
 
