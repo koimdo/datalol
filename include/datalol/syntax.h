@@ -83,6 +83,7 @@ public:
   void reset() noexcept;
   bool test(const Var_& v) const noexcept;
   bool empty() const noexcept;
+  size_t count() const noexcept;
 };
 
 class Var_ {

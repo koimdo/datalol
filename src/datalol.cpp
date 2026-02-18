@@ -187,6 +187,10 @@ bool vars_t::empty() const noexcept
 {
   return vars.none();
 }
+size_t vars_t::count() const noexcept
+{
+  return vars.count();
+}
 
 Var_::Impl::Impl(ident id)
   : id(id)
@@ -245,10 +249,13 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
 {
   // Step 3: set undo variables
   vars_t bound;
-  std::vector<Var_>& stack = r.undo_stack;
-  stack.reserve(vars.size());
+  std::vector<Var_> stack;
   auto body = r.get_body(*this);
   auto head = r.head;
+  vars_t possible;
+  for (auto b : body)
+    possible |= b->meta.produce;
+  stack.reserve(possible.count());
   for (auto ofs : order) {
     auto& elem = *body[ofs];
     auto pos = elem.meta.produce;
@@ -265,6 +272,8 @@ void Query::configure_rule(Rule& r, detail::span<int> order)
   }
 
   verify_neg(r, bound, *head);
+
+  r.undo_stack = std::move(stack);
 
   // Chain rule body (and head) for execution
   Rule::Elem *next = head;
