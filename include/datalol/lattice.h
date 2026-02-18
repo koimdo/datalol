@@ -204,6 +204,15 @@ public:
 };
 
 template<typename T>
+detail::thunk<lmax<T>> operator+(LVar<lmax<T>>& l, LVar<lmax<T>>& r) { return THUNK(lmax<T>(*l + *r)); }
+
+template<typename T>
+detail::thunk<lmax<T>> operator+(LVar<lmax<T>>& l, const T& r) { return THUNK(lmax<T>(*l + r)); }
+
+template<typename T>
+detail::thunk<lmax<T>> operator+(const T& l, LVar<lmax<T>>& r) { return THUNK(lmax<T>(l + *r)); }
+
+template<typename T>
 class lbitset : public lattice_tag_t<T> {
   T t;
 public:

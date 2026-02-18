@@ -314,36 +314,6 @@ void Query::configure()
   DEBUG_PROBE(BREAK_CONFIGURE);
 }
 
-template<typename T>
-struct sccmap {
-  std::map<T, size_t> m; // t -> (id, representitive)
-  size_t& get(const T& t)
-  {
-    size_t n = m.size();
-    auto itb = m.insert({t, n});
-    return itb.first->second;
-  }
-  void unify(const T& l, const T& r)
-  {
-    get(l) = std::max(get(l), get(r));
-  }
-  bool same(const T& l, const T& r)
-  {
-    auto sl = get(l), sr = get(r);
-    return sl == sr;
-  }
-};
-
-template<typename D>
-class depwrap : public dependency {
-  D* d;
-  void print(std::ostream& os) const override final { os << "wrap<" << ident::make<D>().type_name() << ">"; }
-  size_t merge(bool) override final { return 0; }
-public:
-  depwrap(D& d): d(&d) {}
-  D* operator->() const { return d; }
-};
-
 struct dummy_dep : dependency {
   const Rule::Elem *e;
   dummy_dep(const Rule::Elem *e): e(e) {}
@@ -352,9 +322,6 @@ struct dummy_dep : dependency {
 };
 void Query::stratify()
 {
-  sccmap<dependency*> sccMap_;
-  depwrap<decltype(sccMap_)> sccMap(sccMap_);
-
   auto get_dep = [this](const Rule::Elem* e)
   {
     auto& meta = const_cast<Rule::elem_meta&>(e->meta);
@@ -367,17 +334,23 @@ void Query::stratify()
     auto Rules = external(rules, "rules");
     auto Elem = external(elems, "elems");
 
+    using scc_t = lattice::lmax<int>;
     table<dependency*, dependency*, Rule::Body*> deps("deps"); // (body, head, e) if the rule containing `e` has head `h` and body `b`
     table<dependency*, dependency*> reach("reach"); // transitive closure of `deps`
-    table<int, dependency*> whenAll("whenAll");
+    table<dependency*, dependency*> sameSCC("sameSCC");
+    table<dependency*, scc_t> sccMap("sccMap");
+    table<lattice::lmax<int>, dependency*> whenAll("whenAll");
 
     table<int, size_t, bool, const Rule*> when("when"); // time, minSCC representitive, rule
-    Var<Rule*> r("rule");
+    Var<Rule*> rp("rulep");
+    Var<Rule> rule("rule");
     Var<Rule::Body*> e("elem");
     Var<dependency*> body("body"), head("head"), d("d");
     Var<bool> is_recursive("is_recursive");
-    Var<int> s("s"), t("t");
-    Var<size_t> maxSCC("maxSCC");
+    LVar<lattice::lmax<int>> s("s"), t("t");
+    Var<int> time("time");
+    Var<int> scc("scc");
+    LVar<scc_t> maxSCC("maxSCC");
 
     deps(body, head, e)  << Elem(e)
       & body == $_(get_dep(e))
@@ -387,24 +360,28 @@ void Query::stratify()
     reach(body, head) << deps(body, head, ignore);
     reach(body, head) << reach(body, d) & deps(d, head, ignore);
 
-    // Kludge due to current lack of max-semilattice aggregation
     // Possible enhancement for SCC once we get WCOJ:
     // https://www3.cs.stonybrook.edu/~warren/xsbbook/node18.html
-    $_(sccMap->unify(head, body)) << reach(head, body) & reach(body, head);
+    sameSCC(head, body) << reach(head, body) & reach(body, head);
 
-    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & $_(sccMap->same(head, body)) & $_((*e)->meta.has_flags(Rule::FLAG_NEGATIVE));
+    $_(throw compile_error("Cannot stratify negative cycle")) << deps(head, body, e) & sameSCC(head, body) & $_((*e)->meta.has_flags(Rule::FLAG_NEGATIVE));
+
+    sccMap(head, scc) << (tie(scc, rule) == enumerate($_(rules))) & head == $_(get_dep(rule->head));
+    sccMap(head, maxSCC) << sameSCC(head, body) & sccMap(body, maxSCC);
 
     // Topological sorting in datalog,
     // from https://lmeyerov.blogspot.com/2011/04/topological-sort-in-datalog.html
     whenAll(0, d) << Elem(e) & d == $_(get_dep(e)) & !deps(ignore, d, ignore);
-    whenAll(t, head) << whenAll(s, body) & reach(body, head) & t == $_(s + !sccMap->same(head, body));
+    whenAll(t, head) << whenAll(t, body) &  sameSCC(head, body);
+    whenAll(t, head) << whenAll(s, body) & reach(body, head) & !sameSCC(head, body) & t == s+1;
 
-    $_((*e)->rule_->recursive.set(((*e)->idx))) << deps(body, head, e) & $_(sccMap->same(body, head));
-    when(s, maxSCC, is_recursive, r) << whenAll(s, head) & t == $_(s+1) & !whenAll(t, head)
+    $_((*e)->rule_->recursive.set(((*e)->idx))) << deps(body, head, e) & sameSCC(body, head);
+    when(time, scc, is_recursive, rp) << whenAll(t, head) & time == $_(t.reveal())
       & deps(d, head, e)
-      & maxSCC == $_(sccMap->get(head))
-      & r == $_((*e)->rule_)
-      & is_recursive == $_((*r)->recursive.any()); // Sort non-recursive before recursive
+      & sccMap(head, maxSCC)
+      & scc == $_(maxSCC.reveal())
+      & rp == $_((*e)->rule_)
+      & is_recursive == $_((*rp)->recursive.any()); // Sort non-recursive before recursive
 
     // // TODO: mutable lambda directly in query?
     // $_(times.emplace_back(*t, *maxSCC, r.get(), *is_recursive), &times) << when(t, maxSCC, is_recursive, r);
@@ -414,9 +391,13 @@ void Query::stratify()
 
         2, // reach
 
-        2, // negative stratification condition, sccMap
+        1, // sameSCC
 
-        2, // whenAll
+        1, // negative stratification condition
+
+        2, // sccMap
+
+        3, // whenAll
 
         2, // set recursive, when
       });
