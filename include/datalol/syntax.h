@@ -141,7 +141,6 @@ public:
     bool has_flags(elem_flags f) const { return flags & f; }
   };
 
-  class cursor;
   class Elem : public IPrint {
     friend class Query;
   protected:
@@ -172,7 +171,7 @@ public:
   protected:
     using Elem::Elem;
     friend class Query;
-    friend class cursor;
+    friend class Rule;
     undo_pack undo;
     Rule *rule_;
     Elem *next_ = nullptr;
@@ -198,16 +197,6 @@ public:
   using ubody = detail::pool::wrap<Body>;
   using uhead = detail::pool::wrap<Head>;
 
-  class cursor {
-    friend cursor operator<<(uhead&& h, ubody&& b);
-    cursor(uhead&& h, ubody&& b);
-
-    Rule *r;
-  public:
-    cursor& operator&(Rule::ubody&& b);
-    ~cursor();
-  };
-
   size_t size() const noexcept { return last-body; }
   bool operator<(const Rule& o) const { return body < o.body; }
 
@@ -219,7 +208,11 @@ public:
     return os << "Rule(" << r.head << ")";
   }
 
+  Rule& operator&(ubody&& b);
+  friend Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b);
 private:
+  static Rule& create_rule(uhead h, ubody b);
+  void append(ubody b);
   friend class Query;
   friend class Stubs;
   static constexpr size_t MAX_ELEMS = 64;
@@ -230,7 +223,7 @@ private:
   short body = 0, last = 0, seminaive_current = 0;
 };
 
-Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b);
+Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
 class debug_info;
 class Query {
@@ -278,7 +271,6 @@ private:
   detail::pool pool;
 
   friend class Stubs;
-  friend class Rule::cursor;
   friend class Collection;
 
   void verify_neg(const Rule& r, const vars_t& bound, const Rule::Elem& e);
@@ -294,9 +286,6 @@ private:
   void print_rule(std::ostream& os, const Rule&) const;
   void print_stratum(std::ostream& os, const stratum& s) const;
   void print(std::ostream& os) const;
-
-  Rule *start_rule();
-  void end_rule(Rule *r);
 
   struct nothing {
     void externalize() const {}

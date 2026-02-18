@@ -60,32 +60,36 @@ void Rule::elem_meta::negate_vars()
   produce.reset();
 }
 
-Rule::cursor::cursor(uhead&& hh, ubody&& bb)
+Rule& Rule::create_rule(Rule::uhead hh, Rule::ubody bb)
 {
   auto q = Query::current.get();
 
-  r = q->start_rule();
-  r->head = hh.get();
-  q->elems.push_back(bb.get());
-  bb->idx = 0;
+  q->rules.push_back({});
+  Rule& r = q->rules.back();
+  r.head = hh.get();
+  r.last = r.body = q->elems.size();
+  r.append(bb);
+  return r;
 }
 
-Rule::cursor::~cursor()
-{
-  Query::current->end_rule(r);
-}
-
-Rule::cursor operator<<(Rule::uhead&& h, Rule::ubody&& b)
-{
-  return Rule::cursor(std::move(h), std::move(b));
-}
-
-Rule::cursor& Rule::cursor::operator&(Rule::ubody&& b)
+void Rule::append(ubody b)
 {
   auto q = Query::current.get();
 
-  b->idx = q->elems.size() - r->body;
+  assert(q->elems.size() == last);
+  b->idx = last - body;
   q->elems.push_back(b.get());
+  ++last;
+}
+
+Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b)
+{
+  return Rule::create_rule(h, b);
+}
+
+Rule& Rule::operator&(Rule::ubody&& b)
+{
+  append(b);
   return *this;
 }
 
@@ -96,20 +100,6 @@ void Var_::Impl::print_common(std::ostream& os) const
     os << "?" << nvar << "[" << id.type_name() << "]";
   else
     os << "?" << name;
-}
-
-Rule *Query::start_rule()
-{
-  Rule r;
-  r.body = elems.size();
-  rules.push_back(r);
-  return &rules.back();
-}
-
-void Query::end_rule(Rule *r)
-{
-  assert(&rules.back() == r && !r->last);
-  r->last = elems.size();
 }
 
 Query::Query(debug_info *dbg)
