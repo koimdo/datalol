@@ -1,0 +1,177 @@
+#+TITLE: Lolbert Debug Agent Protocol
+#+OPTIONS: toc:2
+
+* Overview
+
+The debugger follows a stop/inspect/resume model analogous to GDB's MI protocol.
+The C++ backend (datalol library) acts as the stub; the Python/Qt frontend (=lolbert.py=)
+acts as the controller.  Communication uses a Unix domain socket whose file descriptor
+is passed to the backend via the =LOLBERT_FD= environment variable.
+
+* Wire Framing
+
+Messages are length-prefixed chunks, similar to GDB's packet framing:
+
+#+begin_example
+  XXXX<data0>YYYY<data1>...0000
+#+end_example
+
+- Each chunk begins with a 4-character ASCII hex length, counting itself (so minimum
+  payload is 0 bytes when chunk length == 4).
+- Chunks are at most 4096 + 4 bytes (4 KiB payload + length prefix).
+- An empty chunk (=0000=) terminates the message.
+- The concatenated payload is a single UTF-8 JSON value.
+
+* Message Format
+
+The protocol is a lightweight JSON-RPC 2.0 subset.
+
+** Request (frontend → backend)
+
+#+begin_src js
+{ "method": "<name>", "params": <array|object>, "id": <int> }
+#+end_src
+
+=params= may be omitted for zero-argument calls.  =id= may be omitted for
+fire-and-forget notifications (the backend never sends requests, only responses
+and notifications).
+
+** Response (backend → frontend)
+
+#+begin_src js
+{ "id": <int>, "result": <value> }
+#+end_src
+
+Errors replace =result= with =error=:
+
+#+begin_src js
+{ "id": <int>, "error": { "code": <int>, "message": "<string>" } }
+#+end_src
+
+** Notification (backend → frontend)
+
+#+begin_src js
+{ "method": "<name>", "params": <value> }
+#+end_src
+
+No =id= field; no response expected.
+
+* Lifecycle
+
+1. Backend sends =hello= notification immediately after connecting.
+2. Frontend opens =MainWindow= and calls =loadQueries= to enumerate all instrumented
+   query sites compiled into the binary.
+3. User arms breakpoints via =set_break=, then issues =resume=.
+4. At each armed probe site the backend sends a =breakpoint= notification and enters
+   a nested event loop; the frontend opens =BreakWindow= and inspects state.
+5. User issues =resume= from the break window; the backend exits the nested loop
+   and execution continues.
+
+* Debug Probe Sites
+
+Each =Query= object contains a =DEBUG_INFO= annotation (stored in the =query_info=
+linker section) and is probed at three points:
+
+| Flag constant    | Bit | Fired at                                   |
+|------------------+-----+--------------------------------------------|
+| =BREAK_CONFIGURE= | 0   | After the rule graph is wired              |
+| =BREAK_FIXPOINT=  | 1   | At the top of every semi-naïve iteration   |
+| =BREAK_END=       | 2   | After all strata reach fixpoint            |
+
+The =flags= field on =debug_info= is a bitmask over these constants.  =tripcount=
+is incremented once per complete =Query::run()= invocation.
+
+* Methods
+
+** =loadQueries= — enumerate instrumented queries
+
+No parameters.  Returns an array of query descriptors:
+
+#+begin_src js
+[
+  { "id": 0,
+    "function": "solve",
+    "file": "src/example.cpp",
+    "line": 42,
+    "flags": 0,
+    "tripcount": 0 }
+]
+#+end_src
+
+=id= is the query's index into the global =all_queries= array (stable for
+the process lifetime).  =flags= and =tripcount= reflect the current
+=debug_info= state.
+
+** COMMENT =set_break= — arm or disarm a probe
+
+#+begin_src js
+{ "method": "set_break",
+  "params": { "qid": <int>, "flags": <int> } }
+#+end_src
+
+Sets =all_queries[qid]->flags= to the supplied bitmask.  Returns the updated descriptor:
+
+#+begin_src js
+{ "qid": <int>, "flags": <int> }
+#+end_src
+
+** =resume= — continue execution
+
+No parameters.  Signals the backend's event loop to exit.  Returns =true=.
+
+At the top-level this resumes program execution; inside a =debug_break= call
+it unblocks the nested loop and returns from the probe site.
+
+** =show_query= — inspect current break state
+
+No parameters; only meaningful while stopped at a breakpoint (i.e. =Query::current=
+is set).  Returns a snapshot of the halted query:
+
+#+begin_src js
+{ "qid": <int>,
+  "db":   { "columns": ["name","internal","type"], "data": [ <relation>… ] },
+  "rules":    [ [<head_elem>, <last_elem>], … ],
+  "elements": [ <element>… ] }
+#+end_src
+
+- =db= — the relations visible to this query at the moment of the break; each
+  entry is the JSON serialisation produced by =Collection::to_json()=.
+- =rules= — one pair per rule: =[head, last]= where each entry is an element
+  descriptor (see below).
+- =elements= — all body elements for the current query, serialised via
+  =Element::to_json()=.
+
+** =get_table= — fetch relation contents
+
+#+begin_src js
+{ "method": "get_table", "params": [<table_index>] }
+#+end_src
+
+Returns the contents of =Query::current->db[table_index]= via
+=Collection::get_contents()=.  The shape of the result is collection-specific
+(tuples for ordinary relations, lattice values for lattice collections).
+
+** =help= — list available methods
+
+No parameters.  Returns the array of method name strings.
+
+* Notifications
+
+** =hello=
+
+Sent once by the backend on startup:
+
+#+begin_src js
+{ "method": "hello", "params": {} }
+#+end_src
+
+** =breakpoint=
+
+Sent when execution halts at an armed probe:
+
+#+begin_src js
+{ "method": "breakpoint", "params": { "qid": <int>, "pos": <int> } }
+#+end_src
+
+=pos= is the single flag bit that triggered the break (one of the =BREAK_*=
+constants), not the full mask.
