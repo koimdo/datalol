@@ -27,7 +27,7 @@ Json::Value IPrint::to_json() const {
 
 bool type_id_t::operator==(type_id_t o) const { return type == o.type; }
 bool type_id_t::operator!=(type_id_t o) const { return type != o.type; }
-bool type_id_t::operator<(type_id_t o) const { return type < o.type < 0; }
+bool type_id_t::operator<(type_id_t o) const { return type < o.type; }
 
 
 type_id_t::type_id_t(const char *type)

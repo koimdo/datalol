@@ -14,8 +14,11 @@
 #include "datalol/syntax.h"
 #include "datalol/relation.h" // for detail::span
 
-extern struct debug_info  *__start_query_info;
-extern struct debug_info  *__stop_query_info;
+extern struct ::datalol::detail::debug_info  *__start_query_info;
+extern struct ::datalol::detail::debug_info  *__stop_query_info;
+
+namespace datalol {
+namespace detail {
 
 datalol::detail::span<debug_info*> all_queries = {&__start_query_info,  &__stop_query_info};
 
@@ -310,6 +313,5 @@ void debug_break(const debug_info *dbg, debug_flags pos)
 }
 
 }
-
 }
 
