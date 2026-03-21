@@ -6,6 +6,7 @@
 #include "lattice.h"
 #include "itertools.h"
 #include "debug.h"
+#include "json.h"
 
 #include <cstddef>
 #include <type_traits>
@@ -117,13 +118,6 @@ struct Matcher : public Rule::Body {
     }
   }
 };
-
-// FIXME: use the real machinery in json.h once ready
-template<typename Coll>
-Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>& columns = {})
-{
-  return Json::Value();
-}
 
 template<typename Coll>
 struct external_ : public Collection, iterable<typename remove_cvref<Coll>::type::value_type> {

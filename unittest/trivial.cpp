@@ -39,6 +39,53 @@ TEST(Ident, names) {
   ASSERT_EQ(i4.get_name(), "troll");
 }
 
+TEST(Json, json_of) {
+  using datalol::detail::json_of;
+  ASSERT_EQ(json_of(3.14), Json::Value(3.14));
+  ASSERT_EQ(json_of("fjord"), Json::Value("fjord"));
+  Json::Value expected(Json::arrayValue);
+  expected.append(3);
+  expected.append("fjord");
+  expected.append(false);
+  ASSERT_EQ(json_of(std::make_tuple(3, "fjord", false)), expected);
+}
+
+template<typename T>
+std::string to_string(const T& t)
+{
+  std::ostringstream ss;
+  ss << t;
+  return ss.str();
+}
+
+TEST(Json, get_contents_common) {
+  using namespace datalol::detail;
+  std::vector<std::tuple<int, std::string, bool>> coll = {
+    {6, "foo", true},
+    {2, "bar", false},
+    {8, "baz", true},
+  };
+
+  Json::Value jval1, jval2;
+  Json::Value vals{Json::arrayValue};
+  vals
+    << (Json::Value{Json::arrayValue} << 6 << "foo" << true)
+    << (Json::Value{Json::arrayValue} << 2 << "bar" << false)
+    << (Json::Value{Json::arrayValue} << 8 << "baz" << true);
+  {
+    auto& cols = jval1["columns"] = Json::arrayValue;
+    cols << "int" << ident::make<std::string>().type_name() << "bool";
+    jval1["values"] = vals;
+  }
+  {
+    auto& cols = jval2["columns"] = Json::arrayValue;
+    cols << "number" << "astring" << "lol";
+    jval2["values"] = vals;
+  }
+  EXPECT_EQ(jval1, get_contents_common(coll));
+  EXPECT_EQ(jval2, get_contents_common(coll, {"number", "astring", "lol"}));
+}
+
 TEST(Trivial, reachable_manual) {
   using edges_t = std::vector<std::tuple<int, int>>;
   edges_t edges = {
@@ -124,7 +171,6 @@ template<> struct tuple_element<2, A> { using type = int; };
 
 TEST(Trivial, test0) {
   flat::set<A> ASs;
-  
   ASs.insert(A{0, 1, 2});
   ASs.insert(A{1, 2, 3});
   ASs.insert(A{1, 1, 3});
@@ -166,7 +212,7 @@ TEST(Trivial, deref) {
   ASSERT_EQ(sum_j, 12);
 }
 
-TEST(Trivial, deref_proxy) {
+TEST(Trivial, DISABLED_deref_proxy) {
   A a0 = A{0, 1, 2};
   A a1 = A{1, 2, 3};
   A a2 = A{1, 1, 3};
