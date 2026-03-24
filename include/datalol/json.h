@@ -21,7 +21,7 @@ BASIC_TYPE(Json::Int)
 BASIC_TYPE(Json::UInt)
 BASIC_TYPE(Json::Int64)
 BASIC_TYPE(Json::UInt64)
-BASIC_TYPE(double);
+BASIC_TYPE(double)
 BASIC_TYPE(const char *)
 BASIC_TYPE(const Json::String&)
 BASIC_TYPE(bool)
@@ -102,7 +102,7 @@ Json::Value get_contents_common(const Coll& coll,
   Json::Value res;
   std::vector<std::string> columns;
   if (column_names.empty()) {
-    columns = type_name<typename Coll::value_type>{}.get();
+    columns = type_name<std::remove_cv_t<typename Coll::value_type>>{}.get();
     column_names = {columns.data(), columns.size()};
   }
   Json::Value& jcolumns = (res["columns"] = Json::arrayValue);

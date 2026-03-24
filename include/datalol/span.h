@@ -10,6 +10,7 @@ namespace detail {
 template<typename T>
 struct span {
   using byte_ptr = typename std::conditional<std::is_const<T>::value, const char*, char*>::type;
+  using value_type = T;
 
   template<typename U>
   struct span_iterator {

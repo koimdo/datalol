@@ -23,7 +23,7 @@ struct debug_info {
   ({                                                                    \
     static struct ::datalol::detail::debug_info dbg                     \
       = { #name, __FILE__, __PRETTY_FUNCTION__, __LINE__ };             \
-    static struct ::datalol::detail::debug_info *here                                      \
+    static struct ::datalol::detail::debug_info *here                   \
       __attribute__((__used__, __section__("query_info")))              \
       = &dbg;                                                           \
     here;                                                               \

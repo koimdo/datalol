@@ -5,6 +5,7 @@
 #include "selector.h"
 #include "lattice.h"
 #include "itertools.h"
+#include "json.h"
 #include "debug.h"
 #include "json.h"
 
@@ -315,7 +316,7 @@ struct table_ : public Collection {
     return Json::Value() << id.get_name() << true << id.type_name();
   }
 
-  Json::Value get_contents() const override final { return detail::get_contents_common(this->stable /* TODO: columns */); }
+  Json::Value get_contents() const override final { return detail::get_contents_common(this->stable.contents()->*&prov_pair_t::first /* TODO: columns */); }
 
   template<typename S>
   void print_(std::ostream& os, const S& s, const char *title) const
