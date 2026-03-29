@@ -17,7 +17,7 @@ struct compile_error : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-fluid_var<Query> Query::current;
+thread_local fluid_var<Query> Query::current;
 
 Json::Value IPrint::to_json() const {
   std::ostringstream os;

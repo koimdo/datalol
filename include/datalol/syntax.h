@@ -245,7 +245,7 @@ public:
     }
   };
 
-  static fluid_var<Query> current;
+  static thread_local fluid_var<Query> current;
 private:
 
   debug_info *dbg;
