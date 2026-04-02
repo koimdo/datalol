@@ -6,6 +6,7 @@ namespace detail {
 template<typename T>
 struct span {
   T *beg_, *end_;
+  constexpr span(): span(nullptr, nullptr) {}
   constexpr span(T *beg, T *end): beg_(beg), end_(end) {}
   constexpr span(T *beg, size_t len): span(beg, beg+len) {}
   const T *begin() const { return beg_; }

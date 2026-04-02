@@ -83,7 +83,8 @@ TEST(Json, get_contents_common) {
     jval2["values"] = vals;
   }
   EXPECT_EQ(jval1, get_contents_common(coll));
-  EXPECT_EQ(jval2, get_contents_common(coll, {"number", "astring", "lol"}));
+  std::string columns[3] = {"number", "astring", "lol"};
+  EXPECT_EQ(jval2, get_contents_common(coll, {columns, 3}));
 }
 
 TEST(Trivial, reachable_manual) {

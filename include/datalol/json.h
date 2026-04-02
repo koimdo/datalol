@@ -1,6 +1,7 @@
 #pragma once
 
 #include <json/json.h>
+#include "span.h"
 
 namespace datalol {
 namespace detail {
@@ -87,22 +88,29 @@ struct type_name<std::tuple<Args...>> {
   }
 };
 
-template<typename Coll>
-Json::Value get_contents_common(const Coll& coll, const std::vector<std::string>& column_names = {})
+struct json_convert {
+  template<typename T>
+  Json::Value operator()(const T& t) const { return json_of(t); }
+};
+
+template<typename Coll, typename F = json_convert>
+Json::Value get_contents_common(const Coll& coll,
+                                span<std::string> column_names = {},
+                                const F& convert = json_convert{})
 {
   Json::Value res;
   Json::Value& values = (res["values"] = Json::arrayValue);
   for (auto const& t : coll)
-    values << json_of(t);
+    values << convert(t);
   std::vector<std::string> columns;
-  if (column_names.empty())
+  if (column_names.empty()) {
     columns = type_name<typename Coll::value_type>{}.get();
-  else {
-    assert(column_names.size() == tuple_size<typename Coll::value_type>::value);
-    columns = column_names;
+    column_names = {columns.data(), columns.size()};
   }
+  assert(column_names.size() == tuple_size<typename Coll::value_type>::value);
+
   Json::Value& jcolumns = (res["columns"] = Json::arrayValue);
-  for (auto const& col : columns)
+  for (auto const& col : column_names)
     jcolumns << col;
   return res;
 }
