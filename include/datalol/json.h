@@ -5,6 +5,12 @@
 namespace datalol {
 namespace detail {
 
+// Utility functions for JsonCpp arrays, in the spirit of Qt's QList:
+Json::Value& operator<<(Json::Value& arr, Json::Value&& item);
+Json::Value& operator<<(Json::Value& arr, const Json::Value& item);
+Json::Value operator<<(Json::Value&& arr, Json::Value&& item);
+Json::Value operator<<(Json::Value&& arr, const Json::Value& item);
+  
 #define BASIC_TYPE(typ)                                                 \
   static inline                                                         \
   Json::Value json_of(typ value) { return Json::Value(value); }

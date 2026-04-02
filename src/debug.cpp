@@ -11,6 +11,7 @@
 #include <cassert>
 #include <unordered_map>
 #include "datalol/debug.h"
+#include "datalol/debug-internal.h"
 #include "datalol/syntax.h"
 #include "datalol/relation.h" // for detail::span
 
@@ -20,15 +21,8 @@ extern struct ::datalol::detail::debug_info  *__stop_query_info;
 namespace datalol {
 namespace detail {
 
-datalol::detail::span<debug_info*> all_queries = {&__start_query_info,  &__stop_query_info};
-
 static
-int get_qid(const debug_info *dbg)
-{
-  auto it = std::find(all_queries.begin(), all_queries.end(), dbg);
-  assert(all_queries.end() != it);
-  return it - &__start_query_info;
-}
+datalol::detail::span<debug_info*> g_all_queries = {&__start_query_info,  &__stop_query_info};
 
 #define DEBUG_ENV_VAR "LOLBERT_FD"
 static
@@ -49,78 +43,67 @@ int get_debug_fd()
   return resfd;
 }
 
-struct JsonPipe {
-  int fd = -1;
+void JsonPipe::wait(short events)
+{
+  struct pollfd pollme;
+  pollme.fd = fd;
+  pollme.events = events;
+  pollme.revents = 0;
+  while (!(pollme.revents & events))
+    poll(&pollme, 1, -1);
+}
 
-  void set(int fd)
-  {
-    this->fd = fd;
+bool JsonPipe::read(Json::Value& v)
+{
+  int len = 0;
+  int pos = 0;
+  std::string readbuf;
+  for (;;) {
+    char hexbuf[5] = {0};
+    wait(POLLIN);
+    int res = ::read(fd, hexbuf, 4);
+    if (res <= 0)
+      return false;           // TODO: error handling?
+    char *end;
+    len = strtol(hexbuf, &end, 16);
+    if (*end)
+      return false;
+    if (!len)                 // flush packet
+      break;
+    assert(len > 4);
+    len -= 4;
+    readbuf.append(len, '\0');
+    res = ::read(fd, const_cast<char*>(readbuf.data() + pos), len);
+    if (res < 0)
+      return false;
   }
 
-  void wait(short events)
-  {
-    struct pollfd pollme;
-    pollme.fd = fd;
-    pollme.events = events;
-    pollme.revents = 0;
-    while (!(pollme.revents & events))
-      poll(&pollme, 1, -1);
-  }
+  std::istringstream sin(readbuf);
+  sin >> v;
+  return true;
+}
 
-  // TODO: replace read() and write() with poll-based nonblocking
-  // streambuf and let the json decoder do the chunking?
-  bool read(Json::Value& v)
+void JsonPipe::write(const Json::Value& val)
+{
+  std::string writebuf;
   {
-    int len = 0;
-    int pos = 0;
-    std::string readbuf;
-    for (;;) {
-      char hexbuf[5] = {0};
-      wait(POLLIN);
-      int res = ::read(fd, hexbuf, 4);
-      if (res <= 0)
-        return false;           // TODO: error handling?
-      char *end;
-      len = strtol(hexbuf, &end, 16);
-      if (*end)
-        return false;
-      if (!len)                 // flush packet
-        break;
-      assert(len > 4);
-      len -= 4;
-      readbuf.append(len, '\0');
-      res = ::read(fd, const_cast<char*>(readbuf.data() + pos), len);
-      if (res < 0)
-        return false;
-    }
-
-    std::istringstream sin(readbuf);
-    sin >> v;
-    return true;
+    std::ostringstream sout;
+    sout << val;
+    writebuf = sout.str();
   }
-
-  void write(const Json::Value& val)
-  {
-    std::string writebuf;
-    {
-      std::ostringstream sout;
-      sout << val;
-      writebuf = sout.str();
-    }
-    const char *pos = writebuf.data();
-    const char *end = writebuf.data() + writebuf.size();
-    while (pos < end) {
-      int len = std::min(4096L, end-pos);
-      char hexbuf[5] = {0};
-      snprintf(hexbuf, 5, "%04x", len+4);
-      // TODO: error/signal handling
-      struct iovec iovecs[] = { {hexbuf, 4}, {const_cast<char*>(pos), (size_t)len}};
-      ::writev(fd, iovecs, 2);
-      pos += len;
-    }
-    ::write(fd, "0000", 4);     // flush packet
+  const char *pos = writebuf.data();
+  const char *end = writebuf.data() + writebuf.size();
+  while (pos < end) {
+    int len = std::min(4096L, end-pos);
+    char hexbuf[5] = {0};
+    snprintf(hexbuf, 5, "%04x", len+4);
+    // TODO: error/signal handling
+    struct iovec iovecs[] = { {hexbuf, 4}, {const_cast<char*>(pos), (size_t)len}};
+    ::writev(fd, iovecs, 2);
+    pos += len;
   }
-};
+  ::write(fd, "0000", 4);     // flush packet
+}
 
 using JVal = Json::Value;
 
@@ -146,14 +129,14 @@ Json::Value operator<<(Json::Value&& arr, const Json::Value& item)
   return std::move(arr) << Json::Value(item);
 }
 
-struct Stubs {
-  JsonPipe pipe;
+int Stubs::get_qid(const debug_info *dbg) const
+{
+  auto it = std::find(all_queries.begin(), all_queries.end(), dbg);
+  assert(all_queries.end() != it);
+  return it - &__start_query_info;
+}
 
-  using action_t = Json::Value (Stubs::*)(const Json::Value&);
-  std::unordered_map<std::string, action_t> methods;
-
-  static
-  JVal getQuery_(const debug_info& d)
+JVal Stubs::getQuery_(const debug_info& d) const
   {
     Json::Value query;
     query["id"] = get_qid(&d);
@@ -165,7 +148,7 @@ struct Stubs {
     return query;
   }
 
-  JVal loadQueries(const JVal&)
+  JVal Stubs::loadQueries(const JVal&)
   {
     Json::Value all;
     for (auto const& d : all_queries) {
@@ -174,12 +157,12 @@ struct Stubs {
     return all;
   }
 
-  JVal loadSingle(const JVal& id)
+  JVal Stubs::loadSingle(const JVal& id)
   {
     return getQuery_(*all_queries[id[0].asInt()]);
   }
 
-  JVal listMethods(const JVal&)
+  JVal Stubs::listMethods(const JVal&)
   {
     Json::Value all;
     for (auto const& kv : methods)
@@ -187,12 +170,12 @@ struct Stubs {
     return all;
   }
 
-  JVal resume(const JVal&) {
+  JVal Stubs::resume(const JVal&) {
     exit_();
     return true;
   }
 
-  JVal set_break(const JVal& v)
+  JVal Stubs::set_break(const JVal& v)
   {
     int id = v["qid"].asInt();
     int flags = v["flags"].asInt();
@@ -202,7 +185,7 @@ struct Stubs {
     return res;
   }
 
-  JVal show_query(const JVal&)
+  JVal Stubs::show_query(const JVal&)
   {
     auto q = Query::current.get();
     Json::Value res;
@@ -231,19 +214,20 @@ struct Stubs {
     return res;
   }
 
-  JVal get_table(const JVal& v)
+  JVal Stubs::get_table(const JVal& v)
   {
     auto coll = Query::current->db.at(v[0].asInt());
     return coll->get_contents();
   }
 
-  void add_method(const char * name, action_t act)
+  void Stubs::add_method(const char * name, action_t act)
   {
     methods.emplace(name, std::move(act));
   }
-  Stubs() {
-    int fd = get_debug_fd();
-    int nstubs = 0;
+
+  Stubs::Stubs(int fd, span<debug_info*> all_queries)
+    : all_queries(all_queries)
+  {
     if (fd < 0)
       return;
     
@@ -259,10 +243,14 @@ struct Stubs {
     notify("hello", JVal());
     mainloop();
   }
+  
+  Stubs::Stubs()
+    : Stubs(get_debug_fd(), g_all_queries)
+  {
+  }
 
-  bool exit_mainloop_;
-  void exit_() { exit_mainloop_ = true; }
-  void notify(std::string&& method, Json::Value&& value)
+  void Stubs::exit_() { exit_mainloop_ = true; }
+  void Stubs::notify(std::string&& method, Json::Value&& value)
   {
     JVal message;
     message["method"] = std::move(method);
@@ -270,7 +258,8 @@ struct Stubs {
     pipe.write(message);
   }
 
-  void mainloop() {
+  
+  void Stubs::mainloop() {
     for (exit_mainloop_ = false; !exit_mainloop_; ) {
       Json::Value v;
       if (!pipe.read(v))
@@ -299,14 +288,14 @@ struct Stubs {
         pipe.write(response);
     }
   }
-};
 
+// FIXME: fluid?
 static Stubs stubs{};
 
 void debug_break(const debug_info *dbg, debug_flags pos)
 {
   JVal brk;
-  brk["qid"] = get_qid(dbg);
+  brk["qid"] = stubs.get_qid(dbg);
   brk["pos"] = pos;
   stubs.notify("breakpoint", std::move(brk));
   stubs.mainloop();
