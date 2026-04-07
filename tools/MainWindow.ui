@@ -33,7 +33,7 @@
          </widget>
         </item>
         <item>
-         <widget class="QListView" name="itemview">
+         <widget class="QTableView" name="itemview">
           <property name="contextMenuPolicy">
            <enum>Qt::ActionsContextMenu</enum>
           </property>

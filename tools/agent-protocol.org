@@ -85,22 +85,23 @@ is incremented once per complete =Query::run()= invocation.
 
 ** =loadQueries= — enumerate instrumented queries
 
-No parameters.  Returns an array of query descriptors:
+No parameters.  Returns a tabular object with =columns= and =data= arrays
+(the same shape used by =show_query='s =db= field):
 
 #+begin_src js
-[
-  { "id": 0,
-    "function": "solve",
-    "file": "src/example.cpp",
-    "line": 42,
-    "flags": 0,
-    "tripcount": 0 }
-]
+{ "columns": ["id", "function", "file", "line", "flags", "tripcount"],
+  "data": [
+    [0, "solve", "src/example.cpp", 42, 0, 0],
+    …
+  ]
+}
 #+end_src
 
-=id= is the query's index into the global =all_queries= array (stable for
-the process lifetime).  =flags= and =tripcount= reflect the current
-=debug_info= state.
+Each row corresponds to one instrumented query site, in the order they
+appear in the =query_info= linker section.  =id= is the row's index into
+the global =all_queries= array (stable for the process lifetime).  =flags=
+and =tripcount= reflect the current =debug_info= state at the time of the
+call.
 
 ** COMMENT =set_break= — arm or disarm a probe
 

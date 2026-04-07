@@ -5,6 +5,7 @@ import json
 import argparse
 import sys
 import os
+import collections
 import pandas
 
 from PyQt5 import QtCore, uic
@@ -12,7 +13,7 @@ from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow,
     QLabel, QMenu, QToolBar, QAction, QStatusBar, QMessageBox,
-    QPushButton, QListView, QLineEdit,
+    QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QAbstractItemView,
     QPlainTextEdit, QSplitter
 )
@@ -129,39 +130,10 @@ class Client:
     def help(self):
         print(self._call('help'))
 
-class Query:
-    def __init__(self, file, id, function, line, flags, tripcount):
-        self.file = file
-        self.id = id
-        self.function = function
-        self.line = line
-        self.flags = flags
-        self.tripcount = tripcount
-
-class QueriesModel(QtCore.QAbstractListModel):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.items = []
-        self.pause_icon = QIcon.fromTheme('media-playback-pause')
-
-    def populate(self, items):
-        self.items = [Query(**d) for d in items]
-        self.layoutChanged.emit()
-
-    def data(self, index, role):
-        item = self.items[index.row()]
-        if role == Qt.DisplayRole:
-            return "{0.file}:{0.line} {0.function}".format(item)
-        elif role == Qt.DecorationRole:
-            if item.flags:
-                return self.pause_icon
-
-    def rowCount(self, index):
-        return len(self.items)
-
 def setup_filterentry(entry, listview, model):
     filtermodel = QSortFilterProxyModel()
     filtermodel.setSourceModel(model)
+    filtermodel.setFilterKeyColumn(-1)
     entry.textChanged.connect(filtermodel.setFilterFixedString)
     listview.setModel(filtermodel)
     return filtermodel
@@ -178,7 +150,11 @@ class MainWindow(QMainWindow):
 
         loadUi("MainWindow.ui", self)
 
-        self.listmodel = QueriesModel()
+        self.pause_icon = QIcon.fromTheme('media-playback-pause')
+        self.listmodel = PandasModel(pandas.DataFrame(columns=['id', 'function', 'file', 'line', 'flags', 'tripcount']),
+                                     columns=['function', 'file', 'line'],
+                                     decoration=lambda q,col: self.pause_icon if q.flags and col == 0 else None,
+                                     name='Query')
         self.filtermodel = setup_filterentry(self.entry, self.itemview, self.listmodel)
         self.client.request('loadQueries', response=self.listmodel.populate)
         self.itemview.doubleClicked.connect(self.show_query)
@@ -204,7 +180,7 @@ class MainWindow(QMainWindow):
             assert(len(new) == 1)
             idx = new.indexes()[0]
             idx = self.filtermodel.mapToSource(idx)
-            next_query = self.listmodel.items[idx.row()]
+            next_query = self.listmodel.get(idx.row())
 
         if self.current_query is not next_query:
             self.current_query = next_query
@@ -232,7 +208,7 @@ class MainWindow(QMainWindow):
         def flagsChanged(response):
             qid = response['qid']
             self.listmodel.layoutAboutToBeChanged.emit()
-            self.listmodel.items[qid].flags=response['flags']
+            self.listmodel._dataframe.at[qid, 'flags'] = response['flags']
             self.listmodel.layoutChanged.emit()
 
         self.client.request('set_break',
@@ -248,9 +224,24 @@ class MainWindow(QMainWindow):
 class PandasModel(QtCore.QAbstractTableModel):
     """A model to interface a Qt view with pandas dataframe """
 
-    def __init__(self, dataframe: pandas.DataFrame, parent=None):
+    def __init__(self, dataframe: pandas.DataFrame, parent=None, *, name:str, columns=[], decoration=None, vertical=False):
         super().__init__(parent)
         self._dataframe = dataframe
+        assert(all(col in dataframe.columns for col in columns))
+        self._columns = columns if columns else list(dataframe.columns)
+        self.classview = collections.namedtuple(name, dataframe.columns)
+        self.decoration = decoration
+        self.vertical = vertical
+
+    def get(self, row):
+        return self.classview(*self._dataframe.iloc[row])
+
+    def populate(self, result):
+        newframe = pandas.DataFrame(result['data'], columns=result['columns'])
+        assert(self._dataframe.columns.equals(newframe.columns))
+        self._dataframe = pandas.concat([self._dataframe, newframe])
+        if len(newframe):
+            self.layoutChanged.emit()
 
     def rowCount(self, parent=QModelIndex()) -> int:
         """ Override method from QAbstractTableModel
@@ -268,7 +259,7 @@ class PandasModel(QtCore.QAbstractTableModel):
         Return column count of the pandas DataFrame
         """
         if parent == QModelIndex():
-            return len(self._dataframe.columns)
+            return len(self._columns)
         return 0
 
     def data(self, index: QModelIndex, role=Qt.ItemDataRole):
@@ -279,8 +270,12 @@ class PandasModel(QtCore.QAbstractTableModel):
         if not index.isValid():
             return None
 
+        col = self._columns[index.column()]
         if role == Qt.DisplayRole:
-            return str(self._dataframe.iloc[index.row(), index.column()])
+            return str(self._dataframe[col].iloc[index.row()])
+
+        elif role == Qt.DecorationRole and self.decoration is not None:
+            return self.decoration(self.get(index.row()), index.column())
 
         return None
 
@@ -293,9 +288,9 @@ class PandasModel(QtCore.QAbstractTableModel):
         """
         if role == Qt.DisplayRole:
             if orientation == Qt.Horizontal:
-                return str(self._dataframe.columns[section])
+                return str(self._columns[section])
 
-            if orientation == Qt.Vertical:
+            elif orientation == Qt.Vertical and self.vertical:
                 return str(self._dataframe.index[section])
 
         return None
@@ -313,7 +308,7 @@ class BreakWindow(QMainWindow):
         print("Break query:", self.query)
 
         tables = pandas.DataFrame(**q['db'])
-        self.dbmodel = PandasModel(tables)
+        self.dbmodel = PandasModel(tables, name='Table')
         self.filtermodel = setup_filterentry(self.entry, self.itemview, self.dbmodel)
         # for rel in sorted(tables['name']):
         #     self.client.request('get_table', rel, response=self.add_table)

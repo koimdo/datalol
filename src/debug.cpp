@@ -136,30 +136,17 @@ int Stubs::get_qid(const debug_info *dbg) const
   return it - &__start_query_info;
 }
 
-JVal Stubs::getQuery_(const debug_info& d) const
-  {
-    Json::Value query;
-    query["id"] = get_qid(&d);
-    query["function"] = d.function;
-    query["file"] = d.file;
-    query["line"] = d.line;
-    query["flags"] = d.flags;
-    query["tripcount"] = d.flags;
-    return query;
-  }
-
   JVal Stubs::loadQueries(const JVal&)
   {
-    Json::Value all;
+    Json::Value all(Json::objectValue);
+    all["columns"] = JVal() << "id" << "function" << "file" << "line" << "flags" << "tripcount";
+    Json::Value data(Json::arrayValue);
+    int id = 0;
     for (auto const& d : all_queries) {
-      all << getQuery_(*d);
+      data << (JVal() << id++ << d->function << d->file << d->line << d->flags << d->tripcount);
     }
+    all["data"] = std::move(data);
     return all;
-  }
-
-  JVal Stubs::loadSingle(const JVal& id)
-  {
-    return getQuery_(*all_queries[id[0].asInt()]);
   }
 
   JVal Stubs::listMethods(const JVal&)
