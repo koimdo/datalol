@@ -13,6 +13,7 @@
 #include "datalol/debug.h"
 #include "datalol/debug-internal.h"
 #include "datalol/syntax.h"
+#include "datalol/json.h"
 #include "datalol/relation.h" // for detail::span
 
 extern struct ::datalol::detail::debug_info  *__start_query_info;
@@ -143,7 +144,7 @@ int Stubs::get_qid(const debug_info *dbg) const
     Json::Value data(Json::arrayValue);
     int id = 0;
     for (auto const& d : all_queries) {
-      data << (JVal() << id++ << d->function << d->file << d->line << d->flags << d->tripcount);
+      data << (JVal() << id++ << d->name << d->file << d->line << d->flags << d->tripcount);
     }
     all["data"] = std::move(data);
     return all;
@@ -180,11 +181,8 @@ int Stubs::get_qid(const debug_info *dbg) const
     {
       JVal db(Json::objectValue);
       JVal data(Json::arrayValue);
-      db["columns"] = JVal() << "name" << "internal" << "type";
-      for (auto const& coll: q->db)
-        data << coll->to_json();
-      db["data"] = std::move(data);
-      res["db"] = std::move(db);
+      std::string columns[] = {"name", "internal", "type"};
+      res["db"] = get_contents_common(q->db, columns, [](auto coll) { return coll->to_json(); });
     }
     {
       Json::Value rules(Json::arrayValue);

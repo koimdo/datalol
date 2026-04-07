@@ -13,7 +13,7 @@ from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow,
     QLabel, QMenu, QToolBar, QAction, QStatusBar, QMessageBox,
-    QPushButton, QLineEdit,
+    QPushButton, QTableView, QLineEdit,
     QVBoxLayout, QHBoxLayout, QAbstractItemView,
     QPlainTextEdit, QSplitter
 )
@@ -219,17 +219,29 @@ class MainWindow(QMainWindow):
     def quit_app(self):
         QApplication.exit(0)
 
+def read_dataframe(js_reply):
+    count = collections.Counter()
+    columns = []
+    for c in js_reply['columns']:
+        if c in count:
+            columns.append("{}.{}".format(c, count[c]))
+        else:
+            columns.append(c)
+        count.update([c])
+    return pandas.DataFrame(columns=columns, data=js_reply['data'])
+
 # Taken from QT's example code in:
 # https://doc.qt.io/qtforpython-6/examples/example_external_pandas.html
 class PandasModel(QtCore.QAbstractTableModel):
     """A model to interface a Qt view with pandas dataframe """
 
-    def __init__(self, dataframe: pandas.DataFrame, parent=None, *, name:str, columns=[], decoration=None, vertical=False):
+    def __init__(self, dataframe: pandas.DataFrame, parent=None, *, name:str, columns=[], decoration=None, vertical=False, allow_get=False):
         super().__init__(parent)
         self._dataframe = dataframe
         assert(all(col in dataframe.columns for col in columns))
         self._columns = columns if columns else list(dataframe.columns)
-        self.classview = collections.namedtuple(name, dataframe.columns)
+        if decoration is not None or allow_get:
+            self.classview = collections.namedtuple(name, dataframe.columns)
         self.decoration = decoration
         self.vertical = vertical
 
@@ -237,7 +249,7 @@ class PandasModel(QtCore.QAbstractTableModel):
         return self.classview(*self._dataframe.iloc[row])
 
     def populate(self, result):
-        newframe = pandas.DataFrame(result['data'], columns=result['columns'])
+        newframe = read_dataframe(result)
         assert(self._dataframe.columns.equals(newframe.columns))
         self._dataframe = pandas.concat([self._dataframe, newframe])
         if len(newframe):
@@ -301,20 +313,41 @@ class BreakWindow(QMainWindow):
         self.client = client
         loadUi("BreakWindow.ui", self)
 
+        self._open_tabs = {}
+        self.tabWidget.clear()
+        self.tabWidget.tabCloseRequested.connect(self._close_tab)
         self.client.request('show_query', response=self.set_query)
 
     def set_query(self, q):
-        self.query = q          # TODO: graph model?
-        print("Break query:", self.query)
-
-        tables = pandas.DataFrame(**q['db'])
-        self.dbmodel = PandasModel(tables, name='Table')
+        self.query = q
+        tables = read_dataframe(q['db'])
+        self.dbmodel = PandasModel(tables, name='Table', allow_get=True)
         self.filtermodel = setup_filterentry(self.entry, self.itemview, self.dbmodel)
-        # for rel in sorted(tables['name']):
-        #     self.client.request('get_table', rel, response=self.add_table)
+        self.itemview.doubleClicked.connect(self._on_table_double_clicked)
 
-    def add_table(self, response):
-        pass
+    def _on_table_double_clicked(self, index):
+        src_index = self.filtermodel.mapToSource(index)
+        name = self.dbmodel.get(src_index.row()).name
+        if name in self._open_tabs:
+            self.tabWidget.setCurrentWidget(self._open_tabs[name])
+        else:
+            self.client.request('get_table', src_index.row(), response=lambda result: self.add_table(name, result))
+
+    def add_table(self, name, result):
+        df = read_dataframe(result)
+        model = PandasModel(df, name=name, vertical=True)
+        view = QTableView()
+        view.setModel(model)
+        self._open_tabs[name] = view
+        self.tabWidget.addTab(view, name)
+        self.tabWidget.setCurrentWidget(view)
+
+    def _close_tab(self, index):
+        widget = self.tabWidget.widget(index)
+        name = next((k for k, v in self._open_tabs.items() if v is widget), None)
+        if name:
+            del self._open_tabs[name]
+        self.tabWidget.removeTab(index)
 
 def sigint_handler(*args):
     QApplication.quit()

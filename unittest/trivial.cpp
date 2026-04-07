@@ -75,16 +75,16 @@ TEST(Json, get_contents_common) {
   {
     auto& cols = jval1["columns"] = Json::arrayValue;
     cols << "int" << ident::make<std::string>().type_name() << "bool";
-    jval1["values"] = vals;
+    jval1["data"] = vals;
   }
   {
     auto& cols = jval2["columns"] = Json::arrayValue;
     cols << "number" << "astring" << "lol";
-    jval2["values"] = vals;
+    jval2["data"] = vals;
   }
   EXPECT_EQ(jval1, get_contents_common(coll));
-  std::string columns[3] = {"number", "astring", "lol"};
-  EXPECT_EQ(jval2, get_contents_common(coll, {columns, 3}));
+  std::string columns[] = {"number", "astring", "lol"};
+  EXPECT_EQ(jval2, get_contents_common(coll, columns));
 }
 
 TEST(Trivial, reachable_manual) {

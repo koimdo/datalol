@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 #include "span.h"
+#include "tuple_util.h"
 
 namespace datalol {
 namespace detail {
@@ -99,19 +100,22 @@ Json::Value get_contents_common(const Coll& coll,
                                 const F& convert = json_convert{})
 {
   Json::Value res;
-  Json::Value& values = (res["values"] = Json::arrayValue);
-  for (auto const& t : coll)
-    values << convert(t);
   std::vector<std::string> columns;
   if (column_names.empty()) {
     columns = type_name<typename Coll::value_type>{}.get();
     column_names = {columns.data(), columns.size()};
   }
-  assert(column_names.size() == tuple_size<typename Coll::value_type>::value);
-
   Json::Value& jcolumns = (res["columns"] = Json::arrayValue);
   for (auto const& col : column_names)
     jcolumns << col;
+
+  Json::Value& values = (res["data"] = Json::arrayValue);
+  for (auto const& t : coll) {
+    auto row = convert(t);
+    assert(column_names.size() == row.size());
+    values << std::move(row);
+  }
+
   return res;
 }
 
