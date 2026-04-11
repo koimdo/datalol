@@ -39,6 +39,20 @@ TEST(Ident, names) {
   ASSERT_EQ(i4.get_name(), "troll");
 }
 
+TEST(Span, subs) {
+  using datalol::detail::span;
+  A whatever[] = {{1, 2}, {2, 3}, {3, 4}};
+  span<A> spanA{whatever};
+
+  ASSERT_EQ(spanA.size(), 3);
+  ASSERT_EQ(spanA[1], A(2, 3));
+
+  auto span_k = spanA->*&A::k;
+  ASSERT_EQ(span_k.size(), 3);
+  ASSERT_EQ(span_k[0], 2);
+  ASSERT_EQ(span_k[1], 6);
+  ASSERT_EQ(span_k[2], 12);
+}
 TEST(Json, json_of) {
   using datalol::detail::json_of;
   ASSERT_EQ(json_of(3.14), Json::Value(3.14));
@@ -296,7 +310,8 @@ TEST(Trivial, apsp) {
     return Shortest;
   };
 
-  std::vector<std::tuple<int, int, lmin>> expected = {
+  using value_t = std::tuple<int, int, lmin>;
+  std::vector<value_t> expected = {
     {1, 2, 1.0},
     {1, 3, 3.0},
     {1, 4, 7.0},
@@ -315,7 +330,8 @@ TEST(Trivial, apsp) {
     {5, 6, 2.0},
   };
 
-  ASSERT_EQ(answer.data(), expected);
+  std::vector<value_t> contents{answer.begin(), answer.end()};
+  ASSERT_EQ(contents, expected);
 }
 
 TEST(Trivial, lset) {
@@ -355,7 +371,8 @@ TEST(Trivial, lset) {
     return res;
   };
 
-  std::vector<std::tuple<int, size_t, double>> expected = {
+  using value_t = std::tuple<int, size_t, double>;
+  std::vector<value_t> expected = {
     {1, 2, 2.5},
     {2, 1, 2.0},
     {3, 2, 2.0},
@@ -363,7 +380,8 @@ TEST(Trivial, lset) {
     {5, 1, 2.0},
   };
 
-  ASSERT_EQ(answer.data(), expected);
+  std::vector<value_t> contents{answer.begin(), answer.end()};
+  ASSERT_EQ(contents, expected);
 }
 
 TEST(Trivial, iterate) {

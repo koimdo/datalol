@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <utility>
 
 namespace datalol {
 
@@ -228,6 +229,32 @@ template<typename T, typename Compare = std::less<void>>
 struct table_ : public Collection {
   static_assert(!std::is_base_of<Var_, T>::value, "Cannot have var type!");
   using value_type = T;
+  using prov_pair_t = std::pair<T, prov_t>;
+
+  struct pair_compare {
+    Compare base_cmp;
+    pair_compare(const Compare& c = Compare{}) : base_cmp(c) {}
+    bool operator()(const prov_pair_t& l, const prov_pair_t& r) const { return base_cmp(l.first, r.first); }
+    bool operator()(const prov_pair_t& l, const T& r) const { return base_cmp(l.first, r); }
+    bool operator()(const T& l, const prov_pair_t& r) const { return base_cmp(l, r.first); }
+  };
+
+  struct pair_combine {
+    combine_<T> base_comb;
+    pair_combine(const combine_<T>& c = combine_<T>{}) : base_comb(c) {}
+    void operator()(prov_pair_t& out, prov_pair_t&& in) const
+    {
+      // Only combine if the T values are equal (which they should be if we're here)
+      // Keep the earlier provenance (smaller iter or same)
+      if (out.second.iter > in.second.iter)
+        out.second = std::move(in.second);
+      base_comb(out.first, std::move(in.first));
+    }
+    bool monus(prov_pair_t& out, const prov_pair_t& in) const
+    {
+      return base_comb.monus(out.first, in.first);
+    }
+  };
 
   table_(const ident& id, const Compare& cmp = Compare{})
     : Collection(id)
@@ -235,14 +262,24 @@ struct table_ : public Collection {
     , recent(cmp)
   {}
 
-  using relation_t = relation<T, Compare, combine_<T>>;
+  using relation_t = relation<prov_pair_t, pair_compare, pair_combine>;
   relation_t stable;
   relation_t recent;
-  std::vector<T> to_add;
+  std::vector<prov_pair_t> to_add;
+
+  struct external_repr {
+    relation_t rel;
+    size_t size() const { return rel.size(); }
+    span<const T> contents() const noexcept { return rel.contents()->*&prov_pair_t::first; }
+    auto begin() const { return contents().begin(); }
+    auto end() const { return contents().end(); }
+  };
+
+  external_repr externalize() && { return external_repr{std::move(stable)}; }
 
   void insert(T&& t)
   {
-    to_add.push_back(std::move(t));
+    to_add.push_back({std::move(t), Query::current->get_provenance()});
   }
 
   size_t merge(bool recursive) override final
@@ -286,7 +323,7 @@ struct table_ : public Collection {
     auto name = this->id.get_name();
     os << title << " {";
     for (auto const& row : s)
-      os << " " << name << "(" << detail::print_tuple<value_type>(row) << ")";
+      os << " " << name << "(" << detail::print_tuple<value_type>(row.first) << ")";
     os <<" }\n";
   }
 
@@ -327,7 +364,7 @@ struct table_ : public Collection {
 
       stream<T> iterator() const override final
       {
-        span<const relation_t> rels{nullptr, nullptr};
+        span<const relation_t> rels;
         if (this->is_negative())
           rels = {&tab.stable, 1};
         else
@@ -339,25 +376,26 @@ struct table_ : public Collection {
           // This returns both `stable` and `recent`.
             rels = {&tab.stable, 2}; break;
           }
-        return stream<T>([rels]() mutable -> buf_t {
+        return stream<T>([rels]() mutable -> detail::span<const T> {
           while (!rels.empty()) {
-            const relation_t *tab = rels.begin();
+            detail::span<const T> res = rels.front().contents()->*&prov_pair_t::first;
             ++rels;
-            if (tab->data().size())
-              return {tab->data().data(), tab->data().size()};
+            if (!res.empty())
+              return res;
           }
           return {};
         });
       }
       bool contains(const T& t) const override final
       {
+        // For contains(T), check if any pair has a matching T value using the relation's contains with a pair
         if (this->is_negative())
-          return tab.stable.contains(t);
+          return tab.stable.contains(prov_pair_t{t, prov_t{}});
         switch (this->use_delta()) {
-        case Rule::Body::RECENT: return tab.recent.contains(t);
-        case Rule::Body::STABLE: return tab.stable.contains(t);
+        case Rule::Body::RECENT: return tab.recent.contains(prov_pair_t{t, prov_t{}});
+        case Rule::Body::STABLE: return tab.stable.contains(prov_pair_t{t, prov_t{}});
         case Rule::Body::BOTH:
-          return tab.stable.contains(t) || tab.recent.contains(t);
+          return tab.stable.contains(prov_pair_t{t, prov_t{}}) || tab.recent.contains(prov_pair_t{t, prov_t{}});
         }
         assert(false);
       }
@@ -492,7 +530,7 @@ public:
   auto operator()(SelectArgs&&... args) {
     return impl(std::forward<SelectArgs>(args)...);
   }
-  auto externalize() && { return std::move(impl.stable); }
+  auto externalize() && { return std::move(impl).externalize(); }
 };
 
 template<typename T0, typename... Rest>

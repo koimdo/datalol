@@ -134,7 +134,7 @@ int Stubs::get_qid(const debug_info *dbg) const
 {
   auto it = std::find(all_queries.begin(), all_queries.end(), dbg);
   assert(all_queries.end() != it);
-  return it - &__start_query_info;
+  return it - all_queries.begin();
 }
 
   JVal Stubs::loadQueries(const JVal&)

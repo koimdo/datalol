@@ -152,7 +152,7 @@ struct relation {
                  to_add.end());
   }
 
-  const elems_t& data() const noexcept { return elements; }
+  span<const T> contents() const noexcept { return {elements.data(), elements.size()}; }
 };
 
 }

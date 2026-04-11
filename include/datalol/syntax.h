@@ -225,6 +225,11 @@ private:
 
 Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
+struct prov_t {
+  const Rule *rule;
+  int iter;  // 0 = non-fixpoint; 1+ = fixpoint iteration
+};
+
 class debug_info;
 class Query {
 public:
@@ -269,6 +274,8 @@ private:
   void run_rule(Rule& r, int current_delta);
 
   detail::pool pool;
+  const Rule *current_rule = nullptr;
+  int current_iter = 0;  // 0 = not in fixpoint; 1+ = fixpoint iteration
 
   friend class Stubs;
   friend class Collection;
@@ -298,6 +305,8 @@ private:
   auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
 
 public:
+  prov_t get_provenance() const noexcept { return {current_rule, current_iter}; }
+
   template<typename T, typename... Args>
   static
   auto allocate(Args&&... args) { return current->pool.template allocate<T>(std::forward<Args>(args)...); }

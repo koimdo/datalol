@@ -463,6 +463,7 @@ void Query::add_stratum(detail::span<Rule> extent)
 
 void Query::run_rule(Rule& r, int current_delta)
 {
+  current_rule = &r;
   r.seminaive_current = current_delta;
   switch (policy) {
   case execution_policy::NESTED:
@@ -499,7 +500,8 @@ void Query::run()
     }
     // Now, the recursive rules
     size_t changed = 1;
-    for (int iter = 0; changed; iter++) {
+    for (int iter = 1; changed; iter++) {
+      current_iter = iter;
       DEBUG_PROBE(BREAK_FIXPOINT);
       for (auto it = beg; it != end; ++it) {
         Rule& r = *it;
@@ -513,6 +515,7 @@ void Query::run()
       for (auto c : to_merge)
         changed += c->merge(true);
     }
+    current_iter = 0;
   }
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;
