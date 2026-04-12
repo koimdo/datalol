@@ -7,6 +7,7 @@ import sys
 import os
 import collections
 import pandas
+import re
 
 from PyQt5 import QtCore, uic
 from PyQt5.QtCore import QSize, Qt
@@ -18,7 +19,7 @@ from PyQt5.QtWidgets import (
     QPlainTextEdit, QSplitter
 )
 from PyQt5.QtGui import (
-    QIcon, QKeySequence, QTextCursor
+    QIcon, QKeySequence, QTextCursor, QTextCharFormat, QTextBlockFormat, QColor, QFont, QSyntaxHighlighter
 )
 
 from PyQt5.QtCore import QTimer, QProcess, QProcessEnvironment, QSortFilterProxyModel, pyqtSignal, QModelIndex
@@ -130,6 +131,55 @@ class Client:
     def help(self):
         print(self._call('help'))
 
+class CppSyntaxHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super().__init__(document)
+        self.highlighting_rules = []
+
+        # Keywords
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor(0, 0, 128))
+        keyword_format.setFontWeight(QFont.Bold)
+        keywords = [
+            'auto', 'break', 'case', 'char', 'const', 'continue', 'default',
+            'do', 'double', 'else', 'enum', 'extern', 'float', 'for', 'goto',
+            'if', 'int', 'long', 'register', 'return', 'short', 'signed',
+            'sizeof', 'static', 'struct', 'switch', 'typedef', 'union',
+            'unsigned', 'void', 'volatile', 'while', 'class', 'namespace',
+            'template', 'typename', 'using', 'virtual', 'inline', 'constexpr',
+            'const_cast', 'dynamic_cast', 'reinterpret_cast', 'static_cast',
+            'explicit', 'friend', 'mutable', 'new', 'delete', 'operator',
+            'private', 'protected', 'public', 'this', 'throw', 'try', 'catch',
+            'noexcept', 'override', 'final', 'nullptr', 'true', 'false',
+        ]
+        for word in keywords:
+            fmt = QTextCharFormat(keyword_format)
+            self.highlighting_rules.append((re.compile(r'\b' + word + r'\b'), fmt))
+
+        # Strings
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor(128, 0, 0))
+        self.highlighting_rules.append((re.compile(r'"(?:[^"\\]|\\.)*"'), string_format))
+        self.highlighting_rules.append((re.compile(r"'(?:[^'\\]|\\.)*'"), string_format))
+
+        # Comments
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor(0, 128, 0))
+        comment_format.setFontItalic(True)
+        self.highlighting_rules.append((re.compile(r'//[^\n]*'), comment_format))
+        self.highlighting_rules.append((re.compile(r'/\*.*?\*/'), comment_format))
+
+        # Numbers
+        number_format = QTextCharFormat()
+        number_format.setForeground(QColor(128, 128, 0))
+        self.highlighting_rules.append((re.compile(r'\b\d+(\.\d+)?([eE][+-]?\d+)?\b'), number_format))
+
+    def highlightBlock(self, text):
+        for pattern, fmt in self.highlighting_rules:
+            for match in pattern.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), fmt)
+
+
 def setup_filterentry(entry, listview, model):
     filtermodel = QSortFilterProxyModel()
     filtermodel.setSourceModel(model)
@@ -199,9 +249,23 @@ class MainWindow(QMainWindow):
             text = f.read()
         assert(text is not None)
         self.rhs.setPlainText(text)
+
+        # Apply C++ syntax highlighting
+        if not hasattr(self, 'cpp_highlighter'):
+            self.cpp_highlighter = CppSyntaxHighlighter(self.rhs.document())
+
+        # Position cursor at the query line
         cursor = QTextCursor(self.rhs.document().findBlockByLineNumber(query.line))
         self.rhs.setTextCursor(cursor)
-        cursor.select(QTextCursor.LineUnderCursor);
+        cursor.select(QTextCursor.LineUnderCursor)
+
+        # Apply yellow background to the query line using block format
+        query_block = self.rhs.document().findBlockByLineNumber(query.line)
+        if query_block.isValid():
+            block_fmt = QTextBlockFormat()
+            block_fmt.setBackground(QColor(255, 255, 0))
+            block_cursor = QTextCursor(query_block)
+            block_cursor.setBlockFormat(block_fmt)
 
     def set_breakpoint(self, break_here):
         query = self.current_query
@@ -324,6 +388,8 @@ class BreakWindow(QMainWindow):
         self.dbmodel = PandasModel(tables, name='Table', allow_get=True)
         self.filtermodel = setup_filterentry(self.entry, self.itemview, self.dbmodel)
         self.itemview.doubleClicked.connect(self._on_table_double_clicked)
+
+        self.splitter.setSizes([self.itemview.sizeHint().width(), self.width()])
 
     def _on_table_double_clicked(self, index):
         src_index = self.filtermodel.mapToSource(index)
