@@ -148,6 +148,21 @@ struct external_ : public Collection, iterable<typename remove_cvref<Coll>::type
 
   bool contains(const value_type& t) const override final { return do_contains(coll, t); }
 
+  // Collection::find_tuple (type-erased)
+  std::pair<const void*, detail::prov_t> find_needle(const void *p) const override final
+  {
+    for (auto it = iterator(); it; ++it) {
+      const value_type* elem = std::addressof(*it);
+      auto* ptr = reinterpret_cast<const char*>(p);
+      auto* begin = reinterpret_cast<const char*>(elem);
+      auto* end = begin + sizeof(value_type);
+      if (ptr >= begin && ptr < end) {
+        return {elem, detail::prov_t{}};
+      }
+    }
+    return {nullptr, detail::prov_t{}};
+  }
+
   template<typename Sel>
   struct susp {
     external_& rel;
@@ -246,8 +261,8 @@ struct table_ : public Collection {
     void operator()(prov_pair_t& out, prov_pair_t&& in) const
     {
       // Only combine if the T values are equal (which they should be if we're here)
-      // Keep the earlier provenance (smaller iter or same)
-      if (out.second.iter > in.second.iter)
+      // Keep the shorter proof tree (smaller height)
+      if (out.second.height > in.second.height)
         out.second = std::move(in.second);
       base_comb(out.first, std::move(in.first));
     }
@@ -317,6 +332,15 @@ struct table_ : public Collection {
   }
 
   Json::Value get_contents() const override final { return detail::get_contents_common(this->stable.contents()->*&prov_pair_t::first /* TODO: columns */); }
+
+  // Collection::find_tuple (type-erased): search stable then recent
+  std::pair<const void*, detail::prov_t> find_needle(const void *p) const override final
+  {
+    if (const prov_pair_t* pair = stable.find_needle(p)) {
+        return {&pair->first, pair->second};
+    }
+    return {nullptr, detail::prov_t{}};
+  }
 
   template<typename S>
   void print_(std::ostream& os, const S& s, const char *title) const

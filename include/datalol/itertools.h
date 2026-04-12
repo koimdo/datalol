@@ -2,6 +2,7 @@
 
 #include "type_traits.h"
 #include "span.h"
+#include "syntax.h"
 
 namespace datalol {
 

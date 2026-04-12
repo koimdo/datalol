@@ -476,6 +476,14 @@ void Query::run_rule(Rule& r, int current_delta)
 void Query::explain(const std::string& coll, const void *target)
 {
 
+
+}
+
+prov_t Query::get_provenance() const
+{
+  int height = -1;
+  // TODO: find relevant tuples on all active Vars
+  return prov_t{current_rule, height+1};
 }
 
 void Query::run()
@@ -501,7 +509,6 @@ void Query::run()
     // Now, the recursive rules
     size_t changed = 1;
     for (int iter = 1; changed; iter++) {
-      current_iter = iter;
       DEBUG_PROBE(BREAK_FIXPOINT);
       for (auto it = beg; it != end; ++it) {
         Rule& r = *it;
@@ -515,7 +522,6 @@ void Query::run()
       for (auto c : to_merge)
         changed += c->merge(true);
     }
-    current_iter = 0;
   }
   DEBUG_PROBE(BREAK_END);
   dbg->tripcount++;

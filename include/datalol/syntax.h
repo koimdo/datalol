@@ -6,6 +6,7 @@
 #include <iostream>
 #include <bitset>
 #include <functional>
+#include <utility>
 #include <json/json.h>
 
 #include "relation.h"
@@ -61,6 +62,12 @@ class dependency : public IPrint {
   virtual size_t merge(bool recursive) = 0;
 };
 
+struct Rule;
+struct prov_t {
+  const Rule *rule = nullptr;
+  int height = 0;  // proof tree height: 0 for external, 1+max(children) for derived
+};
+
 class Collection : public dependency {
 protected:
   ident id;
@@ -70,6 +77,7 @@ public:
   explicit Collection(const ident& id);
   std::string get_name() const noexcept { return id.get_name(); }
   virtual Json::Value get_contents() const = 0;
+  virtual std::pair<const void*, detail::prov_t> find_needle(const void *p) const = 0;
 };
 
 class Var_;
@@ -225,11 +233,6 @@ private:
 
 Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
-struct prov_t {
-  const Rule *rule;
-  int iter;  // 0 = non-fixpoint; 1+ = fixpoint iteration
-};
-
 class debug_info;
 class Query {
 public:
@@ -275,7 +278,6 @@ private:
 
   detail::pool pool;
   const Rule *current_rule = nullptr;
-  int current_iter = 0;  // 0 = not in fixpoint; 1+ = fixpoint iteration
 
   friend class Stubs;
   friend class Collection;
@@ -305,7 +307,7 @@ private:
   auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
 
 public:
-  prov_t get_provenance() const noexcept { return {current_rule, current_iter}; }
+  prov_t get_provenance() const;
 
   template<typename T, typename... Args>
   static
