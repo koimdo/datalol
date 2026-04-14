@@ -7,12 +7,14 @@
 #include <bitset>
 #include <functional>
 #include <utility>
+#include <climits>
 #include <json/json.h>
 
 #include "relation.h"
 #include "pool.h"
 #include "type_traits.h"
 #include "fluid.h"
+#include "debug.h"
 
 namespace datalol {
 
@@ -25,9 +27,10 @@ namespace detail {
 
 struct IPrint {
   virtual void print(std::ostream&) const = 0;
-  virtual Json::Value to_json() const; // Return string representation
   friend std::ostream& operator<<(std::ostream& os, const IPrint& p) { return p.print(os), os; }
 };
+
+std::string to_string(const IPrint&);
 
 class type_id_t {
   std::string type; // TODO: actually a `std::string_view`
@@ -64,7 +67,7 @@ class dependency : public IPrint {
 
 struct Rule;
 struct prov_t {
-  const Rule *rule = nullptr;
+  int rule = -1;                //  Non-negative for rule index
   int height = 0;  // proof tree height: 0 for external, 1+max(children) for derived
 };
 
@@ -75,9 +78,10 @@ protected:
 public:
   Collection(const Collection&) = delete;
   explicit Collection(const ident& id);
-  std::string get_name() const noexcept { return id.get_name(); }
+  const ident& get_id() const noexcept { return id; }
   virtual Json::Value get_contents() const = 0;
-  virtual std::pair<const void*, detail::prov_t> find_needle(const void *p) const = 0;
+  virtual std::pair<const void*, prov_t> get_nth(int idx) const = 0;
+  virtual std::pair<int, prov_t> find_needle(const void *p) const = 0;
 };
 
 class Var_;
@@ -233,7 +237,6 @@ private:
 
 Rule& operator<<(Rule::uhead&& h, Rule::ubody&& b);
 
-class debug_info;
 class Query {
 public:
   class control {
@@ -277,7 +280,9 @@ private:
   void run_rule(Rule& r, int current_delta);
 
   detail::pool pool;
-  const Rule *current_rule = nullptr;
+  int current_rule = -1;
+  int current_max_height = INT_MAX;
+  const void *current_search = nullptr;
 
   friend class Stubs;
   friend class Collection;
@@ -287,7 +292,13 @@ private:
   void stratify();
   void configure_rule(Rule& r, detail::span<int> order);
   void configure();
-  void explain(const std::string& coll, const void *target);
+
+  struct explain_t {
+    const Collection *coll;
+    int idx;
+    prov_t prov;
+  };
+  void explain(const explain_t& rec, std::vector<explain_t>& next);
 
   Query(const Query&) = delete;
   Query(Query&&) = delete;
@@ -306,8 +317,9 @@ private:
   template<typename Q>
   auto runit(Q&& q, control& ctrl, std::false_type) { return q(ctrl); }
 
+  prov_t get_provenance_internal() const;
 public:
-  prov_t get_provenance() const;
+  prov_t get_provenance() const { return dbg->flags ? get_provenance_internal() : prov_t{}; }
 
   template<typename T, typename... Args>
   static

@@ -19,10 +19,10 @@ struct compile_error : public std::runtime_error {
 
 thread_local fluid_var<Query> Query::current;
 
-Json::Value IPrint::to_json() const {
+std::string to_string(const IPrint& p) {
   std::ostringstream os;
-  print(os);
-  return Json::Value(os.str());
+  p.print(os);
+  return os.str();
 }
 
 bool type_id_t::operator==(type_id_t o) const { return type == o.type; }
@@ -463,7 +463,7 @@ void Query::add_stratum(detail::span<Rule> extent)
 
 void Query::run_rule(Rule& r, int current_delta)
 {
-  current_rule = &r;
+  current_rule = &r - rules.data();
   r.seminaive_current = current_delta;
   switch (policy) {
   case execution_policy::NESTED:
@@ -472,18 +472,31 @@ void Query::run_rule(Rule& r, int current_delta)
   }
 }
 
-
-void Query::explain(const std::string& coll, const void *target)
+prov_t Query::get_provenance_internal() const
 {
-
-
+  int height = 0;
+  for (auto const& v : vars) {
+    if (!v.is_set()) continue;
+    const void *p = v.get();
+    for (auto* coll : db) {
+      auto res = coll->find_needle(p);
+      auto prov = res.second;
+      if (res.first >= 0 && current_max_height > prov.height && prov.height > height)
+        height = prov.height;
+    }
+  }
+  return prov_t{current_rule, height + 1};
 }
 
-prov_t Query::get_provenance() const
+void Query::explain(const explain_t& rec, std::vector<explain_t>& next)
 {
-  int height = -1;
-  // TODO: find relevant tuples on all active Vars
-  return prov_t{current_rule, height+1};
+  assert(rec.prov.height > 0 && rec.prov.rule >= 0);
+  auto& rule = rules[rec.prov.rule];
+  auto it = rec.coll->get_nth(rec.idx);
+  current_search = it.first;
+  current_max_height = it.second.height;
+  rule.head->configure();
+  run_rule(rule, -1);
 }
 
 void Query::run()

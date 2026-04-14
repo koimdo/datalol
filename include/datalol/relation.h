@@ -154,16 +154,16 @@ struct relation {
 
   span<const T> contents() const noexcept { return {elements.data(), elements.size()}; }
 
-  const T* find_needle(const void *p) const
+  std::pair<int, const T*> find_needle(const void *p) const
   {
     auto* begin = reinterpret_cast<const char*>(elements.data());
     auto* end = begin + elements.size() * sizeof(T);
     auto* ptr = reinterpret_cast<const char*>(p);
     if (ptr >= begin && ptr < end) {
       auto idx = (ptr - begin) / sizeof(T);
-      return std::addressof(elements[idx]);
+      return {idx, std::addressof(elements[idx])};
     }
-    return nullptr;
+    return {-1, nullptr};
   }
 };
 

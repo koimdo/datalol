@@ -44,7 +44,7 @@ int get_debug_fd()
   return resfd;
 }
 
-void JsonPipe::wait(short events)
+short JsonPipe::wait(short events)
 {
   struct pollfd pollme;
   pollme.fd = fd;
@@ -52,6 +52,7 @@ void JsonPipe::wait(short events)
   pollme.revents = 0;
   while (!(pollme.revents & events))
     poll(&pollme, 1, -1);
+  return pollme.revents;
 }
 
 bool JsonPipe::read(Json::Value& v)
@@ -61,7 +62,10 @@ bool JsonPipe::read(Json::Value& v)
   std::string readbuf;
   for (;;) {
     char hexbuf[5] = {0};
-    wait(POLLIN);
+    auto revents = wait(POLLIN|POLLHUP);
+    if (revents & POLLHUP) {
+      return false;
+    }
     int res = ::read(fd, hexbuf, 4);
     if (res <= 0)
       return false;           // TODO: error handling?
@@ -181,8 +185,11 @@ int Stubs::get_qid(const debug_info *dbg) const
     {
       JVal db(Json::objectValue);
       JVal data(Json::arrayValue);
-      std::string columns[] = {"name", "internal", "type"};
-      res["db"] = get_contents_common(q->db, columns, [](auto coll) { return coll->to_json(); });
+      std::string columns[] = {"name", "type"};
+      res["db"] = get_contents_common(q->db, columns, [](auto coll) {
+        auto const& id = coll->get_id();
+        return Json::Value() << id.get_name() << id.type_name();
+      });
     }
     {
       Json::Value rules(Json::arrayValue);
@@ -193,7 +200,7 @@ int Stubs::get_qid(const debug_info *dbg) const
     {
       Json::Value elements(Json::arrayValue);
       for (auto const& e: q->elems)
-        elements << e->to_json();
+        elements << to_string(*e);
       res["elements"] = std::move(elements);
     }
     return res;

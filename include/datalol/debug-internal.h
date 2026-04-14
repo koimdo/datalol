@@ -21,7 +21,7 @@ struct JsonPipe {
     this->fd = fd;
   }
 
-  void wait(short events);
+  short wait(short events);
   bool read(Json::Value& v);
   void write(const Json::Value& val);
 };

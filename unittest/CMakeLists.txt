@@ -15,3 +15,4 @@ endfunction(add_suite)
 
 add_suite(trivial)
 
+add_suite(test_debug)

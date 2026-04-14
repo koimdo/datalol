@@ -49,7 +49,7 @@ struct Matcher : public Rule::Body {
 
   void print(std::ostream& os) const override
   {
-    os << (is_negative() ? "!" : "") << dep.get_name() << "(" << selector << ")";
+    os << (is_negative() ? "!" : "") << dep.get_id().get_name() << "(" << selector << ")";
   }
 
   enum query_type {
@@ -125,11 +125,6 @@ template<typename Coll>
 struct external_ : public Collection, iterable<typename remove_cvref<Coll>::type::value_type> {
   Coll coll;
 
-  Json::Value to_json() const override final
-  {
-    return Json::Value() << id.get_name() << false << id.type_name();
-  }
-
   Json::Value get_contents() const override final { return get_contents_common(coll /* TODO: columns */); }
 
   void print(std::ostream& os) const override final
@@ -149,18 +144,27 @@ struct external_ : public Collection, iterable<typename remove_cvref<Coll>::type
   bool contains(const value_type& t) const override final { return do_contains(coll, t); }
 
   // Collection::find_tuple (type-erased)
-  std::pair<const void*, detail::prov_t> find_needle(const void *p) const override final
+  std::pair<int, prov_t> find_needle(const void *p) const override final
   {
-    for (auto it = iterator(); it; ++it) {
+    int idx = 0;
+    for (auto it = iterator(); it; ++it, ++idx) {
       const value_type* elem = std::addressof(*it);
       auto* ptr = reinterpret_cast<const char*>(p);
       auto* begin = reinterpret_cast<const char*>(elem);
       auto* end = begin + sizeof(value_type);
       if (ptr >= begin && ptr < end) {
-        return {elem, detail::prov_t{}};
+        return {idx, prov_t{}};
       }
     }
-    return {nullptr, detail::prov_t{}};
+    return {-1, prov_t{}};
+  }
+
+  std::pair<const void*, prov_t> get_nth(int idx) const override
+  {
+    using std::begin;
+    auto it = begin(coll);
+    std::advance(it, idx);
+    return { std::addressof(*it), prov_t{} };
   }
 
   template<typename Sel>
@@ -326,20 +330,26 @@ struct table_ : public Collection {
     }
   }
 
-  Json::Value to_json() const override final
-  {
-    return Json::Value() << id.get_name() << true << id.type_name();
-  }
-
   Json::Value get_contents() const override final { return detail::get_contents_common(this->stable.contents()->*&prov_pair_t::first /* TODO: columns */); }
 
-  // Collection::find_tuple (type-erased): search stable then recent
-  std::pair<const void*, detail::prov_t> find_needle(const void *p) const override final
+  virtual std::pair<const void*, prov_t> get_nth(int idx) const override
   {
-    if (const prov_pair_t* pair = stable.find_needle(p)) {
-        return {&pair->first, pair->second};
+    auto const& p = idx < stable.size() ? stable.elements[idx] : recent.elements[idx-stable.size()];
+    return { std::addressof(p.first), p.second };
+  }
+
+  // Collection::find_tuple (type-erased): search stable then recent
+  std::pair<int, prov_t> find_needle(const void *p) const override final
+  {
+    auto fs = stable.find_needle(p);
+    if (const prov_pair_t* pair = fs.second) {
+        return {fs.first, pair->second};
     }
-    return {nullptr, detail::prov_t{}};
+    auto fr = recent.find_needle(p);
+    if (const prov_pair_t* pair = fr.second) {
+      return {fr.first+stable.size(), pair->second};
+    }
+    return {-1, prov_t{}};
   }
 
   template<typename S>
@@ -376,7 +386,7 @@ struct table_ : public Collection {
       }
       void print(std::ostream& os) const override final
       {
-        os << rel.get_name() << "(" << selector << ")";
+        os << rel.get_id().get_name() << "(" << selector << ")";
       }
     };
 
